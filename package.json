@@ -12,5 +12,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25 || ^4.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/winch-meta/index.js"
+    ]
   }
 }
