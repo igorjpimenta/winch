@@ -1,0 +1,6 @@
+{
+  "id": "winch-meta",
+  "name": "Winch Meta",
+  "description": "Stamps _meta.winch {harness, agent, session} on winch MCP tool calls via the before_tool_call hook, so the backlog server gets three-dimension caller identity it can trust.",
+  "extensions": ["./plugins/openclaw/winch-meta/index.js"]
+}
