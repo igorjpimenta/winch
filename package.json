@@ -7,7 +7,7 @@
     "winch": "bin/winch.js"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/ plugins/"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
