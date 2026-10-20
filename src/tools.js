@@ -11,7 +11,7 @@
 
 import { readyTasks } from "./ready-queue.js";
 import { addDep } from "./deps.js";
-import { identitySessionKey } from "./identity.js";
+import { identitySessionKey, assertCleanTriple } from "./identity.js";
 
 // Session budgets count backlog tool calls per sessionKey, not model turns.
 // The economic termination key is this latch plus the claim lease in the
@@ -317,6 +317,7 @@ export function createToolHandlers(store, logger) {
   };
 
   async function handle(name, args, identity) {
+    assertCleanTriple(identity, `caller identity for ${name}`);
     const fn = handlers[name];
     if (!fn) return err(`unknown tool: ${name}`, "unknown_tool");
     return fn(args, identity);

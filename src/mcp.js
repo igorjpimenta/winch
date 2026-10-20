@@ -36,6 +36,23 @@ function shapeFromJson(schema) {
   return shape;
 }
 
+/**
+ * Unexpected failures — anything handle() throws, including a poisoned
+ * caller identity — become tool-error results. Domain rejections keep their
+ * own content; the call fails, the server survives the request.
+ */
+export function toolErrorResult(err) {
+  const message = `winch: tool failed: ${String(err?.message ?? err)}`;
+  // keep stdio clean: diagnostics would corrupt the JSON-RPC stream
+  if (process.env.WINCH_MCP_DEBUG) {
+    console.error(message);
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+    isError: true,
+  };
+}
+
 export async function startMcpServer({ store, base, logger }) {
   // The three-layer key is a construction requirement: an undeclared server
   // would mint "unknown"-flavoured budget keys that poison claims.
@@ -48,10 +65,14 @@ export async function startMcpServer({ store, base, logger }) {
       def.name,
       { description: def.description, inputSchema: z.object(shapeFromJson(def.inputSchema)) },
       async (args, extra) => {
-        const identity = resolveIdentity({ meta: extra?._meta, base: declared });
-        logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
-        const res = await handle(def.name, args, identity);
-        return { content: res.content };
+        try {
+          const identity = resolveIdentity({ meta: extra?._meta, base: declared });
+          logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
+          const res = await handle(def.name, args, identity);
+          return { content: res.content };
+        } catch (err) {
+          return toolErrorResult(err);
+        }
       }
     );
   }

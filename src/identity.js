@@ -22,7 +22,29 @@
 // binding, never from tool params, or agents could claim under each other's
 // names.
 
-/** Throw unless {harness, agent, session} are all non-empty strings. */
+// The old fallback system minted "unknown" and "instance:<pid>" keys; any
+// value still carrying those tokens is poison from a caller that never
+// declared — missing, empty and reserved are all the same refusal.
+const RESERVED_KEY = /^(unknown|instance:.*)$/i;
+
+/** Throw unless the triple is complete and carries no reserved token. */
+export function assertCleanTriple(id, who = "identity") {
+  const bad = ["harness", "agent", "session"].filter(
+    (k) => typeof id?.[k] !== "string" || id[k].trim() === "" || RESERVED_KEY.test(id[k].trim())
+  );
+  if (bad.length > 0) {
+    throw new Error(
+      `winch: refused ${who} (bad layers: ${bad.join(", ")}). ` +
+        "Provide real harness/agent/session values — empty, missing, " +
+        '"unknown" and "instance:*" keys are not minted, they fail.'
+    );
+  }
+  return { harness: id.harness.trim(), agent: id.agent.trim(), session: id.session.trim() };
+}
+
+/** Declaration = a complete triple with no reserved tokens. The missing
+ * case keeps its original wording (callers test for it); reserved tokens get
+ * their own refusal. Either way the server never starts unnamed. */
 export function assertDeclaration(base) {
   const missing = ["harness", "agent", "session"].filter(
     (k) => typeof base?.[k] !== "string" || base[k].trim() === ""
@@ -35,7 +57,15 @@ export function assertDeclaration(base) {
         "startMcpServer({ base: { harness, agent, session } })."
     );
   }
-  return { harness: base.harness.trim(), agent: base.agent.trim(), session: base.session.trim() };
+  const declared = { harness: base.harness.trim(), agent: base.agent.trim(), session: base.session.trim() };
+  const reserved = ["harness", "agent", "session"].filter((k) => RESERVED_KEY.test(declared[k]));
+  if (reserved.length > 0) {
+    throw new Error(
+      `winch: refused declaration (reserved layers: ${reserved.join(", ")}). ` +
+        '"unknown" and "instance:*" are not identities — declare real values.'
+    );
+  }
+  return declared;
 }
 
 /** Build a declaration from environment variables (the CLI path). */
@@ -66,15 +96,26 @@ export function resolveIdentity({ meta, base }) {
   const agent = pick(m?.agent, declared.agent);
   const session = pick(m?.session, declared.session);
 
+  // A companion plugin that emits "unknown" is a broken plugin, not a quiet
+  // identity: the refusal below refuses the call rather than minting the key.
+  const resolved = assertCleanTriple(
+    {
+      harness: harness.value,
+      agent: agent.value,
+      session: session.value,
+    },
+    "resolved identity"
+  );
   return {
-    harness: harness.value,
-    agent: agent.value,
-    session: session.value,
+    ...resolved,
     source: { harness: harness.source, agent: agent.source, session: session.source },
   };
 }
 
-/** Budget/claim key: one slot per harness×agent×session triple. */
+// Budget/claim key: one slot per harness×agent×session triple. The mint
+// point is guarded too, so a key the constructor and resolver both missed
+// still fails here — nowhere mints a poisoned key.
 export function identitySessionKey(id) {
-  return `${id.harness}:${id.agent}:${id.session}`;
+  const clean = assertCleanTriple(id, "session key");
+  return `${clean.harness}:${clean.agent}:${clean.session}`;
 }

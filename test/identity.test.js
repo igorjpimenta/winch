@@ -3,7 +3,7 @@
 // meta refines the declaration layer by layer with tagged sources.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey } from "../src/identity.js";
+import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey , assertCleanTriple } from "../src/identity.js";
 
 const FULL = { harness: "langgraph", agent: "planner", session: "graph-main" };
 
@@ -70,4 +70,33 @@ test("resolveIdentity: incomplete base throws even with meta present", () => {
 
 test("sessionKey format: harness:agent:session", () => {
   assert.equal(identitySessionKey(FULL), "langgraph:planner:graph-main");
+});
+
+test("assertDeclaration: reserved tokens fail — unknown and instance:* are not keys", () => {
+  assert.throws(
+    () => assertDeclaration({ harness: "unknown", agent: "a", session: "s" }),
+    /reserved layers: harness/
+  );
+  assert.throws(
+    () => assertDeclaration({ harness: "x", agent: "UNKNOWN", session: "s" }),
+    /reserved layers: agent/
+  );
+  assert.throws(
+    () => assertDeclaration({ harness: "x", agent: "a", session: "instance:4721" }),
+    /reserved layers: session/
+  );
+});
+
+test("resolveIdentity: meta carrying a reserved token fails instead of minting", () => {
+  assert.throws(
+    () => resolveIdentity({ base: { harness: "opencode", agent: "main", session: "s1" }, meta: { winch: { harness: "UNKNOWN" } } }),
+    /refused resolved identity.*harness/
+  );
+});
+
+test("identitySessionKey refuses to mint a poisoned key", () => {
+  assert.throws(
+    () => identitySessionKey({ harness: "x", agent: "unknown", session: "s" }),
+    /refused session key.*agent/
+  );
 });

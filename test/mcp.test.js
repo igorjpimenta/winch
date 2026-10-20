@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../src/store.js";
-import { startMcpServer } from "../src/mcp.js";
+import { startMcpServer, toolErrorResult } from "../src/mcp.js";
 
 let dir, store;
 
@@ -34,4 +34,11 @@ test("startMcpServer rejects an empty base entirely", async () => {
     () => startMcpServer({ store: freshStore(), base: undefined }),
     /missing: harness, agent, session/
   );
+});
+
+test("toolErrorResult: unexpected failures become isError tool results", () => {
+  const r = toolErrorResult(new Error("winch: refused caller identity for backlog_next (bad layers: agent)"));
+  assert.equal(r.isError, true);
+  const body = JSON.parse(r.content[0].text);
+  assert.match(body.error, /refused caller identity/);
 });
