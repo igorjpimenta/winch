@@ -37,7 +37,7 @@ handle however they want.
 
 ## Events stream
 
-`winch serve --ws [--port N] [--host H]` (default port 18791, localhost-only
+`winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
 unless `--host` says otherwise) tails the events table and broadcasts every
 new row as a typed envelope plus task context, as JSON text frames:
 

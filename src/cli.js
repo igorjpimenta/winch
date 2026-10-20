@@ -14,7 +14,7 @@ import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
 import { dispatchFraction, epicTokenRollup } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
-import { startEventServer } from "./events-ws.js";
+import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
 
 export function resolveDbPath() {
@@ -219,7 +219,7 @@ export async function runCli(argv) {
       // localhost-only unless asked: the stream carries raw store rows,
       // so it stays behind the loopback interface or a bearer-checked proxy.
       const host = values.host ?? "127.0.0.1";
-      const port = values.port ? Number(values.port) : 18791;
+      const port = values.port ? Number(values.port) : DEFAULT_WS_PORT;
       await startEventServer({ store, port, host, logger });
       logger.info(`winch: events on ws://${host}:${port} (append-only; subscribers track their own state)`);
       return;
