@@ -1,44 +1,39 @@
-// identity.test.js — the three-layer key is a construction requirement:
-// complete declarations pass, incomplete ones throw by name, and per-request
-// meta refines the declaration layer by layer with tagged sources.
+// identity.test.js — harness is declared, agent and session arrive per call.
+// Construction names a missing or reserved harness; resolution names an
+// unstamped or reserved agent/session. Nothing defaults anywhere.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey , assertCleanTriple } from "../src/identity.js";
+import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey } from "../src/identity.js";
 
-const FULL = { harness: "langgraph", agent: "planner", session: "graph-main" };
+const BASE = { harness: "langgraph" };
 
-test("assertDeclaration: complete triple passes and trims", () => {
-  const d = assertDeclaration({ harness: " openclaw ", agent: "main", session: "s1" });
-  assert.deepEqual(d, { harness: "openclaw", agent: "main", session: "s1" });
-});
-
-test("assertDeclaration: unusable agent and session are named", () => {
-  assert.throws(
-    () => assertDeclaration({ harness: "langgraph" }),
-    /refused declaration \(bad layers: agent, session\)/
-  );
-});
-test("assertDeclaration: empty strings count as missing", () => {
-  assert.throws(
-    () => assertDeclaration({ harness: "", agent: "a", session: "s" }),
-    /bad layers: harness/
-  );
-});
-test("assertDeclaration: nothing declared names all three", () => {
-  assert.throws(() => assertDeclaration(undefined), /bad layers: harness, agent, session/);
+test("assertDeclaration: harness passes, extra keys are ignored", () => {
+  const d = assertDeclaration({ harness: " openclaw ", agent: "ignored", session: "ignored" });
+  assert.deepEqual(d, { harness: "openclaw" });
 });
 
-test("declaredFromEnv reads the three env vars", () => {
-  const d = declaredFromEnv({ WINCH_HARNESS: "opencode", WINCH_AGENT_ID: "ops", WINCH_SESSION: "main" });
-  assert.deepEqual(d, { harness: "opencode", agent: "ops", session: "main" });
-});
-test("declaredFromEnv throws when the env is incomplete", () => {
-  assert.throws(() => declaredFromEnv({ WINCH_HARNESS: "opencode" }), /bad layers: agent, session/);
+test("assertDeclaration: missing harness throws and names it", () => {
+  assert.throws(() => assertDeclaration({ agent: "a", session: "s" }), /missing: harness/);
+  assert.throws(() => assertDeclaration(undefined), /missing: harness/);
+  assert.throws(() => assertDeclaration({ harness: "  " }), /missing: harness/);
 });
 
-test("resolveIdentity: meta refines the declaration per layer, sources tagged", () => {
+test("assertDeclaration: reserved harness throws", () => {
+  assert.throws(() => assertDeclaration({ harness: "unknown" }), /refused declaration/);
+  assert.throws(() => assertDeclaration({ harness: "instance:4721" }), /refused declaration/);
+});
+
+test("declaredFromEnv reads only the harness", () => {
+  const d = declaredFromEnv({ WINCH_HARNESS: "opencode", WINCH_AGENT_ID: "x", WINCH_SESSION: "y" });
+  assert.deepEqual(d, { harness: "opencode" });
+});
+test("declaredFromEnv throws without the harness", () => {
+  assert.throws(() => declaredFromEnv({}), /missing: harness/);
+});
+
+test("resolveIdentity: stamped agent+session complete the declared harness", () => {
   const id = resolveIdentity({
-    base: FULL,
+    base: BASE,
     meta: { winch: { agent: "atlas", session: "ses_42" } },
   });
   assert.equal(id.harness, "langgraph");
@@ -47,50 +42,43 @@ test("resolveIdentity: meta refines the declaration per layer, sources tagged", 
   assert.deepEqual(id.source, { harness: "declared", agent: "meta", session: "meta" });
 });
 
-test("resolveIdentity: no meta — every layer is the declaration", () => {
-  const id = resolveIdentity({ base: FULL });
-  assert.deepEqual(id, {
-    ...FULL,
-    source: { harness: "declared", agent: "declared", session: "declared" },
+test("resolveIdentity: meta harness never overrides the declaration", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { winch: { harness: "evil", agent: "a", session: "s" } },
   });
+  assert.equal(id.harness, "langgraph");
 });
 
-test("resolveIdentity: empty-string meta does not refine", () => {
-  const id = resolveIdentity({ base: FULL, meta: { winch: { agent: "" } } });
-  assert.equal(id.agent, "planner");
-  assert.equal(id.source.agent, "declared");
+test("resolveIdentity: no meta — agent and session are unresolved, call refuses", () => {
+  assert.throws(() => resolveIdentity({ base: BASE }), /unresolved agent and session/);
 });
 
-test("resolveIdentity: incomplete base throws even with meta present", () => {
+test("resolveIdentity: partial meta names exactly what's missing", () => {
   assert.throws(
-    () => resolveIdentity({ base: { harness: "x", agent: "y" }, meta: { winch: { session: "z" } } }),
-    /bad layers: session/
+    () => resolveIdentity({ base: BASE, meta: { winch: { agent: "a" } } }),
+    /unresolved session/
+  );
+});
+
+test("resolveIdentity: meta carrying reserved tokens fails instead of minting", () => {
+  assert.throws(
+    () => resolveIdentity({ base: BASE, meta: { winch: { agent: "UNKNOWN", session: "s" } } }),
+    /refused caller identity.*agent/
+  );
+});
+
+test("resolveIdentity: incomplete base throws even with full meta", () => {
+  assert.throws(
+    () => resolveIdentity({ base: {}, meta: { winch: { agent: "a", session: "s" } } }),
+    /missing: harness/
   );
 });
 
 test("sessionKey format: harness:agent:session", () => {
-  assert.equal(identitySessionKey(FULL), "langgraph:planner:graph-main");
-});
-
-test("assertDeclaration: reserved tokens fail — unknown and instance:* are not keys", () => {
-  assert.throws(
-    () => assertDeclaration({ harness: "unknown", agent: "a", session: "s" }),
-    /bad layers: harness/
-  );
-  assert.throws(
-    () => assertDeclaration({ harness: "x", agent: "UNKNOWN", session: "s" }),
-    /bad layers: agent/
-  );
-  assert.throws(
-    () => assertDeclaration({ harness: "x", agent: "a", session: "instance:4721" }),
-    /bad layers: session/
-  );
-});
-
-test("resolveIdentity: meta carrying a reserved token fails instead of minting", () => {
-  assert.throws(
-    () => resolveIdentity({ base: { harness: "opencode", agent: "main", session: "s1" }, meta: { winch: { harness: "UNKNOWN" } } }),
-    /refused resolved identity.*harness/
+  assert.equal(
+    identitySessionKey({ harness: "openclaw", agent: "main", session: "s1" }),
+    "openclaw:main:s1"
   );
 });
 

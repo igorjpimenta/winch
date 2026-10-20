@@ -1,17 +1,18 @@
 # winch companion plugins — the identity contract
 
 The winch server keys every budget and claim to three dimensions
-(`src/identity.js`). All three are **required at construction** — the
-consumer declares its identity when it builds the server, and per-request
-`_meta.winch` refines that declaration layer by layer. There is no fallback
-value: a server that cannot name itself refuses to start, because an
-"unknown" key poisons claims and budgets.
+(`src/identity.js`), and only one of them is declared: the **harness**,
+named at construction (`--harness` / `WINCH_HARNESS`). The **agent** and
+**session** of each call arrive with the call itself — the calling harness's
+companion plugin stamps them in its `before_tool_call` hook, the way lineage
+attributes per-call cost to an agent and a session instead of a configured
+default. Unstamped agent/session fail the call; nothing defaults, ever.
 
-| dimension | declaration (construction)         | meta channel (per-call refinement) | who reads                                   |
-| --------- | ---------------------------------- | ---------------------------------- | ------------------------------------------- |
-| harness   | `--harness` / `WINCH_HARNESS`      | companion plugin: `_meta.winch.harness` | winch server: logs, `harness:agent:session` budget key |
-| agent     | `--agent` / `WINCH_AGENT_ID`       | plugin: ctx `agentId`              | winch server: claim attribution, per-agent caps |
-| session   | `--session` / `WINCH_SESSION`      | plugin: ctx `sessionKey`/`runId`   | winch server: budget/claim key |
+| dimension | construction                     | per-call source                          | who reads                                   |
+| --------- | -------------------------------- | ---------------------------------------- | ------------------------------------------- |
+| harness   | `--harness` / `WINCH_HARNESS` (**required**) | `_meta.winch.harness` if stamped (never overrides a matching declaration) | winch server: logs, `harness:agent:session` budget key |
+| agent     | — (never declared)               | plugin: ctx `agentId`                    | winch server: claim attribution, per-agent caps |
+| session   | — (never declared)               | plugin: ctx `sessionKey`/`runId`         | winch server: budget/claim key |
 
 **Anti-impersonation:** the openclaw plugin's `before_tool_call` hook runs
 before MCP dispatch and returns a full replacement of `event.params` with
@@ -77,9 +78,7 @@ the existing `file://` entries in that file's `plugin` array:
       "type": "local",
       "command": ["winch", "mcp"],
       "env": {
-        "WINCH_HARNESS": "opencode",
-        "WINCH_AGENT_ID": "<agent>",
-        "WINCH_SESSION": "<session>"
+        "WINCH_HARNESS": "opencode"
       }
     }
   },
@@ -91,11 +90,13 @@ the existing `file://` entries in that file's `plugin` array:
 }
 ```
 
-Session: the env block is process-scoped (one MCP server per opencode
-instance) and must be declared — a stable label such as `main` is the floor.
-Per-agent separation works today via `WINCH_AGENT_ID`; per-session separation
-needs a future meta-capable hook, because nothing can refine the declaration
-on opencode today.
+Agent/session on opencode: the `WINCH_AGENT_ID` / `WINCH_SESSION` env
+fallback is gone by design — opencode's hooks cannot carry per-call identity,
+so winch refuses unstamped calls there instead of attributing them to a
+configured default that was never true. Per-agent, per-session opencode
+support needs a future meta-capable hook; until then opencode uses winch
+read-only in practice (dry-runs, metrics, rollups still need no identity —
+they are planned surface, not shipped).
 
 ## generic MCP clients
 
@@ -103,11 +104,11 @@ on opencode today.
 claude mcp add winch -- winch mcp
 ```
 
-No plugin: declare the identity when you build the server — flags or env.
-The server exits with the missing layers named:
+No plugin: declare the harness when you build the server — one flag or env
+var — and stamp agent/session per call yourself, or the server refuses:
 
 ```
-winch mcp --harness generic --agent main --session main
+winch mcp --harness generic
 ```
 
 ### langgraph
@@ -115,23 +116,18 @@ winch mcp --harness generic --agent main --session main
 A LangGraph deployment is one more declared consumer; declare the graph's
 identity as the floor the server keys everything to:
 
+A LangGraph deployment declares the one thing it can — its own harness —
+and stamps agent/session per call from its own wiring (thread id and node
+name make natural values):
+
 ```json
 {
   "mcpServers": {
-    "winch": {
-      "command": "winch",
-      "args": [
-        "mcp",
-        "--harness", "langgraph",
-        "--agent", "delivery-planner",
-        "--session", "graph-main"
-      ]
-    }
+    "winch": { "command": "winch", "args": ["mcp", "--harness", "langgraph"] }
   }
 }
 ```
 
-Env works identically (`WINCH_HARNESS=langgraph` …). There is no langgraph
-companion plugin, so the declared key is the key — one graph, one declared
-agent label, and a session label per deployment (or per checkpointer thread
-if you launch one server per thread).
+Env works identically (`WINCH_HARNESS=langgraph`). Without per-call stamps
+the calls fail loudly — which is the correct signal that the graph side of
+the identity contract is not wired yet.

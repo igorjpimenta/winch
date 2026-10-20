@@ -1,5 +1,6 @@
-// mcp.test.js — server construction refuses an incomplete identity
-// declaration before any transport is opened.
+// mcp.test.js — server construction refuses an undeclared or poisoned
+// harness before connecting. (A harness-only base is accepted up to the
+// transport, so only rejection paths are unit-tested here.)
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,17 +23,17 @@ function freshStore() {
   return store;
 }
 
-test("startMcpServer rejects a missing declaration before connecting", async () => {
+test("startMcpServer rejects a missing harness before connecting", async () => {
   await assert.rejects(
-    () => startMcpServer({ store: freshStore(), base: { harness: "langgraph" } }),
-    /refused declaration \(bad layers: agent, session\)/
+    () => startMcpServer({ store: freshStore(), base: { agent: "a", session: "s" } }),
+    /missing: harness/
   );
 });
 
-test("startMcpServer rejects an empty base entirely", async () => {
+test("startMcpServer rejects a reserved harness before connecting", async () => {
   await assert.rejects(
-    () => startMcpServer({ store: freshStore(), base: undefined }),
-    /bad layers: harness, agent, session/
+    () => startMcpServer({ store: freshStore(), base: { harness: "unknown" } }),
+    /refused declaration/
   );
 });
 

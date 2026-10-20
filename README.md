@@ -49,12 +49,12 @@ the CAS transaction boundary under WAL contention.
 
 ## Identity
 
-Every claim and budget is keyed `harness:agent:session`. The three layers are
-**required at construction** — `winch mcp` will not start without
-`--harness/--agent/--session` (or the `WINCH_HARNESS` / `WINCH_AGENT_ID` /
-`WINCH_SESSION` env), because an undeclared key poisons claims and budgets.
-Per request, `_meta.winch` (companion plugin) refines the declaration layer
-by layer; plugins overwrite `_meta.winch` unconditionally, so model-supplied
-meta cannot impersonate an agent. The contract, the
+Every claim and budget is keyed `harness:agent:session`. The **harness is
+declared at construction** — `winch mcp` will not start without `--harness`
+(or `WINCH_HARNESS`), because an unnamed server cannot attribute anything.
+The agent and session of each call are stamped per call by the calling
+harness's companion plugin (`_meta.winch`), which overwrites unconditionally,
+so model-supplied meta cannot impersonate an agent. A call whose agent or
+session is unstamped fails loudly instead of minting a default key. The contract, the
 per-dimension table and the openclaw/opencode/generic-client setup snippets
 live in [plugins/README.md](plugins/README.md).

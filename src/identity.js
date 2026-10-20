@@ -1,29 +1,18 @@
-// identity.js — the three identity dimensions (harness, agent, session).
+// identity.js — harness declared, agent and session stamped per call.
 //
-// The three-part key is required, not defaulted: every winch MCP server is
-// CONSTRUCTED with a declared triple — the consumer's identity (langgraph
-// declares langgraph, openclaw declares openclaw, a test harness declares
-// itself). Startup fails when any layer is missing; there is no "unknown" or
-// instance-pid fallback to hide an undeclared consumer, because an unnamed
-// key poisons claim attribution and the budget ledger.
+// One thing is declared, two things arrive with the work. The server is
+// CONSTRUCTED with the harness it serves (langgraph declares langgraph, the
+// openclaw MCP entry declares openclaw); the agent and session of each call
+// are the calling harness's job to stamp — via the before_tool_call
+// companion plugin — exactly the way lineage attributes per-call cost to an
+// agent and a session instead of a configured default.
 //
-//   declaration — {harness, agent, session} at construction. For the CLI:
-//                 --harness/--agent/--session flags or WINCH_HARNESS /
-//                 WINCH_AGENT_ID / WINCH_SESSION env. For embedders: the
-//                 `base` option of startMcpServer. The declaration is the
-//                 floor every request starts from.
-//   meta — `_meta.winch` on the MCP request. Companion plugins write it by
-//          overwriting unconditionally, so a model-supplied `_meta` cannot
-//          impersonate a harness/agent/session it does not control. Meta
-//          refines individual layers of the declared floor (openclaw stamps
-//          the real agent and session per call over its declaration).
-//
-// The session key is the budget/claim identity; it is derived from the
-// binding, never from tool params, or agents could claim under each other's
-// names.
+// Nothing here defaults, ever: an unnamed harness refuses construction, and
+// an unstamped call refuses execution. A key that cannot say which harness
+// and which of its calls it belongs to would poison claims and budgets.
 
-// One refusal for missing, empty and reserved layers: same outcome
-// (throw), so one predicate — do not re-split per case.
+// A usable layer names something: non-empty, and neither of the two tokens
+// no key may carry ("unknown", "instance:*").
 function isUsableLayer(v) {
   return (
     typeof v === "string" &&
@@ -43,61 +32,61 @@ export function assertCleanTriple(id, who = "identity") {
   return { harness: id.harness.trim(), agent: id.agent.trim(), session: id.session.trim() };
 }
 
-/** Declaration = a usable triple, plus the usage line constructors hit. */
+/** Declaration = a usable harness, plus the usage line constructors hit.
+ * Missing and reserved refuse differently on purpose: the first tells the
+ * operator what to add, the second that the value itself can never identify.
+ * Both are the same predicate — no separate reserved-token code path. */
 export function assertDeclaration(base) {
-  try {
-    return assertCleanTriple(base ?? {}, "declaration");
-  } catch (err) {
+  const h = typeof base?.harness === "string" ? base.harness.trim() : "";
+  if (h === "") {
     throw new Error(
-      String(err.message) +
-        " All three layers are required at construction — CLI: --harness/--agent/--session " +
-        "flags or WINCH_HARNESS/WINCH_AGENT_ID/WINCH_SESSION; embedders: " +
-        "startMcpServer({ base: { harness, agent, session } })."
+      "winch: identity declaration incomplete (missing: harness). " +
+        "Declare the consumer at construction — CLI: --harness / WINCH_HARNESS; " +
+        "embedders: startMcpServer({ base: { harness } }). " +
+        "Agent and session are never declared: they arrive per call."
     );
   }
+  if (/^(unknown|instance:.*)$/i.test(h)) {
+    throw new Error(
+      `winch: refused declaration (reserved: harness). ` +
+        `"${h}" cannot identify a consumer — declare the real harness name.`
+    );
+  }
+  return { harness: h };
 }
 
 /** Build a declaration from environment variables (the CLI path). */
 export function declaredFromEnv(env = process.env) {
-  return assertDeclaration({
-    harness: env.WINCH_HARNESS,
-    agent: env.WINCH_AGENT_ID,
-    session: env.WINCH_SESSION,
-  });
+  return assertDeclaration({ harness: env.WINCH_HARNESS });
 }
 
 /**
- * Per-request identity: meta refines the declaration layer by layer.
- * @param {{meta?: object, base: {harness: string, agent: string, session: string}}} opts
+ * Per-request identity: the declared harness, plus the agent and session the
+ * calling harness stamped on this call (`_meta.winch`). Unstamped,
+ * unusable-agent/session calls refuse — the hook layer owns them, not config.
  */
 export function resolveIdentity({ meta, base }) {
   const declared = assertDeclaration(base);
   const m = meta?.winch ?? meta ?? null;
-
-  function pick(metaVal, declaredVal) {
-    if (metaVal !== undefined && metaVal !== null && String(metaVal) !== "") {
-      return { value: String(metaVal), source: "meta" };
-    }
-    return { value: declaredVal, source: "declared" };
+  const agent = m?.agent;
+  const session = m?.session;
+  const bad = [];
+  if (!isUsableLayer(agent)) bad.push("agent");
+  if (!isUsableLayer(session)) bad.push("session");
+  if (bad.length > 0) {
+    throw new Error(
+      `winch: refused caller identity (unresolved ${bad.join(" and ")}). ` +
+        "The calling harness must stamp agent and session on each call — " +
+        "the companion plugin does this in its before_tool_call hook, the " +
+        "way lineage attributes its per-call costs. Unidentified callers " +
+        "fail; they are never given default keys."
+    );
   }
-
-  const harness = pick(m?.harness, declared.harness);
-  const agent = pick(m?.agent, declared.agent);
-  const session = pick(m?.session, declared.session);
-
-  // A companion plugin that emits "unknown" is a broken plugin, not a quiet
-  // identity: the refusal below refuses the call rather than minting the key.
-  const resolved = assertCleanTriple(
-    {
-      harness: harness.value,
-      agent: agent.value,
-      session: session.value,
-    },
-    "resolved identity"
-  );
   return {
-    ...resolved,
-    source: { harness: harness.source, agent: agent.source, session: session.source },
+    harness: declared.harness,
+    agent: agent.trim(),
+    session: session.trim(),
+    source: { harness: "declared", agent: "meta", session: "meta" },
   };
 }
 
