@@ -98,7 +98,25 @@ support needs a future meta-capable hook; until then opencode uses winch
 read-only in practice (dry-runs, metrics, rollups still need no identity —
 they are planned surface, not shipped).
 
+## Remote servers: URL + credentials
+
+Winch itself authenticates nothing — stdio trusts the OS user, and that is
+the whole auth model in-process. A hosted winch (long-running `winch mcp`
+behind HTTP/SSE, or any stdio→network bridge you run in front of it)
+authenticates at the transport: reverse proxy, tailnet identity, or a bearer
+header checked before traffic reaches the server. Keep credentials and
+identity apart in your head: a token proves *which deployment* may call; the
+declared harness/agent/session says *whose work* this is.
+
+| client | local (stdio) | remote (URL) | credentials live in |
+| --- | --- | --- | --- |
+| openclaw | `mcp.servers.winch = {command, args, env}` | same object plus `url`, `transport: "sse" \| "streamable-http"`, `headers` | the `headers` map, e.g. `Authorization` |
+| opencode | `"type": "local", command, environment` | `"type": "remote", url, headers` | the `headers` map |
+| langgraph | stdio entry in `mcpServers` | SSE/HTTP transport entry per its adapter | the adapter's header/auth config |
+| claude | `claude mcp add winch -- winch mcp` | `claude mcp add --transport http <name> <url> -H "Authorization: Bearer …"` | the `-H` flags, stored in its config |
+
 ## generic MCP clients
+
 
 ```
 claude mcp add winch -- winch mcp
