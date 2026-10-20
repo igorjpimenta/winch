@@ -4,7 +4,7 @@
 // if accepting the edge would create a cycle. We DFS forward from `to` over
 // the existing dep graph; if we reach `from`, the new edge would close a
 // loop. Depth-limited to avoid pathological graphs (500 nodes is plenty for
-// any human-scale backlog; cycles in real data show up far earlier).
+// any human-scale backlog).
 
 const MAX_DFS_NODES = 500;
 
