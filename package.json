@@ -1,6 +1,6 @@
 {
   "name": "winch",
-  "version": "2026.10.19",
+  "version": "2026.10.20",
   "type": "module",
   "license": "MIT",
   "bin": {
