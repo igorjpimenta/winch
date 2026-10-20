@@ -25,14 +25,14 @@ function freshStore() {
 test("startMcpServer rejects a missing declaration before connecting", async () => {
   await assert.rejects(
     () => startMcpServer({ store: freshStore(), base: { harness: "langgraph" } }),
-    /identity declaration incomplete \(missing: agent, session\)/
+    /refused declaration \(bad layers: agent, session\)/
   );
 });
 
 test("startMcpServer rejects an empty base entirely", async () => {
   await assert.rejects(
     () => startMcpServer({ store: freshStore(), base: undefined }),
-    /missing: harness, agent, session/
+    /bad layers: harness, agent, session/
   );
 });
 

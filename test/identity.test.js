@@ -12,20 +12,20 @@ test("assertDeclaration: complete triple passes and trims", () => {
   assert.deepEqual(d, { harness: "openclaw", agent: "main", session: "s1" });
 });
 
-test("assertDeclaration: missing agent and session are named", () => {
+test("assertDeclaration: unusable agent and session are named", () => {
   assert.throws(
     () => assertDeclaration({ harness: "langgraph" }),
-    /identity declaration incomplete \(missing: agent, session\)/
+    /refused declaration \(bad layers: agent, session\)/
   );
 });
 test("assertDeclaration: empty strings count as missing", () => {
   assert.throws(
     () => assertDeclaration({ harness: "", agent: "a", session: "s" }),
-    /missing: harness/
+    /bad layers: harness/
   );
 });
 test("assertDeclaration: nothing declared names all three", () => {
-  assert.throws(() => assertDeclaration(undefined), /missing: harness, agent, session/);
+  assert.throws(() => assertDeclaration(undefined), /bad layers: harness, agent, session/);
 });
 
 test("declaredFromEnv reads the three env vars", () => {
@@ -33,7 +33,7 @@ test("declaredFromEnv reads the three env vars", () => {
   assert.deepEqual(d, { harness: "opencode", agent: "ops", session: "main" });
 });
 test("declaredFromEnv throws when the env is incomplete", () => {
-  assert.throws(() => declaredFromEnv({ WINCH_HARNESS: "opencode" }), /missing: agent, session/);
+  assert.throws(() => declaredFromEnv({ WINCH_HARNESS: "opencode" }), /bad layers: agent, session/);
 });
 
 test("resolveIdentity: meta refines the declaration per layer, sources tagged", () => {
@@ -64,7 +64,7 @@ test("resolveIdentity: empty-string meta does not refine", () => {
 test("resolveIdentity: incomplete base throws even with meta present", () => {
   assert.throws(
     () => resolveIdentity({ base: { harness: "x", agent: "y" }, meta: { winch: { session: "z" } } }),
-    /missing: session/
+    /bad layers: session/
   );
 });
 
@@ -75,15 +75,15 @@ test("sessionKey format: harness:agent:session", () => {
 test("assertDeclaration: reserved tokens fail — unknown and instance:* are not keys", () => {
   assert.throws(
     () => assertDeclaration({ harness: "unknown", agent: "a", session: "s" }),
-    /reserved layers: harness/
+    /bad layers: harness/
   );
   assert.throws(
     () => assertDeclaration({ harness: "x", agent: "UNKNOWN", session: "s" }),
-    /reserved layers: agent/
+    /bad layers: agent/
   );
   assert.throws(
     () => assertDeclaration({ harness: "x", agent: "a", session: "instance:4721" }),
-    /reserved layers: session/
+    /bad layers: session/
   );
 });
 

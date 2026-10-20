@@ -22,49 +22,41 @@
 // binding, never from tool params, or agents could claim under each other's
 // names.
 
-// "unknown" and "instance:*" are never identities: a layer carrying them
-// refuses, whether the value is missing, empty or reserved.
-const RESERVED_KEY = /^(unknown|instance:.*)$/i;
-
-/** Throw unless the triple is complete and carries no reserved token. */
-export function assertCleanTriple(id, who = "identity") {
-  const bad = ["harness", "agent", "session"].filter(
-    (k) => typeof id?.[k] !== "string" || id[k].trim() === "" || RESERVED_KEY.test(id[k].trim())
+// A layer is usable when it names something: a non-empty string that is
+// neither of the two tokens no key may carry ("unknown", "instance:*").
+// Missing, empty and reserved are one refusal — the outcome is identical
+// (throw), so the check is one predicate, not two code paths.
+function isUsableLayer(v) {
+  return (
+    typeof v === "string" &&
+    v.trim() !== "" &&
+    !/^(unknown|instance:.*)$/i.test(v.trim())
   );
+}
+
+/** Throw unless the triple is usable. `who` names the entry point —
+ * declaration (construction), resolved identity (per request), caller
+ * identity (direct tool entry), session key (the mint itself). */
+export function assertCleanTriple(id, who = "identity") {
+  const bad = ["harness", "agent", "session"].filter((k) => !isUsableLayer(id?.[k]));
   if (bad.length > 0) {
-    throw new Error(
-      `winch: refused ${who} (bad layers: ${bad.join(", ")}). ` +
-        "Provide real harness/agent/session values — empty, missing, " +
-        '"unknown" and "instance:*" keys are not minted, they fail.'
-    );
+    throw new Error(`winch: refused ${who} (bad layers: ${bad.join(", ")}). Provide real harness/agent/session values.`);
   }
   return { harness: id.harness.trim(), agent: id.agent.trim(), session: id.session.trim() };
 }
 
-/** Declaration = a complete triple with no reserved tokens. The missing
- * case keeps its original wording (callers test for it); reserved tokens get
- * their own refusal. Either way the server never starts unnamed. */
+/** Declaration = a usable triple, plus the usage line constructors hit. */
 export function assertDeclaration(base) {
-  const missing = ["harness", "agent", "session"].filter(
-    (k) => typeof base?.[k] !== "string" || base[k].trim() === ""
-  );
-  if (missing.length > 0) {
+  try {
+    return assertCleanTriple(base ?? {}, "declaration");
+  } catch (err) {
     throw new Error(
-      `winch: identity declaration incomplete (missing: ${missing.join(", ")}). ` +
-        "All three layers are required at construction — CLI: --harness/--agent/--session " +
+      String(err.message) +
+        " All three layers are required at construction — CLI: --harness/--agent/--session " +
         "flags or WINCH_HARNESS/WINCH_AGENT_ID/WINCH_SESSION; embedders: " +
         "startMcpServer({ base: { harness, agent, session } })."
     );
   }
-  const declared = { harness: base.harness.trim(), agent: base.agent.trim(), session: base.session.trim() };
-  const reserved = ["harness", "agent", "session"].filter((k) => RESERVED_KEY.test(declared[k]));
-  if (reserved.length > 0) {
-    throw new Error(
-      `winch: refused declaration (reserved layers: ${reserved.join(", ")}). ` +
-        '"unknown" and "instance:*" are not identities — declare real values.'
-    );
-  }
-  return declared;
 }
 
 /** Build a declaration from environment variables (the CLI path). */
