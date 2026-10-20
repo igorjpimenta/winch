@@ -70,12 +70,12 @@ export function kindForEvent(row, taskRow = null) {
   if (from == null) return "task.created";
   if (to === "blocked") return gated ? "gate.opened" : "task.blocked";
   if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
+  if (note.startsWith("release shipped:")) return "release.shipped";
   if (from === "todo" && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress" && note.startsWith("session budget exhausted")) return "budget.exhausted";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";
   if (to === "cancelled") return "task.cancelled";
-  if (to === "blocked") return "task.blocked";
   if (to === "todo") return "task.released";
   return "task.updated";
 }

@@ -48,12 +48,13 @@ new row to all connected clients as JSON text frames:
   insert, in id order.
 
 Kinds wired so far: `task.*` family, `gate.opened` / `gate.resolved`,
-and `budget.exhausted` (note-prefix rule ahead of the generic progressed
-branch — the latch writes a real row). `release.shipped` still has no store
-signal and is not emitted. History and live rows share one envelope shape.
+`budget.exhausted` (latch note), and now `release.shipped` (written by
+merge-detect onto the release task when an epic closes with a version
+marker; reruns deduplicate on the note). History and live rows share one
+envelope shape.
 
-Typed kinds and embedded task context land in follow-up work; this surface
-streams rows verbatim.
+Kinds above are the full catalog the store can emit today; anything not
+matched is a store change that needs a new kind, not a silent default.
 
 The server never interprets a row — a gate opening is just another event,
 and reminders, digests and dashboards are subscriber code. Reconnect replays

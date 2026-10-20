@@ -50,6 +50,24 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
           if (!dryRun) store.epic.update(epic.id, { status: "done" });
           out.closedEpics.push(epic.id);
         }
+        // The shipped marker hangs off the release task: events are
+        // task-scoped, so an epic-level milestone without a task anchor has
+        // nowhere honest to live. No task anchor, no event.
+        const releaseTask = markers.taskId ? store.task.get(markers.taskId) : null;
+        const releaseNote = `release shipped: ${markers.version}`;
+        const already = releaseTask
+          ? store.db.prepare("SELECT 1 FROM events WHERE task_id=? AND note=?").get(releaseTask.id, releaseNote)
+          : null;
+        if (releaseTask && !already) {
+          if (!dryRun) {
+            const cur = store.task.get(releaseTask.id);
+            store.db.prepare(
+              "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
+            ).run(releaseTask.id, cur.status, cur.status, "merge-detector", releaseNote, Date.now());
+          }
+        } else if (!already) {
+          out.skipped.push(`release:${markers.version} (no release task)`);
+        }
         if (exec && !out.tagged.includes(markers.version)) {
           if (!dryRun) {
             try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }

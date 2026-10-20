@@ -66,7 +66,7 @@ test("merged PR with version: epic closes, tag converges across runs", () => {
   const second = applyMergeOutcomes(store, [pr(8, "MERGED", body)], { exec });
   assert.deepEqual(second.closedEpics, [], "epic idempotent");
   assert.deepEqual(second.tagged, [], "no re-tag");
-  assert.deepEqual(second.skipped, ["tag:v2.0.0"], "git's 'already exists' lands in skipped");
+  assert.deepEqual(second.skipped, ["release:v2.0.0 (no release task)", "tag:v2.0.0"], "git's 'already exists' lands in skipped, alongside the unanchored release");
   assert.equal(calls.length, 2, "second attempt occurred and was absorbed");
 });
 
@@ -101,4 +101,38 @@ test("collectPRs builds the gh query", () => {
   assert.equal(cmd, "gh");
   assert.deepEqual(args.slice(0, 4), ["pr", "list", "--state", "merged"]);
   assert.ok(args.includes("--json") && args.join(" ").includes("body,state"));
+});
+
+test("epic close with version writes one release event on the release task", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const task = store.task.create({ storyId: story.id, title: "R", executionKind: "manual" });
+  store.task.update(task.id, { status: "done", actor: "herald", note: "done" });
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}\nRelease: v2.0.0`;
+  const first = applyMergeOutcomes(store, [{ number: 11, state: "MERGED", title: "ship", body }]);
+  assert.deepEqual(first.closedEpics, [epic.id]);
+  const rows = store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'release shipped:%'").all(task.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note, "release shipped: v2.0.0");
+  assert.equal(rows[0].from_status, "done");
+  assert.equal(rows[0].to_status, "done");
+
+  const second = applyMergeOutcomes(store, [{ number: 11, state: "MERGED", title: "ship", body }]);
+  assert.deepEqual(second.closedEpics, [], "epic idempotent");
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE note LIKE 'release shipped:%'").get().n,
+    1, "no duplicate release event on re-run"
+  );
+});
+
+test("epic close with version but no release task records a skip, writes nothing", () => {
+  const epic = store.epic.create({ title: "E2", status: "in_progress" });
+  const body = `Backlog: ${epic.id}\nRelease: v3.0.0`;
+  const out = applyMergeOutcomes(store, [{ number: 12, state: "MERGED", title: "ship", body }]);
+  assert.deepEqual(out.closedEpics, [epic.id]);
+  assert.deepEqual(out.skipped, ["release:v3.0.0 (no release task)"]);
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE note LIKE 'release shipped:%'").get().n,
+    0
+  );
 });
