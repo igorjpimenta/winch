@@ -269,3 +269,18 @@ test("empty backlog_next wakes are counted per session (wasted-wake metric)", as
   assert.equal(after.calls, 3);
   assert.ok(after.ratio < 1);
 });
+
+// ──────────────────────────────────── poisoned identity fails the call
+test("handle refuses an unknown-flavoured identity instead of minting a key", async () => {
+  seedReadyTask();
+  await assert.rejects(
+    () => handle("backlog_next", {}, { harness: "test", agent: "unknown", session: "s-1" }),
+    /refused caller identity for backlog_next.*agent/
+  );
+  await assert.rejects(
+    () => handle("backlog_next", {}, { harness: "test", agent: "builder", session: "instance:999" }),
+    /bad layers: session/
+  );
+  // and nothing was charged or claimed in the attempt
+  assert.equal(store.task.list({ status: "todo" }).length, 1);
+});

@@ -1,88 +1,102 @@
-// identity.test.js — meta > env > fallback resolution per dimension, source
-// tags, and the session-key format budgets/claims are keyed by.
+// identity.test.js — the three-layer key is a construction requirement:
+// complete declarations pass, incomplete ones throw by name, and per-request
+// meta refines the declaration layer by layer with tagged sources.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveIdentity, identitySessionKey } from "../src/identity.js";
+import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey , assertCleanTriple } from "../src/identity.js";
 
-test("meta wins over env and fallback for every dimension, tagged 'meta'", () => {
+const FULL = { harness: "langgraph", agent: "planner", session: "graph-main" };
+
+test("assertDeclaration: complete triple passes and trims", () => {
+  const d = assertDeclaration({ harness: " openclaw ", agent: "main", session: "s1" });
+  assert.deepEqual(d, { harness: "openclaw", agent: "main", session: "s1" });
+});
+
+test("assertDeclaration: unusable agent and session are named", () => {
+  assert.throws(
+    () => assertDeclaration({ harness: "langgraph" }),
+    /refused declaration \(bad layers: agent, session\)/
+  );
+});
+test("assertDeclaration: empty strings count as missing", () => {
+  assert.throws(
+    () => assertDeclaration({ harness: "", agent: "a", session: "s" }),
+    /bad layers: harness/
+  );
+});
+test("assertDeclaration: nothing declared names all three", () => {
+  assert.throws(() => assertDeclaration(undefined), /bad layers: harness, agent, session/);
+});
+
+test("declaredFromEnv reads the three env vars", () => {
+  const d = declaredFromEnv({ WINCH_HARNESS: "opencode", WINCH_AGENT_ID: "ops", WINCH_SESSION: "main" });
+  assert.deepEqual(d, { harness: "opencode", agent: "ops", session: "main" });
+});
+test("declaredFromEnv throws when the env is incomplete", () => {
+  assert.throws(() => declaredFromEnv({ WINCH_HARNESS: "opencode" }), /bad layers: agent, session/);
+});
+
+test("resolveIdentity: meta refines the declaration per layer, sources tagged", () => {
   const id = resolveIdentity({
-    meta: { winch: { harness: "openclaw", agent: "scout", session: "s-1" } },
-    env: { WINCH_HARNESS: "env-h", WINCH_AGENT_ID: "env-a", WINCH_SESSION: "env-s" },
-    pid: 42,
+    base: FULL,
+    meta: { winch: { agent: "atlas", session: "ses_42" } },
   });
-  assert.equal(id.harness, "openclaw");
-  assert.equal(id.agent, "scout");
-  assert.equal(id.session, "s-1");
-  assert.deepEqual(id.source, { harness: "meta", agent: "meta", session: "meta" });
+  assert.equal(id.harness, "langgraph");
+  assert.equal(id.agent, "atlas");
+  assert.equal(id.session, "ses_42");
+  assert.deepEqual(id.source, { harness: "declared", agent: "meta", session: "meta" });
 });
 
-test("env wins over fallback when meta has no opinion, tagged 'env'", () => {
-  const id = resolveIdentity({
-    meta: {},
-    env: { WINCH_HARNESS: "cli", WINCH_AGENT_ID: "lens", WINCH_SESSION: "sess-9" },
-    pid: 42,
+test("resolveIdentity: no meta — every layer is the declaration", () => {
+  const id = resolveIdentity({ base: FULL });
+  assert.deepEqual(id, {
+    ...FULL,
+    source: { harness: "declared", agent: "declared", session: "declared" },
   });
-  assert.equal(id.harness, "cli");
-  assert.equal(id.agent, "lens");
-  assert.equal(id.session, "sess-9");
-  assert.deepEqual(id.source, { harness: "env", agent: "env", session: "env" });
 });
 
-test("fallback is unknown / default / instance:<pid>, tagged 'fallback'", () => {
-  const id = resolveIdentity({ meta: null, env: {}, pid: 1234 });
-  assert.equal(id.harness, "unknown");
-  assert.equal(id.agent, "default");
-  assert.equal(id.session, "instance:1234");
-  assert.deepEqual(id.source, { harness: "fallback", agent: "fallback", session: "fallback" });
+test("resolveIdentity: empty-string meta does not refine", () => {
+  const id = resolveIdentity({ base: FULL, meta: { winch: { agent: "" } } });
+  assert.equal(id.agent, "planner");
+  assert.equal(id.source.agent, "declared");
 });
 
-test("dimensions resolve independently — mixed sources per call", () => {
-  const id = resolveIdentity({
-    meta: { winch: { agent: "forge" } },
-    env: { WINCH_HARNESS: "cron" },
-    pid: 7,
-  });
-  assert.equal(id.harness, "cron");
-  assert.equal(id.agent, "forge");
-  assert.equal(id.session, "instance:7");
-  assert.deepEqual(id.source, { harness: "env", agent: "meta", session: "fallback" });
+test("resolveIdentity: incomplete base throws even with meta present", () => {
+  assert.throws(
+    () => resolveIdentity({ base: { harness: "x", agent: "y" }, meta: { winch: { session: "z" } } }),
+    /bad layers: session/
+  );
 });
 
-test("a meta object without a winch key is treated as the identity itself", () => {
-  const id = resolveIdentity({ meta: { harness: "direct", agent: "herald", session: "s" }, env: {}, pid: 1 });
-  assert.equal(id.harness, "direct");
-  assert.equal(id.agent, "herald");
-  assert.equal(id.session, "s");
-  assert.deepEqual(id.source, { harness: "meta", agent: "meta", session: "meta" });
+test("sessionKey format: harness:agent:session", () => {
+  assert.equal(identitySessionKey(FULL), "langgraph:planner:graph-main");
 });
 
-test("meta.winch wins over a bare meta shape when both exist", () => {
-  const id = resolveIdentity({
-    meta: { harness: "bare", agent: "bare-a", winch: { harness: "tagged", agent: "tagged-a" } },
-    env: {},
-    pid: 1,
-  });
-  assert.equal(id.harness, "tagged");
-  assert.equal(id.agent, "tagged-a");
-  assert.deepEqual(id.source, { harness: "meta", agent: "meta", session: "fallback" });
+test("assertDeclaration: reserved tokens fail — unknown and instance:* are not keys", () => {
+  assert.throws(
+    () => assertDeclaration({ harness: "unknown", agent: "a", session: "s" }),
+    /bad layers: harness/
+  );
+  assert.throws(
+    () => assertDeclaration({ harness: "x", agent: "UNKNOWN", session: "s" }),
+    /bad layers: agent/
+  );
+  assert.throws(
+    () => assertDeclaration({ harness: "x", agent: "a", session: "instance:4721" }),
+    /bad layers: session/
+  );
 });
 
-test("identitySessionKey is harness:agent:session", () => {
-  const id = resolveIdentity({
-    meta: { winch: { harness: "test", agent: "scout", session: "s-1" } },
-    env: {},
-    pid: 99,
-  });
-  assert.equal(identitySessionKey(id), "test:scout:s-1");
+test("resolveIdentity: meta carrying a reserved token fails instead of minting", () => {
+  assert.throws(
+    () => resolveIdentity({ base: { harness: "opencode", agent: "main", session: "s1" }, meta: { winch: { harness: "UNKNOWN" } } }),
+    /refused resolved identity.*harness/
+  );
 });
 
-test("only null/undefined miss — an explicit empty string is still an opinion", () => {
-  const id = resolveIdentity({ meta: { winch: { harness: "", agent: "", session: "" } }, env: { WINCH_AGENT_ID: "env-a" }, pid: 5 });
-  assert.equal(id.harness, "");
-  assert.equal(id.agent, "");
-  assert.equal(id.session, "");
-  assert.deepEqual(id.source, { harness: "meta", agent: "meta", session: "meta" });
-  const id2 = resolveIdentity({ meta: null, env: { WINCH_AGENT_ID: "env-a" }, pid: 5 });
-  assert.equal(id2.agent, "env-a");
-  assert.equal(id2.source.agent, "env");
+test("identitySessionKey refuses to mint a poisoned key", () => {
+  assert.throws(
+    () => identitySessionKey({ harness: "x", agent: "unknown", session: "s" }),
+    /refused session key.*agent/
+  );
 });

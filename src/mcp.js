@@ -11,7 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4-mini";
 import { createToolHandlers } from "./tools.js";
-import { resolveIdentity, identitySessionKey } from "./identity.js";
+import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 
 // JSON Schema → zod raw shape for the subset the tool defs use (string,
 // boolean, string arrays, nested objects, string enums). zod is the MCP
@@ -36,7 +36,27 @@ function shapeFromJson(schema) {
   return shape;
 }
 
-export async function startMcpServer({ store, logger }) {
+/**
+ * Unexpected failures — anything handle() throws, including a poisoned
+ * caller identity — become tool-error results. Domain rejections keep their
+ * own content; the call fails, the server survives the request.
+ */
+export function toolErrorResult(err) {
+  const message = `winch: tool failed: ${String(err?.message ?? err)}`;
+  // keep stdio clean: diagnostics would corrupt the JSON-RPC stream
+  if (process.env.WINCH_MCP_DEBUG) {
+    console.error(message);
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+    isError: true,
+  };
+}
+
+export async function startMcpServer({ store, base, logger }) {
+  // The three-layer key is a construction requirement: an undeclared server
+  // would mint "unknown"-flavoured budget keys that poison claims.
+  const declared = assertDeclaration(base);
   const { TOOL_DEFS, handle } = createToolHandlers(store, logger);
   const server = new McpServer({ name: "winch", version: "0.1.0" });
 
@@ -45,10 +65,14 @@ export async function startMcpServer({ store, logger }) {
       def.name,
       { description: def.description, inputSchema: z.object(shapeFromJson(def.inputSchema)) },
       async (args, extra) => {
-        const identity = resolveIdentity({ meta: extra?._meta });
-        logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
-        const res = await handle(def.name, args, identity);
-        return { content: res.content };
+        try {
+          const identity = resolveIdentity({ meta: extra?._meta, base: declared });
+          logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
+          const res = await handle(def.name, args, identity);
+          return { content: res.content };
+        } catch (err) {
+          return toolErrorResult(err);
+        }
       }
     );
   }
