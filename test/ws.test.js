@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { createStore } from "../src/store.js";
-import { startEventServer } from "../src/events-ws.js";
+import { startEventServer, kindForEvent } from "../src/events-ws.js";
 
 let dir, store, srv, sockets;
 
@@ -80,17 +80,21 @@ test("subscriber gets welcome + history, then live rows", async () => {
   const ws = await connect(srv.port);
   const [welcome, history] = await collect(ws, 2);
   assert.equal(welcome.type, "welcome");
+  assert.equal(welcome.payload, "v2");
   assert.equal(typeof welcome.lastEventId, "number");
   assert.equal(history.type, "history");
   assert.ok(history.events.length >= 1);
   const last = history.events[history.events.length - 1];
+  assert.equal(last.kind, "task.completed");
+  assert.equal(last.task.title, "T");
   assert.equal(last.note, "seeded");
 
   seedEvent();
-  const [live] = await collect(ws, 1);
-  assert.equal(live.type, "event");
-  assert.equal(live.event.note, "seeded");
-  assert.ok(live.event.id > last.id);
+  const [birth, done] = await collect(ws, 2);
+  assert.equal(birth.kind, "task.created");
+  assert.equal(birth.task.title, "T");
+  assert.equal(done.kind, "task.completed");
+  assert.ok(birth.id > last.id);
 });
 
 test("every connected client receives the same broadcast", async () => {
@@ -103,7 +107,8 @@ test("every connected client receives the same broadcast", async () => {
   seedEvent();
   const [liveA] = await collect(a, 1);
   const [liveB] = await collect(b, 1);
-  assert.equal(liveA.event.id, liveB.event.id);
+  assert.equal(liveA.id, liveB.id);
+  assert.equal(liveA.kind, "task.created");
   assert.equal(srv.clients(), 2);
 });
 
@@ -127,5 +132,47 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
   assert.deepEqual(history.events, []);
   seedEvent();
   const [live] = await collect(ws, 1);
-  assert.equal(live.event.note, "seeded");
+  assert.equal(live.kind, "task.created");
+  assert.equal(live.task.title, "T");
+});
+
+test("history and live rows share one envelope", async () => {
+  seedEvent();
+  srv = await startEventServer({ store, port: 0, intervalMs: 50 });
+  const ws = await connect(srv.port);
+  const [, history] = await collect(ws, 2);
+  seedEvent();
+  const [live] = await collect(ws, 1);
+  assert.deepEqual(
+    Object.keys(history.events[0]).sort(),
+    Object.keys(live).sort()
+  );
+  assert.equal(history.events[0].kind, live.kind);
+});
+
+test("kindForEvent: task family maps; gate rows wait for the gate PR", () => {
+  const cases = [
+    [{ from_status: null, to_status: "todo", note: "task created" }, "task.created"],
+    [{ from_status: "todo", to_status: "in_progress", note: "claim" }, "task.claimed"],
+    [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, "task.progressed"],
+    [{ from_status: "todo", to_status: "done", note: "done" }, "task.completed"],
+    [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, "task.released"],
+    [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, "task.blocked"],
+    [{ from_status: "todo", to_status: "cancelled", note: "cut" }, "task.cancelled"],
+  ];
+  for (const [row, want] of cases) {
+    assert.equal(kindForEvent(row), want, JSON.stringify(row));
+  }
+});
+
+test("task.create writes a birth row the stream picks up", async () => {
+  srv = await startEventServer({ store, port: 0, intervalMs: 50 });
+  const ws = await connect(srv.port);
+  await collect(ws, 2); // welcome + empty history
+  const epic = store.epic.create({ title: "E", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  store.task.create({ storyId: story.id, title: "born", executionKind: "manual" });
+  const [live] = await collect(ws, 1);
+  assert.equal(live.kind, "task.created");
+  assert.equal(live.task.title, "born");
 });
