@@ -1,0 +1,104 @@
+// merges.test.js — S2.6: marker parsing, merge/close outcomes, idempotence,
+// tag command contract.
+import { test, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createStore } from "../src/store.js";
+import { parseMarkers, applyMergeOutcomes, collectPRs } from "../src/merges.js";
+
+let dir, store, epic, story, task;
+
+beforeEach(() => {
+  dir = mkdtempSync(path.join(tmpdir(), "backlog-merges-"));
+  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  epic = store.epic.create({ title: "Ship v1", status: "in_progress" });
+  story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
+});
+afterEach(() => {
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const pr = (n, state, body, title = "whatever") => ({ number: n, state, body, title });
+
+test("parseMarkers: all three markers, partials, absent", () => {
+  const full = parseMarkers("notes\nBacklog: EPIC-1\nBacklog-Task: TASK-2\nRelease: v9.9.9\n");
+  assert.deepEqual(full, { epicId: "EPIC-1", taskId: "TASK-2", version: "v9.9.9" });
+  assert.deepEqual(parseMarkers("Backlog: EPIC-1\n"), { epicId: "EPIC-1", taskId: null, version: null });
+  assert.deepEqual(parseMarkers("no markers"), { epicId: null, taskId: null, version: null });
+});
+
+test("merged PR with task marker: task done with merge event; rerun idempotent", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  const prs = [pr(7, "MERGED", body, "feat: the thing")];
+  const first = applyMergeOutcomes(store, prs);
+  assert.deepEqual(first.doneTasks, [task.id]);
+  assert.equal(store.task.get(task.id).status, "done");
+  assert.match(store.task.get(task.id).result_summary, /PR #7: feat: the thing/);
+  const second = applyMergeOutcomes(store, prs);
+  assert.deepEqual(second.doneTasks, [], "second run is a no-op");
+});
+
+test("merged PR with version: epic closes, tag converges across runs", () => {
+  // Model real git: tagging an existing tag fails — the detector must land
+  // that failure in skipped instead of crashing, and a re-run stays safe.
+  const calls = [];
+  const tags = new Set();
+  const exec = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (args.includes("tag")) {
+      const v = args[args.indexOf("tag") + 1];
+      if (tags.has(v)) throw new Error("fatal: tag 'v2.0.0' already exists");
+      tags.add(v);
+    }
+    return "";
+  };
+  const body = `Backlog: ${epic.id}\nRelease: v2.0.0`;
+  const first = applyMergeOutcomes(store, [pr(8, "MERGED", body)], { exec });
+  assert.deepEqual(first.closedEpics, [epic.id]);
+  assert.equal(store.epic.get(epic.id).status, "done");
+  assert.deepEqual(first.tagged, ["v2.0.0"]);
+  assert.deepEqual(calls, [["git", "tag", "v2.0.0"]]);
+
+  const second = applyMergeOutcomes(store, [pr(8, "MERGED", body)], { exec });
+  assert.deepEqual(second.closedEpics, [], "epic idempotent");
+  assert.deepEqual(second.tagged, [], "no re-tag");
+  assert.deepEqual(second.skipped, ["tag:v2.0.0"], "git's 'already exists' lands in skipped");
+  assert.equal(calls.length, 2, "second attempt occurred and was absorbed");
+});
+
+test("closed-unmerged PR reclaims an in-flight task; done is never rewritten", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  store.task.update(task.id, { status: "in_progress", assigned: "builder" });
+  const s1 = applyMergeOutcomes(store, [pr(9, "CLOSED", body)]);
+  assert.deepEqual(s1.reopenedTasks, [task.id]);
+  const reopened = store.task.get(task.id);
+  assert.equal(reopened.status, "todo");
+  assert.equal(reopened.assigned, null);
+
+  store.task.update(task.id, { status: "done", result_summary: "done" });
+  const s2 = applyMergeOutcomes(store, [pr(9, "CLOSED", body)]);
+  assert.deepEqual(s2.reopenedTasks, [], "history stays");
+});
+
+test("PRs without markers and open PRs are untouched", () => {
+  const s = applyMergeOutcomes(store, [pr(1, "MERGED", "unrelated"), pr(2, "OPEN", `Backlog: ${epic.id}`)]);
+  assert.deepEqual(s.doneTasks, []);
+  assert.equal(store.task.get(task.id).status, "todo");
+  assert.equal(store.epic.get(epic.id).status, "in_progress");
+  assert.deepEqual(s.skipped, ["pr#2:OPEN"]);
+});
+
+test("collectPRs builds the gh query", () => {
+  const calls = [];
+  const exec = (cmd, args) => { calls.push([cmd, ...args]); return "[]"; };
+  const rows = collectPRs({ exec });
+  assert.deepEqual(rows, []);
+  const [cmd, ...args] = calls[0];
+  assert.equal(cmd, "gh");
+  assert.deepEqual(args.slice(0, 4), ["pr", "list", "--state", "merged"]);
+  assert.ok(args.includes("--json") && args.join(" ").includes("body,state"));
+});

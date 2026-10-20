@@ -1,0 +1,686 @@
+// store.js — sqlite-backed backlog data layer.
+//
+// Schema lives inline (single init.sql equivalent); migrations tracked via
+// PRAGMA user_version. node:sqlite (built-in, Node 22+) — zero npm deps.
+//
+// Tables: epics, stories, tasks, deps, meta. JSON columns hold capability
+// arrays + execution_args opaquely. Statuses validated via CHECK constraints
+// so bad inputs fail fast at the DB layer rather than silently persisting.
+//
+// Concurrency: WAL mode enabled. CLI and gateway processes can read/write the
+// same DB concurrently; sqlite serializes the writes.
+
+import { DatabaseSync } from "node:sqlite";
+import { existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+import { newEpicId, newStoryId, newTaskId, classifyId } from "./ids.js";
+
+const SCHEMA_VERSION = 6;
+
+// Tasks that exhaust this many sweeper re-releases escalate to 'blocked';
+// claim/release and sweepExpired both read it.
+export const MAX_ATTEMPTS = 3;
+
+export const EPIC_STATUSES   = ["idea", "planned", "in_progress", "done", "cancelled"];
+export const STORY_STATUSES  = ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
+export const TASK_STATUSES   = ["todo", "in_progress", "done", "blocked", "cancelled"];
+export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
+export const ITEM_KINDS      = ["epic", "story", "task"];
+
+const STORY_TERMINAL = new Set(["done", "cancelled"]);
+const TASK_TERMINAL  = new Set(["done", "cancelled"]);
+const EPIC_TERMINAL  = new Set(["done", "cancelled"]);
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS epics (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  description TEXT,
+  acceptance  TEXT,
+  status      TEXT NOT NULL CHECK (status IN ('idea','planned','in_progress','done','cancelled')),
+  owner_team  TEXT,
+  priority    INTEGER NOT NULL DEFAULT 50,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  closed_at   INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS stories (
+  id           TEXT PRIMARY KEY,
+  epic_id      TEXT NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL,
+  description  TEXT,
+  acceptance   TEXT,
+  status       TEXT NOT NULL CHECK (status IN ('backlog','ready','in_progress','review','done','blocked','cancelled')),
+  size         TEXT,
+  priority     INTEGER NOT NULL DEFAULT 50,
+  assigned     TEXT,
+  capabilities TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  closed_at    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id               TEXT PRIMARY KEY,
+  story_id         TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
+  execution_kind   TEXT NOT NULL CHECK (execution_kind IN ('pipeclaw','subagent','cli','gate','manual')),
+  execution_args   TEXT NOT NULL DEFAULT '{}',
+  assigned         TEXT,
+  capabilities     TEXT,
+  flow_id          TEXT,
+  task_run_id      TEXT,
+  claim_expires_at INTEGER,
+  lease_seconds    INTEGER,
+  last_heartbeat   INTEGER,
+  attempt_count    INTEGER NOT NULL DEFAULT 0,
+  gate_type        TEXT,
+  blocked_at       INTEGER,
+  result_summary   TEXT,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL,
+  claimed_at       INTEGER,
+  closed_at        INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL,
+  from_status TEXT,
+  to_status   TEXT NOT NULL,
+  actor       TEXT,
+  note        TEXT,
+  session_ref TEXT,
+  at          INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deps (
+  from_id    TEXT NOT NULL,
+  from_kind  TEXT NOT NULL CHECK (from_kind IN ('epic','story','task')),
+  to_id      TEXT NOT NULL,
+  to_kind    TEXT NOT NULL CHECK (to_kind   IN ('epic','story','task')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (from_id, to_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_epic              ON stories(epic_id);
+CREATE INDEX IF NOT EXISTS idx_stories_status_assigned   ON stories(status, assigned);
+CREATE INDEX IF NOT EXISTS idx_tasks_story               ON tasks(story_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned     ON tasks(status, assigned);
+CREATE INDEX IF NOT EXISTS idx_events_task               ON events(task_id);
+CREATE INDEX IF NOT EXISTS idx_deps_from                 ON deps(from_id);
+CREATE INDEX IF NOT EXISTS idx_deps_to                   ON deps(to_id);
+
+CREATE TABLE IF NOT EXISTS session_budgets (
+  session_key   TEXT PRIMARY KEY,
+  agent_id      TEXT NOT NULL,
+  tool_calls    INTEGER NOT NULL DEFAULT 0,
+  limit_calls   INTEGER NOT NULL,
+  exhausted_at  INTEGER,
+  empty_wakes   INTEGER NOT NULL DEFAULT 0,
+  updated_at    INTEGER NOT NULL
+);
+`;
+
+function now() { return Date.now(); }
+function jsonOut(v) { return v == null ? null : JSON.stringify(v); }
+function jsonIn(v)  { if (v == null) return null; try { return JSON.parse(v); } catch { return null; } }
+
+function rowEpic(r) {
+  if (!r) return null;
+  return { ...r };
+}
+function rowStory(r) {
+  if (!r) return null;
+  return { ...r, capabilities: jsonIn(r.capabilities) };
+}
+function rowTask(r) {
+  if (!r) return null;
+  return { ...r, capabilities: jsonIn(r.capabilities), execution_args: jsonIn(r.execution_args) ?? {} };
+}
+
+export function createStore({ dbPath, logger } = {}) {
+  const finalPath = dbPath || path.join(process.env.HOME || ".", ".openclaw", "backlog", "store.sqlite");
+  const dir = path.dirname(finalPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const db = new DatabaseSync(finalPath);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA foreign_keys = ON;");
+  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec(SCHEMA);
+
+  // The graph-flow→pipeclaw rename changed code, not CHECK constraints:
+  // CREATE TABLE IF NOT EXISTS never rewrites a legacy table's vocabulary, so
+  // a store born before the rename rejects every pipeclaw-kind insert. Detect
+  // the stale constraint and rebuild the table (renaming stored values too) —
+  // otherwise execution_kind='pipeclaw' is uninsertable on migrated stores.
+  const tasksSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get()?.sql ?? "";
+  if (tasksSql.includes("'graph_flow'")) {
+    const oldCols = db.prepare("PRAGMA table_info(tasks)").all().map((r) => r.name);
+    const keep = oldCols.map((c) => `"${c}"`).join(", ");
+    // Rename in-flight: inserting the legacy 'graph_flow' value first would
+    // violate the rebuilt table's CHECK before any UPDATE could fix it.
+    const sel = oldCols.map((c) => (c === "execution_kind"
+      ? `CASE WHEN "execution_kind"='graph_flow' THEN 'pipeclaw' ELSE "execution_kind" END`
+      : `"${c}"`)).join(", ");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        CREATE TABLE tasks_rebuild (
+          id               TEXT PRIMARY KEY,
+          story_id         TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+          title            TEXT NOT NULL,
+          description      TEXT,
+          status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
+          execution_kind   TEXT NOT NULL CHECK (execution_kind IN ('pipeclaw','subagent','cli','gate','manual')),
+          execution_args   TEXT NOT NULL DEFAULT '{}',
+          assigned         TEXT,
+          capabilities     TEXT,
+          flow_id          TEXT,
+          task_run_id      TEXT,
+          claim_expires_at INTEGER,
+          result_summary   TEXT,
+          created_at       INTEGER NOT NULL,
+          updated_at       INTEGER NOT NULL,
+          claimed_at       INTEGER,
+          closed_at        INTEGER
+        );
+        INSERT INTO tasks_rebuild (${keep})
+        SELECT ${sel} FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_rebuild RENAME TO tasks;
+        CREATE INDEX IF NOT EXISTS idx_tasks_story         ON tasks(story_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned ON tasks(status, assigned);
+      `);
+      db.exec("COMMIT");
+      logger?.info?.("backlog: repaired stale graph_flow execution_kind CHECK (table rebuilt, values renamed)");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  // v1 → v2 migration. The ALTERs are PRAGMA-guarded so a v2 store reopens
+  // clean; events table/index already exist via SCHEMA above. Existing rows
+  // survive untouched.
+  const versionRow = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
+  const storedVersion = versionRow ? Number(versionRow.value) : 0;
+  if (storedVersion < SCHEMA_VERSION) {
+    const cols = new Set(db.prepare("PRAGMA table_info(tasks)").all().map((c) => c.name));
+    if (!cols.has("lease_seconds"))  db.exec("ALTER TABLE tasks ADD COLUMN lease_seconds INTEGER");
+    if (!cols.has("last_heartbeat")) db.exec("ALTER TABLE tasks ADD COLUMN last_heartbeat INTEGER");
+    if (!cols.has("attempt_count"))  db.exec("ALTER TABLE tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
+    if (!cols.has("gate_type"))      db.exec("ALTER TABLE tasks ADD COLUMN gate_type TEXT");
+    if (!cols.has("blocked_at"))     db.exec("ALTER TABLE tasks ADD COLUMN blocked_at INTEGER");
+    const sbCols = new Set(db.prepare("PRAGMA table_info(session_budgets)").all().map((c) => c.name));
+    if (!sbCols.has("empty_wakes"))  db.exec("ALTER TABLE session_budgets ADD COLUMN empty_wakes INTEGER NOT NULL DEFAULT 0");
+    const evCols = new Set(db.prepare("PRAGMA table_info(events)").all().map((c) => c.name));
+    if (!evCols.has("session_ref"))  db.exec("ALTER TABLE events ADD COLUMN session_ref TEXT");
+    db.prepare("INSERT INTO meta(key,value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(String(SCHEMA_VERSION));
+  }
+
+  const liveVersion = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value;
+  logger?.info?.(`backlog: store ready at ${finalPath} (schema_version=${liveVersion})`);
+
+  // ────────────────────────────────────────────────────────────── EPICS
+  const epicApi = {
+    create({ title, description, acceptance, status, ownerTeam, priority, id }) {
+      const epicId = id || newEpicId();
+      const t = now();
+      const s = status || "idea";
+      if (!EPIC_STATUSES.includes(s)) throw new Error(`invalid epic status: ${s}`);
+      db.prepare(`
+        INSERT INTO epics(id, title, description, acceptance, status, owner_team, priority, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(epicId, title, description ?? null, acceptance ?? null, s, ownerTeam ?? null, priority ?? 50, t, t);
+      return epicApi.get(epicId);
+    },
+    get(id) {
+      return rowEpic(db.prepare("SELECT * FROM epics WHERE id=?").get(id));
+    },
+    list({ status } = {}) {
+      const sql = status
+        ? "SELECT * FROM epics WHERE status=? ORDER BY priority DESC, created_at ASC"
+        : "SELECT * FROM epics ORDER BY priority DESC, created_at ASC";
+      return db.prepare(sql).all(...(status ? [status] : [])).map(rowEpic);
+    },
+    update(id, patch) {
+      const existing = epicApi.get(id);
+      if (!existing) throw new Error(`epic not found: ${id}`);
+      if (patch.status && !EPIC_STATUSES.includes(patch.status)) throw new Error(`invalid epic status: ${patch.status}`);
+      const merged = { ...existing, ...patch, updated_at: now() };
+      if (patch.status && EPIC_TERMINAL.has(patch.status) && !existing.closed_at) merged.closed_at = merged.updated_at;
+      db.prepare(`
+        UPDATE epics SET title=?, description=?, acceptance=?, status=?, owner_team=?, priority=?, updated_at=?, closed_at=?
+        WHERE id=?
+      `).run(merged.title, merged.description, merged.acceptance, merged.status, merged.owner_team, merged.priority, merged.updated_at, merged.closed_at, id);
+      return epicApi.get(id);
+    },
+    delete(id) {
+      const r = db.prepare("DELETE FROM epics WHERE id=?").run(id);
+      return r.changes > 0;
+    },
+  };
+
+  // ────────────────────────────────────────────────────────────── STORIES
+  const storyApi = {
+    create({ epicId, title, description, acceptance, status, size, priority, assigned, capabilities, id }) {
+      if (!epicApi.get(epicId)) throw new Error(`epic not found: ${epicId}`);
+      const storyId = id || newStoryId();
+      const t = now();
+      const s = status || "backlog";
+      if (!STORY_STATUSES.includes(s)) throw new Error(`invalid story status: ${s}`);
+      db.prepare(`
+        INSERT INTO stories(id, epic_id, title, description, acceptance, status, size, priority, assigned, capabilities, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(storyId, epicId, title, description ?? null, acceptance ?? null, s, size ?? null, priority ?? 50, assigned ?? null, jsonOut(capabilities), t, t);
+      return storyApi.get(storyId);
+    },
+    get(id) {
+      return rowStory(db.prepare("SELECT * FROM stories WHERE id=?").get(id));
+    },
+    list({ epicId, status, assigned } = {}) {
+      const where = [];
+      const args = [];
+      if (epicId)   { where.push("epic_id=?"); args.push(epicId); }
+      if (status)   { where.push("status=?");  args.push(status); }
+      if (assigned) { where.push("assigned=?"); args.push(assigned); }
+      const sql = `SELECT * FROM stories${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY priority DESC, created_at ASC`;
+      return db.prepare(sql).all(...args).map(rowStory);
+    },
+    update(id, patch) {
+      const existing = storyApi.get(id);
+      if (!existing) throw new Error(`story not found: ${id}`);
+      if (patch.status && !STORY_STATUSES.includes(patch.status)) throw new Error(`invalid story status: ${patch.status}`);
+      const merged = {
+        ...existing,
+        ...patch,
+        capabilities: patch.capabilities !== undefined ? patch.capabilities : existing.capabilities,
+        updated_at: now(),
+      };
+      if (patch.status && STORY_TERMINAL.has(patch.status) && !existing.closed_at) merged.closed_at = merged.updated_at;
+      db.prepare(`
+        UPDATE stories SET title=?, description=?, acceptance=?, status=?, size=?, priority=?, assigned=?, capabilities=?, updated_at=?, closed_at=?
+        WHERE id=?
+      `).run(merged.title, merged.description, merged.acceptance, merged.status, merged.size, merged.priority, merged.assigned, jsonOut(merged.capabilities), merged.updated_at, merged.closed_at, id);
+      return storyApi.get(id);
+    },
+    delete(id) {
+      const r = db.prepare("DELETE FROM stories WHERE id=?").run(id);
+      return r.changes > 0;
+    },
+  };
+
+  // ────────────────────────────────────────────────────────────── TASKS
+  // Every status-changing caller writes its event row inside the same
+  // transaction as the UPDATE — a status change committed without its event
+  // desyncs the audit trail the sweeper and operators read.
+  function insertEvent({ taskId, fromStatus, toStatus, actor, note, at, sessionRef }) {
+    const r = db.prepare(`
+      INSERT INTO events(task_id, from_status, to_status, actor, note, session_ref, at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(taskId, fromStatus ?? null, toStatus, actor ?? null, note ?? null, sessionRef ?? null, at);
+    return Number(r.lastInsertRowid);
+  }
+
+  function rowEvent(r) { return r ? { ...r } : null; }
+
+  const taskApi = {
+    create({ storyId, title, description, status, executionKind, executionArgs, capabilities, assigned, id }) {
+      if (!storyApi.get(storyId)) throw new Error(`story not found: ${storyId}`);
+      const taskId = id || newTaskId();
+      const t = now();
+      const s = status || "todo";
+      const ek = executionKind || "manual";
+      if (!TASK_STATUSES.includes(s))     throw new Error(`invalid task status: ${s}`);
+      if (!EXECUTION_KINDS.includes(ek))  throw new Error(`invalid execution_kind: ${ek}`);
+      db.prepare(`
+        INSERT INTO tasks(id, story_id, title, description, status, execution_kind, execution_args, capabilities, assigned, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(taskId, storyId, title, description ?? null, s, ek, JSON.stringify(executionArgs ?? {}), jsonOut(capabilities), assigned ?? null, t, t);
+      return taskApi.get(taskId);
+    },
+    get(id) {
+      return rowTask(db.prepare("SELECT * FROM tasks WHERE id=?").get(id));
+    },
+    list({ storyId, status, assigned } = {}) {
+      const where = [];
+      const args = [];
+      if (storyId)  { where.push("story_id=?"); args.push(storyId); }
+      if (status)   { where.push("status=?");   args.push(status); }
+      if (assigned) { where.push("assigned=?"); args.push(assigned); }
+      const sql = `SELECT * FROM tasks${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at ASC`;
+      return db.prepare(sql).all(...args).map(rowTask);
+    },
+    update(id, patch) {
+      const existing = taskApi.get(id);
+      if (!existing) throw new Error(`task not found: ${id}`);
+      if (patch.status && !TASK_STATUSES.includes(patch.status)) throw new Error(`invalid task status: ${patch.status}`);
+      const merged = {
+        ...existing,
+        ...patch,
+        capabilities: patch.capabilities !== undefined ? patch.capabilities : existing.capabilities,
+        execution_args: patch.execution_args !== undefined ? patch.execution_args : existing.execution_args,
+        updated_at: now(),
+      };
+      if (patch.status && TASK_TERMINAL.has(patch.status) && !existing.closed_at) merged.closed_at = merged.updated_at;
+      const statusChanged = patch.status != null && patch.status !== existing.status;
+      // Gate metadata is a function of the blocked state alone: entering
+      // stamps it (gateType from the patch or the row's existing value), any
+      // exit clears it — a task outside 'blocked' never carries gate fields.
+      if (merged.status === "blocked" && existing.status !== "blocked") {
+        merged.gate_type = patch.gateType !== undefined ? patch.gateType : existing.gate_type;
+        merged.blocked_at = now();
+      } else if (existing.status === "blocked" && merged.status !== "blocked") {
+        merged.gate_type = null;
+        merged.blocked_at = null;
+      } else {
+        merged.gate_type = patch.gateType !== undefined ? patch.gateType : existing.gate_type;
+      }
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(`
+          UPDATE tasks SET title=?, description=?, status=?, execution_kind=?, execution_args=?, capabilities=?, assigned=?,
+                           flow_id=?, task_run_id=?, claim_expires_at=?, lease_seconds=?, last_heartbeat=?, attempt_count=?,
+                           gate_type=?, blocked_at=?,
+                           result_summary=?, updated_at=?, claimed_at=?, closed_at=?
+          WHERE id=?
+        `).run(
+          merged.title, merged.description, merged.status, merged.execution_kind,
+          JSON.stringify(merged.execution_args ?? {}), jsonOut(merged.capabilities), merged.assigned,
+          merged.flow_id, merged.task_run_id, merged.claim_expires_at,
+          merged.lease_seconds, merged.last_heartbeat, merged.attempt_count,
+          merged.gate_type, merged.blocked_at,
+          merged.result_summary, merged.updated_at, merged.claimed_at, merged.closed_at,
+          id
+        );
+        if (statusChanged) {
+          insertEvent({
+            taskId: id,
+            fromStatus: existing.status,
+            toStatus: merged.status,
+            actor: patch.actor ?? "system",
+            note: patch.note ?? null,
+            at: merged.updated_at,
+          });
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return taskApi.get(id);
+    },
+    delete(id) {
+      const r = db.prepare("DELETE FROM tasks WHERE id=?").run(id);
+      return r.changes > 0;
+    },
+    /**
+     * Open a human gate: CAS working states (todo|in_progress) → blocked with
+     * gate_type stamped, event row in the same transaction. Null if terminal or
+     * already blocked — a gate opens exactly once; the event trail is the audit.
+     */
+    openGate({ id, gateType, reason, actor = "system" }) {
+      const t = now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const cur = db.prepare("SELECT status FROM tasks WHERE id=?").get(id);
+        if (!cur || (cur.status !== "todo" && cur.status !== "in_progress")) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        db.prepare(`
+          UPDATE tasks SET status='blocked', gate_type=?, blocked_at=?, updated_at=?
+          WHERE id=? AND status IN ('todo','in_progress')
+        `).run(gateType, t, t, id);
+        insertEvent({
+          taskId: id, fromStatus: cur.status, toStatus: "blocked", actor,
+          note: `gate open: ${gateType}${reason ? ` — ${reason}` : ""}`, at: t,
+        });
+        db.exec("COMMIT");
+        return taskApi.get(id);
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    /**
+     * Operator resolution of a gate: CAS blocked → todo with claim fields and
+     * gate metadata cleared, so the task re-enters the queue for a fresh claim.
+     * Null when not blocked — one resume per gate, or the event trail lies.
+     */
+    resumeGate({ id, actor = "operator" }) {
+      const t = now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const cur = db.prepare("SELECT status FROM tasks WHERE id=?").get(id);
+        if (!cur || cur.status !== "blocked") {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        db.prepare(`
+          UPDATE tasks SET status='todo', assigned=NULL, claimed_at=NULL, claim_expires_at=NULL,
+                           gate_type=NULL, blocked_at=NULL, updated_at=?
+          WHERE id=? AND status='blocked'
+        `).run(t, id);
+        insertEvent({ taskId: id, fromStatus: "blocked", toStatus: "todo", actor, note: "gate resume", at: t });
+        db.exec("COMMIT");
+        return taskApi.get(id);
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    /**
+     * CAS claim. Returns the claimed task with a `.lastEvent` property (the
+     * event row written in the same transaction), or null if the task wasn't
+     * claimable (already in_progress, wrong assignee, terminal, etc.).
+     * Claim and its event row are one transaction — splitting them lets the
+     * sweeper re-release a task whose claim event never landed.
+     */
+    claim({ id, agentId, watchdogMs = 30 * 60 * 1000, sessionKey }) {
+      const t = now();
+      const expires = t + watchdogMs;
+      const leaseSeconds = Math.floor(watchdogMs / 1000);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const r = db.prepare(`
+          UPDATE tasks SET status='in_progress', assigned=?, claimed_at=?, claim_expires_at=?, lease_seconds=?, last_heartbeat=?, updated_at=?
+          WHERE id=? AND status='todo' AND (assigned IS NULL OR assigned=?)
+        `).run(agentId, t, expires, leaseSeconds, t, t, id, agentId);
+        if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
+        const eventsId = insertEvent({
+          taskId: id, fromStatus: "todo", toStatus: "in_progress",
+          actor: agentId, note: "claim", at: t, sessionRef: sessionKey ?? null,
+        });
+        db.exec("COMMIT");
+        const task = taskApi.get(id);
+        task.lastEvent = rowEvent(db.prepare("SELECT * FROM events WHERE id=?").get(eventsId));
+        return task;
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    },
+    /**
+     * Prove liveness mid-task: push last_heartbeat forward. No event row —
+     * heartbeats fire too often to pollute the audit trail.
+     */
+    heartbeat(id, agentId) {
+      const t = now();
+      const r = db.prepare(`
+        UPDATE tasks SET last_heartbeat=?, updated_at=? WHERE id=? AND status='in_progress' AND assigned=?
+      `).run(t, t, id, agentId);
+      if (r.changes === 0) return null;
+      return taskApi.get(id);
+    },
+    /**
+     * Release a claim — task goes back to 'todo', assignment cleared,
+     * attempt_count incremented. Returns the task with `.lastEvent`, or null
+     * if it wasn't in_progress. `note`/`at` are for sweepExpired's reuse of
+     * this path; external callers just pass id.
+     */
+    release(id, note = "release", at = now()) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const r = db.prepare(`
+          UPDATE tasks SET status='todo', assigned=NULL, claimed_at=NULL, claim_expires_at=NULL, attempt_count=attempt_count+1, updated_at=?
+          WHERE id=? AND status='in_progress'
+        `).run(at, id);
+        if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
+        const eventsId = insertEvent({
+          taskId: id, fromStatus: "in_progress", toStatus: "todo",
+          actor: null, note, at,
+        });
+        db.exec("COMMIT");
+        const task = taskApi.get(id);
+        task.lastEvent = rowEvent(db.prepare("SELECT * FROM events WHERE id=?").get(eventsId));
+        return task;
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    },
+    /**
+     * Re-release every in_progress task whose claim expired before `now`
+     * (same release path, note 'sweeper'). Once a task's attempt_count
+     * reaches MAX_ATTEMPTS it escalates to 'blocked' instead of cycling.
+     * Returns the affected tasks in their post-sweep state.
+     */
+    sweepExpired({ now: at = Date.now() } = {}) {
+      const expired = db.prepare(
+        "SELECT id FROM tasks WHERE status='in_progress' AND claim_expires_at < ?"
+      ).all(at);
+      const swept = [];
+      for (const { id } of expired) {
+        const task = taskApi.release(id, "sweeper", at);
+        if (!task) continue; // lost a race with a concurrent claim/release
+        if (task.attempt_count >= MAX_ATTEMPTS) {
+          db.exec("BEGIN IMMEDIATE");
+          try {
+            const r = db.prepare(`
+              UPDATE tasks SET status='blocked', updated_at=? WHERE id=? AND status='todo'
+            `).run(at, id);
+            if (r.changes > 0) {
+              insertEvent({
+                taskId: id, fromStatus: "todo", toStatus: "blocked",
+                actor: "sweeper", note: "blocked: max attempts", at,
+              });
+            }
+            db.exec("COMMIT");
+          } catch (err) {
+            db.exec("ROLLBACK");
+            throw err;
+          }
+          swept.push(taskApi.get(id));
+        } else {
+          swept.push(task);
+        }
+      }
+      return swept;
+    },
+  };
+
+  // ────────────────────────────────────────────────────────────── DEPS
+  const depApi = {
+    /**
+     * Add edge: `from depends on to`. Both sides must already exist.
+     * Caller MUST cycle-check before calling (see deps.js).
+     */
+    addRaw({ fromId, fromKind, toId, toKind }) {
+      db.prepare(`
+        INSERT INTO deps(from_id, from_kind, to_id, to_kind, created_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(from_id, to_id) DO NOTHING
+      `).run(fromId, fromKind, toId, toKind, now());
+      return db.prepare("SELECT * FROM deps WHERE from_id=? AND to_id=?").get(fromId, toId);
+    },
+    remove({ fromId, toId }) {
+      const r = db.prepare("DELETE FROM deps WHERE from_id=? AND to_id=?").run(fromId, toId);
+      return r.changes > 0;
+    },
+    listOutgoing(fromId) {
+      return db.prepare("SELECT * FROM deps WHERE from_id=?").all(fromId);
+    },
+    listIncoming(toId) {
+      return db.prepare("SELECT * FROM deps WHERE to_id=?").all(toId);
+    },
+    all() {
+      return db.prepare("SELECT * FROM deps").all();
+    },
+  };
+
+  // ──────────────────────────────────────────────────── EXISTENCE / KIND
+  function itemKindOf(id) {
+    const cls = classifyId(id);
+    if (!cls) return null;
+    const row = ({ epic: epicApi.get, story: storyApi.get, task: taskApi.get })[cls](id);
+    return row ? cls : null;
+  }
+
+  // ──────────────────────────────────────── SESSION BUDGETS (S1.3)
+  const sessionBudgetApi = {
+    /**
+     * Charge one backlog tool call against the session's budget and return
+     * post-increment state. Exceeding limit_calls latches exhausted_at —
+     * latching is one-way: a session that ran out of claims never resumes
+     * mid-session, so a runaway loop cannot re-arm by burning calls.
+     */
+    charge({ sessionKey, agentId, limit }) {
+      const t = now();
+      db.prepare(`
+        INSERT INTO session_budgets(session_key, agent_id, tool_calls, limit_calls, updated_at)
+        VALUES (?, ?, 1, ?, ?)
+        ON CONFLICT(session_key) DO UPDATE SET
+          tool_calls = tool_calls + 1, updated_at = excluded.updated_at
+      `).run(sessionKey, agentId, limit, t);
+      const row = db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey);
+      const exhausted = row.tool_calls >= row.limit_calls;
+      if (exhausted && !row.exhausted_at) {
+        db.prepare("UPDATE session_budgets SET exhausted_at=? WHERE session_key=?").run(t, sessionKey);
+        return { ...row, tool_calls: row.tool_calls, exhausted: true, exhausted_at: t };
+      }
+      return { ...row, exhausted, exhausted_at: row.exhausted_at };
+    },
+    get(sessionKey) {
+      return db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey) ?? null;
+    },
+    /**
+     * A wake that found nothing to claim. Charged rows exist first (backlog_next
+     * charges before it computes), so this is an UPDATE — the wasted-wake
+     * metric is per-session and feeds the burn-in gate (S3.5's <30% target).
+     */
+    recordEmptyWake(sessionKey) {
+      const r = db.prepare(
+        "UPDATE session_budgets SET empty_wakes = empty_wakes + 1 WHERE session_key=?"
+      ).run(sessionKey);
+      return r.changes > 0;
+    },
+    wastedWakeRatio() {
+      const row = db.prepare(
+        "SELECT COALESCE(SUM(empty_wakes),0) AS empty, COALESCE(SUM(tool_calls),0) AS calls FROM session_budgets"
+      ).get();
+      return { ...row, ratio: row.calls > 0 ? row.empty / row.calls : 0 };
+    },
+  };
+
+  return {
+    db,
+    path: finalPath,
+    sessionBudget: sessionBudgetApi,
+    epic:  epicApi,
+    story: storyApi,
+    task:  taskApi,
+    dep:   depApi,
+    itemKindOf,
+    close() { db.close(); },
+  };
+}

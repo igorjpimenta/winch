@@ -1,0 +1,216 @@
+// cli.js — winch subcommands over the shared store. Every subcommand that
+// needs the DB resolves it the same way: WINCH_DB, else BACKLOG_DB_PATH,
+// else the default store under the user's home.
+
+import path from "node:path";
+import os from "node:os";
+import { parseArgs } from "node:util";
+import { execFileSync } from "node:child_process";
+import { createStore } from "./store.js";
+import { readyTasks } from "./ready-queue.js";
+import { tick, telegramSender } from "./watcher.js";
+import { notifyGates, remindGates, markGateNotified } from "./notify.js";
+import { shipRelease } from "./release.js";
+import { collectPRs, applyMergeOutcomes } from "./merges.js";
+import { failureReport, formatFailureReport } from "./metrics.js";
+import { dispatchFraction, epicTokenRollup } from "./rollup.js";
+import { startMcpServer } from "./mcp.js";
+
+export function resolveDbPath() {
+  return process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite");
+}
+
+// stdout is the data channel for every subcommand; diagnostics go to stderr.
+function openStore() {
+  return createStore({ dbPath: resolveDbPath() });
+}
+
+const USAGE = `usage: winch <command>
+
+  mcp                                    serve the backlog tools over MCP stdio
+  watch [--notify]                       one watcher tick (JSON manifest on stdout)
+  resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
+  next                                   list the current ready queue
+  metrics [--json] [--window-days N]     per-hop failure report
+  rollup [--json]                        dispatch fraction + epic token rollup
+  release-epic --epic <id> [--task ID] [--version V] [--base B]
+  merge-detect [--dry-run]               apply merged/closed PR outcomes
+  check-slugs [--config <path>]          live-verify registered model slugs
+  gate-notified <taskId>                 record that the operator was pinged`;
+
+function fail(msg, code = 2) {
+  console.error(msg);
+  process.exit(code);
+}
+
+export async function runCli(argv) {
+  const [cmd, ...rest] = argv;
+  switch (cmd) {
+    case undefined:
+    case "--help":
+    case "-h":
+    case "help":
+      console.log(USAGE);
+      return;
+
+    case "mcp": {
+      const store = openStore();
+      const logger = {
+        info: (...a) => console.error(...a),
+        warn: (...a) => console.error(...a),
+        error: (...a) => console.error(...a),
+      };
+      await startMcpServer({ store, logger });
+      return;
+    }
+
+    case "watch": {
+      const { values } = parseArgs({ args: rest, options: { notify: { type: "boolean" } } });
+      const store = openStore();
+      try {
+        let notify = null;
+        if (values.notify) {
+          const send = telegramSender();
+          notify = send
+            ? await notifyGates(store, { send })
+            : { notified: [], failed: [], skipped: "telegram credentials missing" };
+          if (send) notify.remind = await remindGates(store, { send });
+        }
+        const manifest = tick(store);
+        if (notify) manifest.notify = notify;
+        console.log(JSON.stringify(manifest));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "resume": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        options: { actor: { type: "string" } },
+        allowPositionals: true,
+      });
+      const taskId = positionals[0];
+      if (!taskId) fail("usage: winch resume <taskId> [--actor <name>]");
+      const store = openStore();
+      try {
+        const r = store.task.resumeGate({ id: taskId, actor: values.actor ?? "operator" });
+        if (!r) fail(`not resumable: ${taskId}`, 1);
+        console.log(JSON.stringify(r, null, 2));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "next": {
+      const store = openStore();
+      try {
+        const rows = readyTasks(store, { limit: 20 });
+        console.log(JSON.stringify(
+          rows.map((r) => ({ taskId: r.task.id, title: r.task.title, assigned: r.task.assigned, story: r.story.id, epic: r.epic.id })),
+          null, 2
+        ));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "metrics": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { json: { type: "boolean" }, "window-days": { type: "string" } },
+      });
+      const windowMs = values["window-days"] !== undefined ? Number(values["window-days"]) * 86_400_000 : undefined;
+      const store = openStore();
+      try {
+        const report = failureReport(store, { windowMs });
+        console.log(values.json ? JSON.stringify(report, null, 2) : formatFailureReport(report));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "rollup": {
+      const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
+      const store = openStore();
+      try {
+        const out = { dispatch: dispatchFraction(store), rollup: epicTokenRollup(store) };
+        console.log(values.json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "release-epic": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          epic: { type: "string" },
+          task: { type: "string" },
+          version: { type: "string" },
+          base: { type: "string" },
+        },
+      });
+      if (!values.epic) fail("usage: winch release-epic --epic <id> [--task ID] [--version V] [--base B]");
+      const store = openStore();
+      try {
+        const r = shipRelease(store, {
+          epicId: values.epic,
+          taskId: values.task ?? null,
+          version: values.version ?? null,
+          base: values.base ?? "main",
+        });
+        console.log(r.prUrl);
+      } catch (e) {
+        fail(`release-epic failed: ${e.message ?? e}`, 1);
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "merge-detect": {
+      const { values } = parseArgs({ args: rest, options: { "dry-run": { type: "boolean" } } });
+      const store = openStore();
+      try {
+        const prs = collectPRs({ exec: execFileSync });
+        const summary = applyMergeOutcomes(store, prs, { exec: execFileSync, dryRun: !!values["dry-run"] });
+        console.log(JSON.stringify(summary, null, 2));
+      } catch (e) {
+        fail(`merge-detect failed: ${e.message ?? e}`, 1);
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "check-slugs": {
+      const script = path.join(import.meta.dirname, "check-slugs.mjs");
+      execFileSync(process.execPath, [script, ...rest], { stdio: "inherit" });
+      return;
+    }
+
+    case "gate-notified": {
+      const { positionals } = parseArgs({ args: rest, allowPositionals: true });
+      const taskId = positionals[0];
+      if (!taskId) fail("usage: winch gate-notified <taskId>");
+      const store = openStore();
+      try {
+        const row = markGateNotified(store, taskId);
+        if (!row) fail(`no gate recorded for ${taskId} (not gated, or already notified)`, 1);
+        console.log(JSON.stringify(row, null, 2));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    default:
+      fail(`unknown command: ${cmd}\n\n${USAGE}`);
+  }
+}
