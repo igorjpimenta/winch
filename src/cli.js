@@ -15,6 +15,7 @@ import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
 import { dispatchFraction, epicTokenRollup } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
+import { assertDeclaration } from "./identity.js";
 
 export function resolveDbPath() {
   return process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite");
@@ -27,7 +28,9 @@ function openStore() {
 
 const USAGE = `usage: winch <command>
 
-  mcp                                    serve the backlog tools over MCP stdio
+  mcp --harness H --agent A --session S serve the backlog tools over MCP stdio
+                                         (identity declaration; flags or
+                                          WINCH_HARNESS/WINCH_AGENT_ID/WINCH_SESSION env)
   watch [--notify]                       one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
@@ -54,13 +57,31 @@ export async function runCli(argv) {
       return;
 
     case "mcp": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          harness: { type: "string" },
+          agent: { type: "string" },
+          session: { type: "string" },
+        },
+      });
       const store = openStore();
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),
         error: (...a) => console.error(...a),
       };
-      await startMcpServer({ store, logger });
+      try {
+        // flags win over env; all three layers mandatory either way
+        const base = assertDeclaration({
+          harness: values.harness ?? process.env.WINCH_HARNESS,
+          agent: values.agent ?? process.env.WINCH_AGENT_ID,
+          session: values.session ?? process.env.WINCH_SESSION,
+        });
+        await startMcpServer({ store, base, logger });
+      } catch (err) {
+        fail(String(err?.message ?? err));
+      }
       return;
     }
 
