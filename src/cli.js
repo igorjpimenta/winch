@@ -8,8 +8,7 @@ import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store.js";
 import { readyTasks } from "./ready-queue.js";
-import { tick, telegramSender } from "./watcher.js";
-import { notifyGates, remindGates, markGateNotified } from "./notify.js";
+import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
@@ -30,7 +29,7 @@ const USAGE = `usage: winch <command>
 
   mcp --harness H serve the backlog tools over MCP stdio
                                      (identity: harness declared here, agent+session stamped per call)
-  watch [--notify]                       one watcher tick (JSON manifest on stdout)
+  watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
   metrics [--json] [--window-days N]     per-hop failure report
@@ -38,7 +37,7 @@ const USAGE = `usage: winch <command>
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
   check-slugs [--config <path>]          live-verify registered model slugs
-  gate-notified <taskId>                 record that the operator was pinged`;
+  serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -81,20 +80,9 @@ export async function runCli(argv) {
     }
 
     case "watch": {
-      const { values } = parseArgs({ args: rest, options: { notify: { type: "boolean" } } });
       const store = openStore();
       try {
-        let notify = null;
-        if (values.notify) {
-          const send = telegramSender();
-          notify = send
-            ? await notifyGates(store, { send })
-            : { notified: [], failed: [], skipped: "telegram credentials missing" };
-          if (send) notify.remind = await remindGates(store, { send });
-        }
-        const manifest = tick(store);
-        if (notify) manifest.notify = notify;
-        console.log(JSON.stringify(manifest));
+        console.log(JSON.stringify(tick(store)));
       } finally {
         store.close();
       }
@@ -208,21 +196,6 @@ export async function runCli(argv) {
     case "check-slugs": {
       const script = path.join(import.meta.dirname, "check-slugs.mjs");
       execFileSync(process.execPath, [script, ...rest], { stdio: "inherit" });
-      return;
-    }
-
-    case "gate-notified": {
-      const { positionals } = parseArgs({ args: rest, allowPositionals: true });
-      const taskId = positionals[0];
-      if (!taskId) fail("usage: winch gate-notified <taskId>");
-      const store = openStore();
-      try {
-        const row = markGateNotified(store, taskId);
-        if (!row) fail(`no gate recorded for ${taskId} (not gated, or already notified)`, 1);
-        console.log(JSON.stringify(row, null, 2));
-      } finally {
-        store.close();
-      }
       return;
     }
 

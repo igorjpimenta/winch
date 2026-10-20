@@ -10,13 +10,11 @@
 // Exit code is always 0, including on an empty tick — silence is the calling
 // cron message's decision, not the script's.
 
-import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { createStore } from "./store.js";
 import { readyTasks } from "./ready-queue.js";
-import { notifyGates, remindGates } from "./notify.js";
 
 // An agent this busy should finish before it hears about more work. Keeps the
 // wake queue from stacking claims on an already-loaded assignee — the
@@ -45,16 +43,15 @@ export function tick(store) {
   const blocked = store.db
     .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM tasks WHERE status='blocked' ORDER BY updated_at DESC LIMIT 20")
     .all();
-  // Gated tasks are separated from plain blocks: only gate_type rows owe the
-  // operator a ping, and needs_notify is derived from the events log so the
-  // flag survives restarts and duplicate ticks.
+  // Gated tasks are separated from plain blocks for visibility. Who should
+  // be told about them is a subscriber decision — the events WebSocket
+  // streams every row, and clients track their own seen state.
   const gates = store.db.prepare(`
-    SELECT t.id, t.title, t.gate_type, t.blocked_at, t.assigned,
-           NOT EXISTS (SELECT 1 FROM events ev WHERE ev.task_id=t.id AND ev.note='gate notify') AS needs_notify
+    SELECT t.id, t.title, t.gate_type, t.blocked_at, t.assigned
       FROM tasks t
      WHERE t.status='blocked' AND t.gate_type IS NOT NULL
      ORDER BY t.blocked_at ASC
-  `).all().map((r) => ({ ...r, needsNotify: !!r.needs_notify }));
+  `).all();
   const active = new Map();
   for (const r of store.db.prepare(
     "SELECT assigned, COUNT(*) AS n FROM tasks WHERE status='in_progress' AND assigned IS NOT NULL GROUP BY assigned"
@@ -80,48 +77,12 @@ export function tick(store) {
   };
 }
 
-// Script-side Telegram send (the weekly-stats NOTIFY-node pattern): templated
-// gate text, no model in the loop, credentials read from the gateway service
-// env and never logged.
-export function telegramSender() {
-  const file = path.join(os.homedir(), ".openclaw", "service-env", "ai.openclaw.gateway.env");
-  const keys = { ...process.env };
-  try {
-    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-      const m = line.match(/^(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
-      if (m) keys[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
-    }
-  } catch { /* ambient env only */ }
-  const token = keys.TELEGRAM_BOT_TOKEN;
-  const chat = keys.TELEGRAM_OWNER_CHAT_ID;
-  if (!token || !chat) return null;
-  return async (text) => {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true }),
-    });
-    return res.ok;
-  };
-}
-
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   const dbPath = process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite");
-  const withNotify = process.argv.includes("--notify");
   const store = createStore({ dbPath });
   try {
-    let notify = null;
-    if (withNotify) {
-      const send = telegramSender();
-      notify = send
-        ? await notifyGates(store, { send })
-        : { notified: [], failed: [], skipped: "telegram credentials missing" };
-      if (send) notify.remind = await remindGates(store, { send });
-    }
-    const manifest = tick(store);
-    if (notify) manifest.notify = notify;
-    console.log(JSON.stringify(manifest));
+    console.log(JSON.stringify(tick(store)));
   } finally {
     store.close();
   }
