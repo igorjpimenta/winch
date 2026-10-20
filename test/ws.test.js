@@ -155,6 +155,7 @@ test("kindForEvent: task family maps; gate rows key on note vocabulary or joined
     [{ from_status: null, to_status: "todo", note: "task created" }, null, "task.created"],
     [{ from_status: "todo", to_status: "in_progress", note: "claim" }, null, "task.claimed"],
     [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, null, "task.progressed"],
+    [{ from_status: "in_progress", to_status: "in_progress", note: "session budget exhausted: 40/40 backlog calls; claims halted" }, null, "budget.exhausted"],
     [{ from_status: "todo", to_status: "done", note: "done" }, null, "task.completed"],
     [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, null, "task.released"],
     [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, null, "gate.opened"],

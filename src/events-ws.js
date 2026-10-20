@@ -71,6 +71,7 @@ export function kindForEvent(row, taskRow = null) {
   if (to === "blocked") return gated ? "gate.opened" : "task.blocked";
   if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
   if (from === "todo" && to === "in_progress") return "task.claimed";
+  if (from === "in_progress" && to === "in_progress" && note.startsWith("session budget exhausted")) return "budget.exhausted";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";
   if (to === "cancelled") return "task.cancelled";
