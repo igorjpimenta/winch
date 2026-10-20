@@ -47,11 +47,10 @@ new row to all connected clients as JSON text frames:
   story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
   insert, in id order.
 
-Kinds wired so far (`task.*` family — gate, budget and release kinds land in
-follow-up PRs): `task.created` (birth row, `from` is null), `task.claimed`,
-`task.progressed`, `task.completed`, `task.released`, `task.blocked`,
-`task.cancelled`, plus the `task.updated` fallback no current transition
-should ever hit. History and live rows share one envelope shape.
+Kinds wired so far: `task.*` family plus `gate.opened` /
+`gate.resolved` (note vocabulary first, joined `gate_type` as fallback).
+`budget.exhausted` and `release.shipped` have no store signal yet and are not
+emitted. History and live rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.

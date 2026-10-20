@@ -57,18 +57,19 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
 }
 
-// Stable kind for a stored transition, task family. Pure function of the
-// row: the note vocabulary is the primary signal. Gate rows (note starting
-// "gate open:", or a gate_type on the joined task) intentionally fall through
-// to task.blocked here — gate.opened lands in the follow-up gate PR, and a
-// temporarily coarse name beats a dropped row. Anything not matched is a
-// store change that needs a new kind, not a silent default: every row must
-// stream with a name subscribers can filter on.
-export function kindForEvent(row) {
+// Stable kind for a stored transition. Pure function of the row plus the
+// task's current gate flag — the note vocabulary is the primary signal, the
+// gate_type join covers rows whose note predates the vocabulary. Anything not
+// matched here is a store change that needs a new kind, not a silent default:
+// every row must stream with a name subscribers can filter on.
+export function kindForEvent(row, taskRow = null) {
   const from = row.from_status;
   const to = row.to_status;
   const note = row.note ?? "";
+  const gated = note.startsWith("gate open:") || (taskRow?.gate_type != null && taskRow.gate_type !== "");
   if (from == null) return "task.created";
+  if (to === "blocked") return gated ? "gate.opened" : "task.blocked";
+  if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
   if (from === "todo" && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";
@@ -88,7 +89,7 @@ export function toEventMessage(store, row) {
   const epic = story ? store.epic.get(story.epic_id) : null;
   return {
     type: "event",
-    kind: kindForEvent(row),
+    kind: kindForEvent(row, task),
     id: row.id,
     at: row.at,
     task: task

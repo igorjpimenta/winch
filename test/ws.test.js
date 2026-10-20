@@ -150,19 +150,40 @@ test("history and live rows share one envelope", async () => {
   assert.equal(history.events[0].kind, live.kind);
 });
 
-test("kindForEvent: task family maps; gate rows wait for the gate PR", () => {
+test("kindForEvent: task family maps; gate rows key on note vocabulary or joined gate_type", () => {
   const cases = [
-    [{ from_status: null, to_status: "todo", note: "task created" }, "task.created"],
-    [{ from_status: "todo", to_status: "in_progress", note: "claim" }, "task.claimed"],
-    [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, "task.progressed"],
-    [{ from_status: "todo", to_status: "done", note: "done" }, "task.completed"],
-    [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, "task.released"],
-    [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, "task.blocked"],
-    [{ from_status: "todo", to_status: "cancelled", note: "cut" }, "task.cancelled"],
+    [{ from_status: null, to_status: "todo", note: "task created" }, null, "task.created"],
+    [{ from_status: "todo", to_status: "in_progress", note: "claim" }, null, "task.claimed"],
+    [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, null, "task.progressed"],
+    [{ from_status: "todo", to_status: "done", note: "done" }, null, "task.completed"],
+    [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, null, "task.released"],
+    [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, null, "gate.opened"],
+    [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, { gate_type: "architecture" }, "gate.opened"],
+    [{ from_status: "todo", to_status: "blocked", note: "blocked: reason" }, { gate_type: null }, "task.blocked"],
+    [{ from_status: "blocked", to_status: "todo", note: "gate resume" }, null, "gate.resolved"],
+    [{ from_status: "blocked", to_status: "todo", note: "manual reopen" }, null, "task.released"],
+    [{ from_status: "todo", to_status: "cancelled", note: "cut" }, null, "task.cancelled"],
   ];
-  for (const [row, want] of cases) {
-    assert.equal(kindForEvent(row), want, JSON.stringify(row));
+  for (const [row, task, want] of cases) {
+    assert.equal(kindForEvent(row, task), want, JSON.stringify(row));
   }
+});
+
+test("gate.opened streams with gate context, gate resume resolves it", async () => {
+  const epic = store.epic.create({ title: "E", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const task = store.task.create({ storyId: story.id, title: "G", executionKind: "manual" });
+  store.task.openGate({ id: task.id, gateType: "architecture", reason: "ADR review" });
+  srv = await startEventServer({ store, port: 0, intervalMs: 50 });
+  const ws = await connect(srv.port);
+  const [, history] = await collect(ws, 2);
+  const opened = history.events.find((e) => e.kind === "gate.opened");
+  assert.ok(opened, "history carries the gate opening");
+  assert.equal(opened.task.title, "G");
+  store.task.resumeGate({ id: task.id });
+  const [live] = await collect(ws, 1);
+  assert.equal(live.kind, "gate.resolved");
+  assert.equal(live.task.id, task.id);
 });
 
 test("task.create writes a birth row the stream picks up", async () => {
