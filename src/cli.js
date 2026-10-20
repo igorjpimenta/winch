@@ -28,9 +28,8 @@ function openStore() {
 
 const USAGE = `usage: winch <command>
 
-  mcp --harness H --agent A --session S serve the backlog tools over MCP stdio
-                                         (identity declaration; flags or
-                                          WINCH_HARNESS/WINCH_AGENT_ID/WINCH_SESSION env)
+  mcp --harness H serve the backlog tools over MCP stdio
+                                     (identity: harness declared here, agent+session stamped per call)
   watch [--notify]                       one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
@@ -61,8 +60,6 @@ export async function runCli(argv) {
         args: rest,
         options: {
           harness: { type: "string" },
-          agent: { type: "string" },
-          session: { type: "string" },
         },
       });
       const store = openStore();
@@ -72,11 +69,9 @@ export async function runCli(argv) {
         error: (...a) => console.error(...a),
       };
       try {
-        // flags win over env; all three layers mandatory either way
+        // harness from flag or env; agent/session arrive per call via the hook
         const base = assertDeclaration({
           harness: values.harness ?? process.env.WINCH_HARNESS,
-          agent: values.agent ?? process.env.WINCH_AGENT_ID,
-          session: values.session ?? process.env.WINCH_SESSION,
         });
         await startMcpServer({ store, base, logger });
       } catch (err) {
