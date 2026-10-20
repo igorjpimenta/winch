@@ -17,10 +17,6 @@ import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-// Default serve port. Deliberately outside OpenClaw's 187xx block: 18791 is
-// its browser-control default (live on any gateway host), and 18789 is the
-// gateway itself — a winch default in that range would fail to bind exactly
-// where winch is most likely to run.
 export const DEFAULT_WS_PORT = 38291;
 export const HISTORY_LIMIT = 200;
 

@@ -40,9 +40,9 @@ async function listModels(baseUrl, key) {
   return new Set((body.data ?? []).map((m) => m.id));
 }
 
-// /models can omit ids the endpoint still serves (legacy catalog drift), so an
-// unlisted id is a warning until a 1-token completion proves it dead — only a
-// failed probe is a real mismatch.
+// /models can omit ids the endpoint still serves, so an unlisted id is a
+// warning until a 1-token completion proves it dead — only a failed probe
+// is a real mismatch.
 async function probeServes(t, key, model) {
   const bodies = { "anthropic-messages": {"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
                    "openai-completions": {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1} };
