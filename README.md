@@ -10,9 +10,6 @@ loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, `metrics` / `rollup` report per-hop failures and dispatch
 fractions, and `serve --ws` streams every store event for subscribers to
 handle however they want.
-Extraction provenance: lifted from the openclaw `backlog-system` extension
-(oc-config), PRs #208–#227, test suite carried 67 → 69 tests as of
-extraction.
 
 ## Install / run
 
@@ -67,8 +64,9 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` → `BACKLOG_DB_PATH` →
 `~/.openclaw/backlog/store.sqlite`.
 
-Migration note: sharing the sqlite file with an already-installed openclaw
-backlog-system plugin is safe — WAL mode, and `test/store.race.test.js`
+Migration note: concurrent access to the sqlite file — server, watcher and
+CLI processes at once — is safe under WAL mode, and
+`test/store.race.test.js`
 races 4 real OS processes with independent handles through one claim to prove
 the CAS transaction boundary under WAL contention.
 

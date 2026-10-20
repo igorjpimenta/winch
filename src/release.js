@@ -66,7 +66,7 @@ export function shipRelease(store, { epicId, taskId = null, version = null, base
     "",
     "---",
     marker.join(" · "),
-    "_Opened by backlog-system release automation; merge closes the loop with the merge detector._",
+    "_Opened by winch release automation; merge closes the loop with the merge detector._",
   ].join("\n");
   const prUrl = sh("gh", [
     "pr", "create", "--base", base, "--head", branch,

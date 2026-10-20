@@ -85,7 +85,7 @@ the existing `file://` entries in that file's `plugin` array:
   "plugin": [
     "file:///opt/homebrew/lib/node_modules/@igorjpimenta/doppler-harness/dist/loader.js",
     "file:///opt/homebrew/lib/node_modules/@igorjpimenta/doppler-harness/dist/doppler.js",
-    "file:///Users/herculano/.dev/winch/plugins/opencode/winch-meta.js"
+    "file:///Users/herculano/.dev/job/igorpimenta/winch/plugins/opencode/winch-meta.js"
   ]
 }
 ```
