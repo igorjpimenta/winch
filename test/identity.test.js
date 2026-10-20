@@ -61,6 +61,13 @@ test("resolveIdentity: partial meta names exactly what's missing", () => {
   );
 });
 
+test("resolveIdentity: empty-string meta is unstamped, not an identity", () => {
+  assert.throws(
+    () => resolveIdentity({ base: { harness: "langgraph" }, meta: { winch: { agent: "", session: "" } } }),
+    /unresolved agent and session/
+  );
+});
+
 test("resolveIdentity: meta carrying reserved tokens fails instead of minting", () => {
   assert.throws(
     () => resolveIdentity({ base: BASE, meta: { winch: { agent: "UNKNOWN", session: "s" } } }),
