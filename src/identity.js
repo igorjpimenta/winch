@@ -22,9 +22,8 @@
 // binding, never from tool params, or agents could claim under each other's
 // names.
 
-// The old fallback system minted "unknown" and "instance:<pid>" keys; any
-// value still carrying those tokens is poison from a caller that never
-// declared — missing, empty and reserved are all the same refusal.
+// "unknown" and "instance:*" are never identities: a layer carrying them
+// refuses, whether the value is missing, empty or reserved.
 const RESERVED_KEY = /^(unknown|instance:.*)$/i;
 
 /** Throw unless the triple is complete and carries no reserved token. */
