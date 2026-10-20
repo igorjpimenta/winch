@@ -1,6 +1,6 @@
 // ws.test.js — the event pipe: welcome, history replay, live broadcast to
 // every connected client. Uses the real server and real sockets on an
-// ephemeral port; the payload assertions run against rows the store wrote.
+// ephemeral port; rows stream verbatim, typed kinds land in a follow-up.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { createStore } from "../src/store.js";
-import { startEventServer, kindForEvent } from "../src/events-ws.js";
+import { startEventServer } from "../src/events-ws.js";
 
 let dir, store, srv, sockets;
 
@@ -80,21 +80,17 @@ test("subscriber gets welcome + history, then live rows", async () => {
   const ws = await connect(srv.port);
   const [welcome, history] = await collect(ws, 2);
   assert.equal(welcome.type, "welcome");
-  assert.equal(welcome.payload, "v2");
   assert.equal(typeof welcome.lastEventId, "number");
   assert.equal(history.type, "history");
   assert.ok(history.events.length >= 1);
   const last = history.events[history.events.length - 1];
-  assert.equal(last.kind, "task.completed");
-  assert.equal(last.task.title, "T");
   assert.equal(last.note, "seeded");
 
   seedEvent();
   const [live] = await collect(ws, 1);
   assert.equal(live.type, "event");
-  assert.equal(live.kind, "task.completed");
-  assert.equal(live.task.title, "T");
-  assert.ok(live.id > last.id);
+  assert.equal(live.event.note, "seeded");
+  assert.ok(live.event.id > last.id);
 });
 
 test("every connected client receives the same broadcast", async () => {
@@ -107,8 +103,7 @@ test("every connected client receives the same broadcast", async () => {
   seedEvent();
   const [liveA] = await collect(a, 1);
   const [liveB] = await collect(b, 1);
-  assert.equal(liveA.id, liveB.id);
-  assert.equal(liveA.kind, "task.completed");
+  assert.equal(liveA.event.id, liveB.event.id);
   assert.equal(srv.clients(), 2);
 });
 
@@ -132,38 +127,5 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
   assert.deepEqual(history.events, []);
   seedEvent();
   const [live] = await collect(ws, 1);
-  assert.equal(live.kind, "task.completed");
-  assert.equal(live.task.title, "T");
-});
-
-test("history and live rows share one envelope", async () => {
-  seedEvent();
-  srv = await startEventServer({ store, port: 0, intervalMs: 50 });
-  const ws = await connect(srv.port);
-  const [, history] = await collect(ws, 2);
-  seedEvent();
-  const [live] = await collect(ws, 1);
-  assert.deepEqual(
-    Object.keys(history.events[0]).sort(),
-    Object.keys(live).sort()
-  );
-  assert.equal(history.events[0].kind, live.kind);
-});
-
-test("kindForEvent: every transition family maps, gate vocabulary wins ties", () => {
-  const cases = [
-    [{ from_status: "todo", to_status: "in_progress", note: "claim" }, null, "task.claimed"],
-    [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, null, "task.progressed"],
-    [{ from_status: "todo", to_status: "done", note: "done" }, null, "task.completed"],
-    [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, null, "task.released"],
-    [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, null, "gate.opened"],
-    [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, { gate_type: "architecture" }, "gate.opened"],
-    [{ from_status: "todo", to_status: "blocked", note: "blocked: reason" }, { gate_type: null }, "task.blocked"],
-    [{ from_status: "blocked", to_status: "todo", note: "gate resume" }, null, "gate.resolved"],
-    [{ from_status: "blocked", to_status: "todo", note: "manual reopen" }, null, "task.released"],
-    [{ from_status: "todo", to_status: "cancelled", note: "cut" }, null, "task.cancelled"],
-  ];
-  for (const [row, task, want] of cases) {
-    assert.equal(kindForEvent(row, task), want, JSON.stringify(row));
-  }
+  assert.equal(live.event.note, "seeded");
 });

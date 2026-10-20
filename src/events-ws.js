@@ -1,20 +1,19 @@
-// events-ws.js — typed event pipe over WebSocket. Tails the events table and
-// broadcasts every new row as a typed envelope: a stable kind derived from
-// the stored transition plus the task context the row alone cannot carry.
-// No filtering, no notify logic: what a gate opening means — ping, dashboard
-// card, digest line — is the subscriber's decision.
+// events-ws.js — dumb event pipe over WebSocket. Tails the events table and
+// broadcasts every new row to all connected clients, verbatim. No
+// interpretation, no filtering, no notify logic: a gate opening is just
+// another row, and what it means — ping, dashboard card, digest line — is the
+// subscriber's decision.
 //
-// Wire protocol, payload v2 (JSON text frames, server → client):
-//   {"type":"welcome","payload":"v2","lastEventId":N}   on connect
-//   {"type":"history","events":[{envelope}...]}         backlog, oldest-first
-//   {"type":"event",<envelope fields>}                  one per new row, in id order
+// Wire protocol (JSON text frames, server → client only):
+//   {"type":"welcome","lastEventId":N}    on connect (current max row id)
+//   {"type":"history","events":[...]}     backlog, oldest-first, capped
+//   {"type":"event","event":{...row...}}  one per new row, in id order
 // Clients track their own seen state: reconnecting replays history, so a
 // missed frame costs a re-read, never a lost event. No auth in-process —
 // bind localhost, or put a bearer-checked reverse proxy in front.
 
 import http from "node:http";
 import crypto from "node:crypto";
-import { collectStoryArtifacts } from "./tools.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -57,58 +56,6 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
 }
 
-// Stable kind for a stored transition. Pure function of the row plus the
-// task's current gate flag — the note vocabulary is the primary signal, the
-// gate_type join covers rows whose note predates the vocabulary. Anything not
-// matched here is a store change that needs a new kind, not a silent default:
-// every row must stream with a name subscribers can filter on.
-export function kindForEvent(row, taskRow = null) {
-  const from = row.from_status;
-  const to = row.to_status;
-  const note = row.note ?? "";
-  const gated = note.startsWith("gate open:") || (taskRow?.gate_type != null && taskRow.gate_type !== "");
-  if (to === "blocked") return gated ? "gate.opened" : "task.blocked";
-  if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
-  if (from === "todo" && to === "in_progress") return "task.claimed";
-  if (from === "in_progress" && to === "in_progress") return "task.progressed";
-  if (to === "done") return "task.completed";
-  if (to === "cancelled") return "task.cancelled";
-  if (to === "todo") return "task.released";
-  // budget.exhausted and release.shipped have no store signal yet (the first
-  // lives only in tool responses, the second in epic transitions) — when the
-  // store emits them, they get kinds here.
-  return "task.updated";
-}
-
-// One envelope shape for history and live rows alike: the stored transition
-// plus the task, story and epic context a subscriber would otherwise fetch
-// once per row. Artifacts come from the same collector the claim handoff
-// uses, so both paths agree on what "the artifacts" means.
-export function toEventMessage(store, row) {
-  const task = row.task_id ? store.task.get(row.task_id) : null;
-  const story = task ? store.story.get(task.story_id) : null;
-  const epic = story ? store.epic.get(story.epic_id) : null;
-  return {
-    type: "event",
-    kind: kindForEvent(row, task),
-    id: row.id,
-    at: row.at,
-    task: task
-      ? {
-          id: task.id,
-          title: task.title,
-          story: story ? story.title : null,
-          epic: epic ? epic.title : null,
-          acceptance: story ? story.acceptance : null,
-          artifacts: story ? collectStoryArtifacts(store, story.id) : [],
-          assignee: task.assigned,
-        }
-      : null,
-    actor: row.actor,
-    note: row.note,
-  };
-}
-
 export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.0.1", intervalMs = 1000, logger } = {}) {
   const clients = new Set();
   let cursor = lastEventId(store);
@@ -144,8 +91,8 @@ export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.
     clients.add(socket);
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
-      socket.write(encodeFrame(JSON.stringify({ type: "welcome", payload: "v2", lastEventId: cursor })));
-      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0).map((row) => toEventMessage(store, row)) })));
+      socket.write(encodeFrame(JSON.stringify({ type: "welcome", lastEventId: cursor })));
+      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0) })));
     } catch {
       clients.delete(socket);
     }
@@ -193,7 +140,7 @@ export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.
       const rows = eventsSince(store, cursor);
       if (!rows.length) return;
       cursor = rows[rows.length - 1].id;
-      for (const row of rows) broadcast(toEventMessage(store, row));
+      for (const row of rows) broadcast({ type: "event", event: row });
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }

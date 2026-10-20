@@ -39,19 +39,14 @@ handle however they want.
 
 `winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
 unless `--host` says otherwise) tails the events table and broadcasts every
-new row as a typed envelope plus task context, as JSON text frames:
+new row to all connected clients as JSON text frames:
 
-- `{"type":"welcome","payload":"v2","lastEventId":N}` on connect, then
-  `{"type":"history","events":[{envelope}...]}` (newest 200), then
-- `{"type":"event","kind":"task.completed","id":N,"at":T,"task":{id,title,
-  story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
-  insert, in id order.
+- `{"type":"welcome","lastEventId":N}` on connect, then
+  `{"type":"history","events":[...]}` (newest 200), then
+- `{"type":"event","event":{...row...}}` per insert, in id order.
 
-Kinds (`task.claimed/progressed/completed/released/blocked/cancelled`,
-`gate.opened/resolved`) derive from the stored transition — a row's name is
-stable so subscribers can filter on it; `budget.exhausted` and
-`release.shipped` have no store signal yet and are not emitted. History and
-live rows share one envelope shape.
+Typed kinds and embedded task context land in follow-up work; this surface
+streams rows verbatim.
 
 The server never interprets a row — a gate opening is just another event,
 and reminders, digests and dashboards are subscriber code. Reconnect replays

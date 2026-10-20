@@ -36,7 +36,7 @@ function clampNote(s, max = 2000) {
 
 // Artifacts upstream tasks recorded on this story: addArtifact events plus
 // done-result artifact lists, deduped. Everything read is a store row.
-export function collectStoryArtifacts(store, storyId) {
+function collectStoryArtifacts(store, storyId) {
   const out = new Set();
   for (const t of store.task.list({ storyId })) {
     const evs = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'artifact:%'").all(t.id);
