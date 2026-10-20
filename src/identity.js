@@ -22,10 +22,8 @@
 // binding, never from tool params, or agents could claim under each other's
 // names.
 
-// A layer is usable when it names something: a non-empty string that is
-// neither of the two tokens no key may carry ("unknown", "instance:*").
-// Missing, empty and reserved are one refusal — the outcome is identical
-// (throw), so the check is one predicate, not two code paths.
+// One refusal for missing, empty and reserved layers: same outcome
+// (throw), so one predicate — do not re-split per case.
 function isUsableLayer(v) {
   return (
     typeof v === "string" &&
