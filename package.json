@@ -1,16 +1,21 @@
 {
   "name": "winch",
-  "version": "0.1.0",
+  "version": "2026.10.19",
   "type": "module",
   "license": "MIT",
   "bin": {
     "winch": "bin/winch.js"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/ plugins/"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25 || ^4.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/winch-meta/index.js"
+    ]
   }
 }
