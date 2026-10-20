@@ -5,10 +5,11 @@ dependency DAG — served as an MCP server. Agents claim work with atomic CAS
 claims under per-identity leases (`backlog_next` claims the highest-priority
 ready task for *this* agent, or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
-with `backlog_block` (the watcher pings and reminds over Telegram) and
-resolve them with `backlog_resume`; a release/merge loop (`release-epic`,
-`merge-detect`) carries backlog markers through branch → PR → merge, and
-`metrics` / `rollup` report per-hop failures and dispatch fractions.
+with `backlog_block` and resolve them with `backlog_resume`; a release/merge
+loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
+PR → merge, `metrics` / `rollup` report per-hop failures and dispatch
+fractions, and `serve --ws` streams every store event for subscribers to
+handle however they want.
 Extraction provenance: lifted from the openclaw `backlog-system` extension
 (oc-config), PRs #208–#227, test suite carried 67 → 69 tests as of
 extraction.
@@ -27,7 +28,7 @@ extraction.
 | command                                                       | what it does                                            |
 | ------------------------------------------------------------- | ------------------------------------------------------- |
 | `mcp`                                                         | serve the backlog tools over MCP stdio                  |
-| `watch [--notify]`                                            | one watcher tick (JSON manifest on stdout)              |
+| `watch`                                                       | one watcher tick (JSON manifest on stdout)              |
 | `resume <taskId> [--actor <name>]`                            | resolve a human gate: blocked → todo                    |
 | `next`                                                        | list the current ready queue                            |
 | `metrics [--json] [--window-days N]`                          | per-hop failure report                                  |
@@ -35,7 +36,31 @@ extraction.
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
 | `check-slugs [--config <path>]`                               | live-verify registered model slugs                      |
-| `gate-notified <taskId>`                                      | record that the operator was pinged                     |
+| `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
+
+## Events stream
+
+`winch serve --ws [--port N] [--host H]` (default port 18791, localhost-only
+unless `--host` says otherwise) tails the events table and broadcasts every
+new row as a typed envelope plus task context, as JSON text frames:
+
+- `{"type":"welcome","payload":"v2","lastEventId":N}` on connect, then
+  `{"type":"history","events":[{envelope}...]}` (newest 200), then
+- `{"type":"event","kind":"task.completed","id":N,"at":T,"task":{id,title,
+  story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
+  insert, in id order.
+
+Kinds (`task.claimed/progressed/completed/released/blocked/cancelled`,
+`gate.opened/resolved`) derive from the stored transition — a row's name is
+stable so subscribers can filter on it; `budget.exhausted` and
+`release.shipped` have no store signal yet and are not emitted. History and
+live rows share one envelope shape.
+
+The server never interprets a row — a gate opening is just another event,
+and reminders, digests and dashboards are subscriber code. Reconnect replays
+history, so a missed frame costs a re-read, never a lost event. No auth in
+process: keep the loopback bind, or put a bearer-checked reverse proxy in
+front. Plain HTTP hits get 404.
 
 ## Store
 

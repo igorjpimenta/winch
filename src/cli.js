@@ -14,6 +14,7 @@ import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
 import { dispatchFraction, epicTokenRollup } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
+import { startEventServer } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
 
 export function resolveDbPath() {
@@ -196,6 +197,31 @@ export async function runCli(argv) {
     case "check-slugs": {
       const script = path.join(import.meta.dirname, "check-slugs.mjs");
       execFileSync(process.execPath, [script, ...rest], { stdio: "inherit" });
+      return;
+    }
+
+    case "serve": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          ws: { type: "boolean" },
+          port: { type: "string" },
+          host: { type: "string" },
+        },
+      });
+      if (!values.ws) fail("usage: winch serve --ws [--port N] [--host H]");
+      const store = openStore();
+      const logger = {
+        info: (...a) => console.error(...a),
+        warn: (...a) => console.error(...a),
+        error: (...a) => console.error(...a),
+      };
+      // localhost-only unless asked: the stream carries raw store rows,
+      // so it stays behind the loopback interface or a bearer-checked proxy.
+      const host = values.host ?? "127.0.0.1";
+      const port = values.port ? Number(values.port) : 18791;
+      await startEventServer({ store, port, host, logger });
+      logger.info(`winch: events on ws://${host}:${port} (append-only; subscribers track their own state)`);
       return;
     }
 
