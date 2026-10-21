@@ -3,10 +3,8 @@
 //
 // PRAGMA user_version remains the canonical integer (meta.schema_version is
 // mirrored for pre-ledger stores). Umzug's schema_migrations table records
-// which migration files ran, so future changes are append-only files rather
-// than edits to a switch in store.js.
-//
-// This is not `winch migrate-store` (migrate.js); that copies a database.
+// which migration files ran, so a schema change is a new file, not an edit
+// to the runner.
 
 import { readdirSync } from "node:fs";
 import path from "node:path";
@@ -30,9 +28,8 @@ function metaVersion(db) {
   return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
-// Both counters are read because stores created before this runner wrote
-// only meta.schema_version. The max prevents replaying a migration when one
-// counter lags the other.
+// Read both counters and take the max so a lagging counter cannot replay a
+// migration.
 function currentVersion(db) {
   return Math.max(pragmaVersion(db), metaVersion(db));
 }
