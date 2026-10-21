@@ -7,8 +7,7 @@ ready task for *this* agent, or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
-PR → merge, `metrics` / `rollup` report per-hop failures and dispatch
-fractions, and `serve --ws` streams every store event for subscribers to
+PR → merge, and `serve --ws` streams every store event for subscribers to
 handle however they want.
 
 Winch is harness-agnostic: the server contains no harness-specific code. The
@@ -32,11 +31,8 @@ contract itself is the only integration surface.
 | `watch`                                                       | one watcher tick (JSON manifest on stdout)              |
 | `resume <taskId> [--actor <name>]`                            | resolve a human gate: blocked → todo                    |
 | `next`                                                        | list the current ready queue                            |
-| `metrics [--json] [--window-days N]`                          | per-hop failure report                                  |
-| `rollup [--json]`                                             | dispatch fraction                                       |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
-| `migrate-store --from <path> [--to <path>]`                   | copy a store to `~/.winch/store.sqlite`                 |
 | `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
 
 ## Events stream
