@@ -1,6 +1,6 @@
 // schema.js — the application schema. Drizzle owns the table/column types,
 // constraints, indexes, and relations; drizzle-kit generates the migration
-// SQL in drizzle/ from this file. store.js queries these tables directly.
+// SQL in .migrations/ from this file. store.js queries these tables directly.
 
 import { sql } from "drizzle-orm";
 import {

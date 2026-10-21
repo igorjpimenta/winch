@@ -1,5 +1,5 @@
 // db.js — the better-sqlite3 connection and Drizzle client. Schema changes
-// are generated into drizzle/ from src/schema.js and applied here on open.
+// are generated into .migrations/ from src/schema.js and applied here on open.
 
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";

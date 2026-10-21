@@ -1,6 +1,6 @@
 // store.js — backlog data layer over better-sqlite3 + Drizzle.
 //
-// Schema lives in src/schema.js; drizzle-kit generates the SQL in drizzle/
+// Schema lives in src/schema.js; drizzle-kit generates the SQL in .migrations/
 // and db.js applies it on open. The query bodies use the same better-sqlite3
 // connection; JSON columns hold capabilities + execution_args opaquely.
 //
