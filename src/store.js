@@ -1,135 +1,33 @@
-// store.js — sqlite-backed backlog data layer.
+// store.js — backlog data layer over better-sqlite3 + Drizzle.
 //
-// Schema lives inline (single init.sql equivalent); migrations tracked via
-// PRAGMA user_version. node:sqlite (built-in, Node 22+) — zero npm deps.
-//
-// Tables: epics, stories, tasks, deps, meta. JSON columns hold capability
-// arrays + execution_args opaquely. Statuses validated via CHECK constraints
-// so bad inputs fail fast at the DB layer rather than silently persisting.
+// Schema lives in src/schema.js; drizzle-kit generates the SQL in drizzle/
+// and db.js applies it on open. The query bodies use the same better-sqlite3
+// connection; JSON columns hold capabilities + execution_args opaquely.
 //
 // Concurrency: WAL mode enabled. CLI and gateway processes can read/write the
 // same DB concurrently; sqlite serializes the writes.
 
-import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
 import { newEpicId, newStoryId, newTaskId, classifyId } from "./ids.js";
 import { resolveDbPath } from "./paths.js";
-
-const SCHEMA_VERSION = 6;
+import { openDatabase } from "./db.js";
+import {
+  EPIC_STATUSES,
+  STORY_STATUSES,
+  TASK_STATUSES,
+  EXECUTION_KINDS,
+  ITEM_KINDS,
+} from "./schema.js";
 
 // Tasks that exhaust this many sweeper re-releases escalate to 'blocked';
 // claim/release and sweepExpired both read it.
 export const MAX_ATTEMPTS = 3;
 
-export const EPIC_STATUSES   = ["idea", "planned", "in_progress", "done", "cancelled"];
-export const STORY_STATUSES  = ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
-export const TASK_STATUSES   = ["todo", "in_progress", "done", "blocked", "cancelled"];
-export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
-export const ITEM_KINDS      = ["epic", "story", "task"];
+export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };
 
 const STORY_TERMINAL = new Set(["done", "cancelled"]);
 const TASK_TERMINAL  = new Set(["done", "cancelled"]);
 const EPIC_TERMINAL  = new Set(["done", "cancelled"]);
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS epics (
-  id          TEXT PRIMARY KEY,
-  title       TEXT NOT NULL,
-  description TEXT,
-  acceptance  TEXT,
-  status      TEXT NOT NULL CHECK (status IN ('idea','planned','in_progress','done','cancelled')),
-  owner_team  TEXT,
-  priority    INTEGER NOT NULL DEFAULT 50,
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL,
-  closed_at   INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS stories (
-  id           TEXT PRIMARY KEY,
-  epic_id      TEXT NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
-  title        TEXT NOT NULL,
-  description  TEXT,
-  acceptance   TEXT,
-  status       TEXT NOT NULL CHECK (status IN ('backlog','ready','in_progress','review','done','blocked','cancelled')),
-  size         TEXT,
-  priority     INTEGER NOT NULL DEFAULT 50,
-  assigned     TEXT,
-  capabilities TEXT,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  closed_at    INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-  id               TEXT PRIMARY KEY,
-  story_id         TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
-  title            TEXT NOT NULL,
-  description      TEXT,
-  status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
-  execution_kind   TEXT NOT NULL CHECK (execution_kind IN ('pipeclaw','subagent','cli','gate','manual')),
-  execution_args   TEXT NOT NULL DEFAULT '{}',
-  assigned         TEXT,
-  capabilities     TEXT,
-  flow_id          TEXT,
-  task_run_id      TEXT,
-  claim_expires_at INTEGER,
-  lease_seconds    INTEGER,
-  last_heartbeat   INTEGER,
-  attempt_count    INTEGER NOT NULL DEFAULT 0,
-  gate_type        TEXT,
-  blocked_at       INTEGER,
-  result_summary   TEXT,
-  created_at       INTEGER NOT NULL,
-  updated_at       INTEGER NOT NULL,
-  claimed_at       INTEGER,
-  closed_at        INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id     TEXT NOT NULL,
-  from_status TEXT,
-  to_status   TEXT NOT NULL,
-  actor       TEXT,
-  note        TEXT,
-  session_ref TEXT,
-  at          INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS deps (
-  from_id    TEXT NOT NULL,
-  from_kind  TEXT NOT NULL CHECK (from_kind IN ('epic','story','task')),
-  to_id      TEXT NOT NULL,
-  to_kind    TEXT NOT NULL CHECK (to_kind   IN ('epic','story','task')),
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (from_id, to_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_stories_epic              ON stories(epic_id);
-CREATE INDEX IF NOT EXISTS idx_stories_status_assigned   ON stories(status, assigned);
-CREATE INDEX IF NOT EXISTS idx_tasks_story               ON tasks(story_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned     ON tasks(status, assigned);
-CREATE INDEX IF NOT EXISTS idx_events_task               ON events(task_id);
-CREATE INDEX IF NOT EXISTS idx_deps_from                 ON deps(from_id);
-CREATE INDEX IF NOT EXISTS idx_deps_to                   ON deps(to_id);
-
-CREATE TABLE IF NOT EXISTS session_budgets (
-  session_key   TEXT PRIMARY KEY,
-  agent_id      TEXT NOT NULL,
-  tool_calls    INTEGER NOT NULL DEFAULT 0,
-  limit_calls   INTEGER NOT NULL,
-  exhausted_at  INTEGER,
-  empty_wakes   INTEGER NOT NULL DEFAULT 0,
-  updated_at    INTEGER NOT NULL
-);
-`;
 
 function now() { return Date.now(); }
 function jsonOut(v) { return v == null ? null : JSON.stringify(v); }
@@ -150,88 +48,7 @@ function rowTask(r) {
 
 export function createStore({ dbPath, logger } = {}) {
   const finalPath = dbPath || resolveDbPath();
-  const dir = path.dirname(finalPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-  const db = new DatabaseSync(finalPath);
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA foreign_keys = ON;");
-  db.exec("PRAGMA busy_timeout = 5000;");
-  db.exec(SCHEMA);
-
-  // The graph-flow→pipeclaw rename changed code, not CHECK constraints:
-  // CREATE TABLE IF NOT EXISTS never rewrites a legacy table's vocabulary, so
-  // a store born before the rename rejects every pipeclaw-kind insert. Detect
-  // the stale constraint and rebuild the table (renaming stored values too) —
-  // otherwise execution_kind='pipeclaw' is uninsertable on migrated stores.
-  const tasksSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get()?.sql ?? "";
-  if (tasksSql.includes("'graph_flow'")) {
-    const oldCols = db.prepare("PRAGMA table_info(tasks)").all().map((r) => r.name);
-    const keep = oldCols.map((c) => `"${c}"`).join(", ");
-    // Rename in-flight: inserting the legacy 'graph_flow' value first would
-    // violate the rebuilt table's CHECK before any UPDATE could fix it.
-    const sel = oldCols.map((c) => (c === "execution_kind"
-      ? `CASE WHEN "execution_kind"='graph_flow' THEN 'pipeclaw' ELSE "execution_kind" END`
-      : `"${c}"`)).join(", ");
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.exec(`
-        CREATE TABLE tasks_rebuild (
-          id               TEXT PRIMARY KEY,
-          story_id         TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
-          title            TEXT NOT NULL,
-          description      TEXT,
-          status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
-          execution_kind   TEXT NOT NULL CHECK (execution_kind IN ('pipeclaw','subagent','cli','gate','manual')),
-          execution_args   TEXT NOT NULL DEFAULT '{}',
-          assigned         TEXT,
-          capabilities     TEXT,
-          flow_id          TEXT,
-          task_run_id      TEXT,
-          claim_expires_at INTEGER,
-          result_summary   TEXT,
-          created_at       INTEGER NOT NULL,
-          updated_at       INTEGER NOT NULL,
-          claimed_at       INTEGER,
-          closed_at        INTEGER
-        );
-        INSERT INTO tasks_rebuild (${keep})
-        SELECT ${sel} FROM tasks;
-        DROP TABLE tasks;
-        ALTER TABLE tasks_rebuild RENAME TO tasks;
-        CREATE INDEX IF NOT EXISTS idx_tasks_story         ON tasks(story_id);
-        CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned ON tasks(status, assigned);
-      `);
-      db.exec("COMMIT");
-      logger?.info?.("backlog: repaired stale graph_flow execution_kind CHECK (table rebuilt, values renamed)");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-  }
-
-  // v1 → v2 migration. The ALTERs are PRAGMA-guarded so a v2 store reopens
-  // clean; events table/index already exist via SCHEMA above. Existing rows
-  // survive untouched.
-  const versionRow = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
-  const storedVersion = versionRow ? Number(versionRow.value) : 0;
-  if (storedVersion < SCHEMA_VERSION) {
-    const cols = new Set(db.prepare("PRAGMA table_info(tasks)").all().map((c) => c.name));
-    if (!cols.has("lease_seconds"))  db.exec("ALTER TABLE tasks ADD COLUMN lease_seconds INTEGER");
-    if (!cols.has("last_heartbeat")) db.exec("ALTER TABLE tasks ADD COLUMN last_heartbeat INTEGER");
-    if (!cols.has("attempt_count"))  db.exec("ALTER TABLE tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
-    if (!cols.has("gate_type"))      db.exec("ALTER TABLE tasks ADD COLUMN gate_type TEXT");
-    if (!cols.has("blocked_at"))     db.exec("ALTER TABLE tasks ADD COLUMN blocked_at INTEGER");
-    const sbCols = new Set(db.prepare("PRAGMA table_info(session_budgets)").all().map((c) => c.name));
-    if (!sbCols.has("empty_wakes"))  db.exec("ALTER TABLE session_budgets ADD COLUMN empty_wakes INTEGER NOT NULL DEFAULT 0");
-    const evCols = new Set(db.prepare("PRAGMA table_info(events)").all().map((c) => c.name));
-    if (!evCols.has("session_ref"))  db.exec("ALTER TABLE events ADD COLUMN session_ref TEXT");
-    db.prepare("INSERT INTO meta(key,value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .run(String(SCHEMA_VERSION));
-  }
-
-  const liveVersion = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value;
-  logger?.info?.(`backlog: store ready at ${finalPath} (schema_version=${liveVersion})`);
+  const { sqlite: db, orm } = openDatabase({ dbPath: finalPath, logger });
 
   // ────────────────────────────────────────────────────────────── EPICS
   const epicApi = {
@@ -683,6 +500,7 @@ export function createStore({ dbPath, logger } = {}) {
 
   return {
     db,
+    orm,
     path: finalPath,
     sessionBudget: sessionBudgetApi,
     epic:  epicApi,

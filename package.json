@@ -7,10 +7,17 @@
     "winch": "bin/winch.js"
   },
   "scripts": {
-    "test": "node --test test/ plugins/"
+    "test": "node --test test/ plugins/",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4",
     "zod": "^3.25 || ^4.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11"
   }
 }

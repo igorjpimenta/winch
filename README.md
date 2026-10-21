@@ -16,8 +16,9 @@ contract itself is the only integration surface.
 
 ## Install / run
 
-- Node 22+ (uses `node:sqlite`; runtime deps are the MCP SDK and its `zod`
-  peer only).
+- Node 22+. Runtime deps are the MCP SDK, its `zod` peer, Drizzle ORM, and
+  `better-sqlite3` (a native module; prebuilt binaries cover common platforms,
+  otherwise a C++ toolchain is needed).
 - `npm install`, then `./bin/winch.js <command>` — or `npm link` for a global
   `winch`.
 - `winch mcp` serves the five backlog tools over MCP stdio (stdout is
@@ -67,7 +68,15 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` → `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
-Migration note: concurrent access to the sqlite file — server, watcher and
+Schema lives in `src/schema.js` as Drizzle tables. `npm run db:generate`
+turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
+migrations on open, and `npm run db:migrate` does the same explicitly for a
+deploy. The files are plain SQL and may be edited before they are applied for
+data backfills, triggers, or renames; an applied migration is a snapshot, so
+append a new one instead of editing it. `npx drizzle-kit generate --custom
+--name=<name>` creates an empty SQL file for a hand-written data migration.
+
+Concurrency note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and
 `test/store.race.test.js`
 races 4 real OS processes with independent handles through one claim to prove
