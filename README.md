@@ -108,3 +108,25 @@ so model-supplied meta cannot impersonate an agent. A call whose agent or
 session is unstamped fails loudly instead of minting a default key. The contract, the
 per-dimension table and the harness adapter setup snippets
 live in [plugins/README.md](plugins/README.md).
+
+## Configuration
+
+Tuning knobs are declared the way the harness is — and none of them is
+required. Precedence per knob: per-call `_meta.winch.config` > constructor
+`{ config }` (`createStore`, `--config JSON|PATH` on `mcp`/`serve`/`watch`)
+> `WINCH_*` env > code default. An undeclared server behaves exactly like
+the old hardcoded one. Malformed values refuse (bad key named) at startup
+for construction config, per call for meta overlay; unknown explicit keys
+refuse as likely typos, unknown meta keys are ignored for forward compat.
+
+| knob | env | default |
+|---|---|---|
+| Claim lease | `WINCH_LEASE_SECONDS` | 1800 (30 min) |
+| Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
+| Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` (`"24h,72h"`, `ms\|s\|m\|h\|d` suffixes) | 24h / 72h |
+| WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
+| Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
+| Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
+| Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
+| Note caps (progress / result / reason / artifact) | `WINCH_NOTE_{PROGRESS,RESULT,REASON,ARTIFACT}_LIMIT` | 2000 / 4000 / 1000 / 500 |
+| Artifacts per done | `WINCH_MAX_ARTIFACTS` | 50 |
