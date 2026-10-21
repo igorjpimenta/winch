@@ -2,7 +2,6 @@
 // needs the DB resolves it through paths.js: WINCH_DB, else
 // ~/.winch/store.sqlite.
 
-import path from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store.js";
@@ -38,7 +37,6 @@ const USAGE = `usage: winch <command>
   merge-detect [--dry-run]               apply merged/closed PR outcomes
   migrate-store --from <path> [--to <path>]
                                          copy a store to ~/.winch
-  check-slugs --config <path>            live-verify registered model slugs
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
@@ -206,12 +204,6 @@ export async function runCli(argv) {
       } catch (e) {
         fail(`migrate-store failed: ${e.message ?? e}`, 1);
       }
-      return;
-    }
-
-    case "check-slugs": {
-      const script = path.join(import.meta.dirname, "check-slugs.mjs");
-      execFileSync(process.execPath, [script, ...rest], { stdio: "inherit" });
       return;
     }
 
