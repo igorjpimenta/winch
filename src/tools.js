@@ -139,7 +139,7 @@ export function createToolHandlers(store, logger) {
         properties: {
           taskId: { type: "string", description: "Task id (TASK-…)." },
           reason: { type: "string", description: "Why the task cannot proceed." },
-          gateType: { type: "string", description: "Human gate being opened (roadmap|architecture|release|custom) — stamps gate_type for the notify/resume cycle." },
+          gateType: { type: "string", description: "Human gate being opened (roadmap|architecture|release|custom) — stamps gate_type; resume clears it." },
           blockedBy: {
             type: "object",
             additionalProperties: false,
