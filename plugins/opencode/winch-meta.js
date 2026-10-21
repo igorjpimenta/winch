@@ -11,11 +11,11 @@
 // before the wire. The winch server reads extra._meta (request params._meta;
 // src/mcp.js), which this hook cannot reach.
 //
-// Identity therefore travels the env channel on the MCP server entry —
-// WINCH_HARNESS=opencode, WINCH_AGENT_ID=<agent> — with session degrading
-// server-side to instance:<pid> (one MCP process per opencode instance).
-// Env is operator configuration, not model-controlled per-call input, so the
-// overwrite property a hook-based adapter gets holds here by construction.
+// Identity therefore has no per-call channel on opencode. The MCP entry can
+// declare the harness (WINCH_HARNESS=opencode), but agent and session must be
+// stamped per call and this hook cannot reach request params. Unstamped calls
+// are refused rather than attributed to a configured default, so opencode
+// uses winch read-only until a meta-capable hook exists.
 //
 // The export stays a registered no-op so the hook point exists for an
 // opencode version that grows request-level meta mutation; see plugins/README.

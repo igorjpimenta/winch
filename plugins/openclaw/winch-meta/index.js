@@ -5,8 +5,9 @@ import { buildWinchMeta } from "./meta.js";
 // a full replacement of event.params with _meta.winch set unconditionally on
 // every winch tool call — whatever _meta the model supplied is overwritten
 // before the request reaches the server, so model-supplied meta cannot
-// impersonate an agent. No resolvable session/agent returns undefined and the
-// call degrades to the server's env resolution.
+// impersonate an agent. No resolvable session/agent returns undefined; the
+// call reaches the server unstamped and is refused — identity has no env
+// fallback.
 export default definePluginEntry({
   id: "winch-meta",
   name: "Winch Meta",

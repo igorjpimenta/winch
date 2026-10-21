@@ -39,7 +39,7 @@ test("event.runId is read when ctx carries neither sessionKey nor runId", () => 
   assert.equal(out.params._meta.winch.agent, null);
 });
 
-test("no resolvable session or agent: undefined (degrade to env, never fabricate)", () => {
+test("no resolvable session or agent: undefined (server refuses the unstamped call)", () => {
   assert.equal(buildWinchMeta({ toolName: "mcp__winch__backlog_next", params: {} }, {}), undefined);
 });
 

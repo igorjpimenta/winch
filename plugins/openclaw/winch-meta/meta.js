@@ -9,9 +9,10 @@ export function isWinchTool(name) {
 
 // sessionKey is the live session; runId is the run that issued the call —
 // the same ctx fields browser-lease's ownerFor resolves from. A null
-// dimension is "no opinion": the server falls it through to env/fallback
-// (src/identity.js treats null as a miss). No resolvable dimension at all
-// returns undefined so the call degrades to env instead of fabricated meta.
+// dimension stays null in the stamp: src/identity.js treats it as a miss and
+// refuses the call, so a half-stamped call fails loudly instead of minting a
+// default key. With no resolvable dimension at all the hook returns
+// undefined and the call proceeds unstamped, for the server to refuse.
 export function buildWinchMeta(event, ctx) {
   const toolName = event?.toolName ?? ctx?.toolName;
   if (!isWinchTool(toolName)) return undefined;

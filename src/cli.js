@@ -71,8 +71,16 @@ export async function runCli(argv) {
         options: {
           harness: { type: "string" },
           config: { type: "string" },
+          agent: { type: "string" },
+          session: { type: "string" },
         },
       });
+      if (values.agent !== undefined || values.session !== undefined) {
+        fail(
+          "winch mcp: --agent/--session are per-call identity, not construction flags. " +
+            "Remove them from the MCP entry; the companion plugin stamps agent and session on every call."
+        );
+      }
       const store = openStore(loadConfig(values));
       const logger = {
         info: (...a) => console.error(...a),
