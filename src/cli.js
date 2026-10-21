@@ -1,6 +1,6 @@
 // cli.js — winch subcommands over the shared store. Every subcommand that
-// needs the DB resolves it through paths.js: WINCH_DB, else BACKLOG_DB_PATH,
-// else ~/.winch/store.sqlite.
+// needs the DB resolves it through paths.js: WINCH_DB, else
+// ~/.winch/store.sqlite.
 
 import path from "node:path";
 import { parseArgs } from "node:util";

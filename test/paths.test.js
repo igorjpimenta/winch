@@ -24,11 +24,11 @@ test("WINCH_DB wins over both the default and the legacy path", (t) => {
   assert.equal(resolveDbPath({ home, env: { WINCH_DB: "/tmp/explicit.sqlite" } }), "/tmp/explicit.sqlite");
 });
 
-test("BACKLOG_DB_PATH remains an explicit override", (t) => {
+test("BACKLOG_DB_PATH no longer overrides the default", (t) => {
   const home = tempHome(t);
   assert.equal(
     resolveDbPath({ home, env: { BACKLOG_DB_PATH: "/tmp/legacy-env.sqlite" } }),
-    "/tmp/legacy-env.sqlite"
+    defaultDbPath(home)
   );
 });
 
