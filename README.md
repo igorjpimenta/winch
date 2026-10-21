@@ -59,8 +59,7 @@ structure alone. Notes never classify anything: they are free text and can
 change, so pre-kind rows keep exactly the meanings they streamed with — an
 append-only log keeps its history.
 The closed catalog lives in `src/events-ws.js` and is named here by family
-only, so the two cannot drift. Spend metering is retired: every call that
-reaches a handler runs, and there are no budget kinds. History and live
+only, so the two cannot drift. History and live
 rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface

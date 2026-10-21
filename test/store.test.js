@@ -198,7 +198,7 @@ test("0001 adds events.kind without rewriting history", (t) => {
   t.after(() => store.close());
   assert.ok(store.db.prepare("PRAGMA table_info(events)").all().some((c) => c.name === "kind"));
   assert.ok(!store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_budgets'").get(),
-    "0002 drops the retired table");
+    "0002 drops session_budgets");
   // no backfill: pre-kind rows keep NULL and map by structure, as streamed
   const kinds = store.db.prepare("SELECT kind FROM events ORDER BY id").all().map((r) => r.kind);
   assert.deepEqual(kinds, [null, null]);

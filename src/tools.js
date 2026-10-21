@@ -13,9 +13,9 @@ import { readyTasks } from "./ready-queue.js";
 import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 
-// No spend metering here: every call that reaches a handler runs. Claim
-// pacing is the store's lease plus the watcher's per-agent routing cap;
-// semantic stop stays backlog_done.
+// Every call that reaches a handler runs. Claim pacing is the store's
+// lease plus the watcher's per-agent routing cap; semantic stop stays
+// backlog_done.
 function ok(text, details) {
   return { content: [{ type: "text", text }], details };
 }

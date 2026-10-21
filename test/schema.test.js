@@ -30,7 +30,7 @@ test("fresh store creates the schema and records the Drizzle migration", (t) => 
   assert.ok(tables(store.db).includes("tasks"));
   assert.ok(tables(store.db).includes("events"));
   assert.ok(tables(store.db).includes("deps"));
-  assert.ok(!tables(store.db).includes("session_budgets"), "spend metering retired");
+  assert.ok(!tables(store.db).includes("session_budgets"), "no spend ledger table");
   assert.equal(ledger(store.db).length, 3);
 });
 
