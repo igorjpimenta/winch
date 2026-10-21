@@ -68,7 +68,12 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` → `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
-Migration note: concurrent access to the sqlite file — server, watcher and
+Schema migrations live in `src/migrations.js` and are tracked by
+`PRAGMA user_version` (mirrored to `meta.schema_version`); a store newer than
+the build refuses to open instead of guessing. `winch migrate-store` is the
+separate data-copy command for moving a store between paths.
+
+Concurrency note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and
 `test/store.race.test.js`
 races 4 real OS processes with independent handles through one claim to prove
