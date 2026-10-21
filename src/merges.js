@@ -94,12 +94,10 @@ export function collectPRs({ exec, cwd = process.cwd(), limit = 100 } = {}) {
 
 const invokedDirectly = process.argv[1]?.endsWith("merges.js");
 if (invokedDirectly) {
-  const path = await import("node:path");
-  const os = await import("node:os");
   const { execFileSync } = await import("node:child_process");
   const { createStore } = await import("./store.js");
   const dryRun = process.argv.includes("--dry-run");
-  const store = createStore({ dbPath: process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite") });
+  const store = createStore();
   try {
     const prs = collectPRs({ exec: execFileSync });
     const summary = applyMergeOutcomes(store, prs, { exec: execFileSync, dryRun });

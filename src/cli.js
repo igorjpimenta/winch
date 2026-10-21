@@ -1,9 +1,8 @@
 // cli.js — winch subcommands over the shared store. Every subcommand that
-// needs the DB resolves it the same way: WINCH_DB, else BACKLOG_DB_PATH,
-// else the default store under the user's home.
+// needs the DB resolves it through paths.js: WINCH_DB, else
+// ~/.winch/store.sqlite.
 
 import path from "node:path";
-import os from "node:os";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store.js";
@@ -16,10 +15,10 @@ import { dispatchFraction, epicTokenRollup } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
+import { resolveDbPath } from "./paths.js";
+import { migrateStore } from "./migrate.js";
 
-export function resolveDbPath() {
-  return process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite");
-}
+export { resolveDbPath };
 
 // stdout is the data channel for every subcommand; diagnostics go to stderr.
 function openStore() {
@@ -37,6 +36,8 @@ const USAGE = `usage: winch <command>
   rollup [--json]                        dispatch fraction + epic token rollup
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
+  migrate-store [--from <path>] [--to <path>]
+                                         copy the legacy store to ~/.winch
   check-slugs [--config <path>]          live-verify registered model slugs
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
@@ -190,6 +191,20 @@ export async function runCli(argv) {
         fail(`merge-detect failed: ${e.message ?? e}`, 1);
       } finally {
         store.close();
+      }
+      return;
+    }
+
+    case "migrate-store": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { from: { type: "string" }, to: { type: "string" } },
+      });
+      try {
+        const result = migrateStore({ from: values.from, to: values.to });
+        console.log(JSON.stringify(result, null, 2));
+      } catch (e) {
+        fail(`migrate-store failed: ${e.message ?? e}`, 1);
       }
       return;
     }

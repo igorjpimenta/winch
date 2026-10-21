@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { newEpicId, newStoryId, newTaskId, classifyId } from "./ids.js";
+import { resolveDbPath } from "./paths.js";
 
 const SCHEMA_VERSION = 6;
 
@@ -148,7 +149,7 @@ function rowTask(r) {
 }
 
 export function createStore({ dbPath, logger } = {}) {
-  const finalPath = dbPath || path.join(process.env.HOME || ".", ".openclaw", "backlog", "store.sqlite");
+  const finalPath = dbPath || resolveDbPath();
   const dir = path.dirname(finalPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 

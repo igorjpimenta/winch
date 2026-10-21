@@ -59,12 +59,10 @@ export function formatFailureReport(r) {
 
 const invokedDirectly = process.argv[1]?.endsWith("metrics.js");
 if (invokedDirectly) {
-  const path = await import("node:path");
-  const os = await import("node:os");
   const { createStore } = await import("./store.js");
   const argv = process.argv.slice(2);
   const wIdx = argv.indexOf("--window-days");
-  const store = createStore({ dbPath: process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite") });
+  const store = createStore();
   try {
     const windowMs = wIdx >= 0 ? Number(argv[wIdx + 1]) * 86_400_000 : undefined;
     const report = failureReport(store, { windowMs });
