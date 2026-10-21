@@ -1,47 +1,13 @@
-// migrations.js — Umzug owns the migration ledger; this module supplies the
-// node:sqlite context, the schema_migrations storage, and the version guard.
-//
-// PRAGMA user_version remains the canonical integer (meta.schema_version is
-// mirrored for pre-ledger stores). Umzug's schema_migrations table records
-// which migration files ran, so a schema change is a new file, not an edit
-// to the runner.
+// migrations.js — Umzug runs the schema files in src/migrations/ and records
+// what ran in schema_migrations. A fresh store runs the initial migration;
+// a ledger row unknown to this build refuses to open.
 
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Umzug } from "umzug";
 
-export const SCHEMA_VERSION = 6;
-
 const MIGRATIONS_DIR = path.join(import.meta.dirname, "migrations");
-const BASELINE_NAME = "0001-consolidated-v1-v6";
-
-function pragmaVersion(db) {
-  const n = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-  return Number.isInteger(n) && n >= 0 ? n : 0;
-}
-
-function metaVersion(db) {
-  const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'").get();
-  if (!table) return 0;
-  const n = Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value ?? 0);
-  return Number.isInteger(n) && n >= 0 ? n : 0;
-}
-
-// Read both counters and take the max so a lagging counter cannot replay a
-// migration.
-function currentVersion(db) {
-  return Math.max(pragmaVersion(db), metaVersion(db));
-}
-
-function writeVersion(db, version) {
-  db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  db.exec(`PRAGMA user_version = ${version}`);
-  db.prepare(
-    "INSERT INTO meta(key,value) VALUES('schema_version', ?) " +
-      "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).run(String(version));
-}
 
 class SqliteStorage {
   constructor(db) {
@@ -116,13 +82,6 @@ async function loadMigrations() {
 }
 
 export async function applyMigrations(db, { logger } = {}) {
-  const from = currentVersion(db);
-  if (from > SCHEMA_VERSION) {
-    throw new Error(
-      `winch: store schema v${from} is newer than this build (v${SCHEMA_VERSION}); upgrade winch`
-    );
-  }
-
   const migrations = await loadMigrations();
   const known = new Set(migrations.map((m) => m.name));
   const storage = new SqliteStorage(db);
@@ -135,13 +94,6 @@ export async function applyMigrations(db, { logger } = {}) {
     );
   }
 
-  // A pre-ledger store already carries the consolidated schema as a version
-  // counter. Record the baseline so Umzug does not replay it; the file is
-  // idempotent anyway, but the ledger should tell the truth.
-  if (from >= SCHEMA_VERSION && !executed.includes(BASELINE_NAME)) {
-    await storage.logMigration({ name: BASELINE_NAME });
-  }
-
   const log = logger ?? { info() {}, warn() {}, error() {} };
   const umzug = new Umzug({
     migrations,
@@ -151,10 +103,5 @@ export async function applyMigrations(db, { logger } = {}) {
   });
 
   const applied = await umzug.up();
-  writeVersion(db, SCHEMA_VERSION);
-  return {
-    from,
-    to: SCHEMA_VERSION,
-    applied: applied.map((m) => m.name),
-  };
+  return { applied: applied.map((m) => m.name) };
 }

@@ -1,13 +1,7 @@
-// schema.js — the current logical schema. Every statement is idempotent so
-// a fresh store and an old store converge on the same tables and indexes;
-// migrations.js owns the versioned repair steps on top.
+// schema.js — the current logical schema. The initial migration applies it
+// to a fresh store; later changes are new files in src/migrations/.
 
 export const SCHEMA = `
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS epics (
   id          TEXT PRIMARY KEY,
   title       TEXT NOT NULL,

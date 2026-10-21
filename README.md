@@ -68,11 +68,8 @@ DB path resolution: `WINCH_DB` → `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
 Schema migrations are Umzug migrations in `src/migrations/`, recorded in
-`schema_migrations`; `PRAGMA user_version` is the canonical integer and
-`meta.schema_version` mirrors it for pre-ledger stores. A store newer than the
-build, or one with unknown migration rows, refuses to open instead of
-guessing. `winch migrate-store` is the separate data-copy command for moving a
-store between paths.
+`schema_migrations`. A fresh store runs the initial migration; a store with
+unknown migration rows refuses to open instead of guessing.
 
 Concurrency note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and

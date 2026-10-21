@@ -4,7 +4,7 @@
 // files and tracks the ledger. node:sqlite (built-in, Node 22+) — zero
 // native deps.
 //
-// Tables: epics, stories, tasks, deps, meta. JSON columns hold capability
+// Tables: epics, stories, tasks, deps, events, session_budgets. JSON columns hold capability
 // arrays + execution_args opaquely. Statuses validated via CHECK constraints
 // so bad inputs fail fast at the DB layer rather than silently persisting.
 //
@@ -66,8 +66,7 @@ export async function createStore({ dbPath, logger } = {}) {
     throw err;
   }
 
-  const liveVersion = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value;
-  logger?.info?.(`backlog: store ready at ${finalPath} (schema_version=${liveVersion})`);
+  logger?.info?.(`backlog: store ready at ${finalPath}`);
 
   // ────────────────────────────────────────────────────────────── EPICS
   const epicApi = {
