@@ -25,28 +25,45 @@ construction.
 
 ## openclaw
 
+Winch is an MCP server package, not an openclaw extension package. The only
+extension here is the companion hook under `plugins/openclaw/winch-meta/`,
+installed as its own directory. Do not place the repo root in
+`~/.openclaw/extensions/` and do not install it with
+`openclaw plugins install git:<url>@<ref>`: the root carries no plugin
+manifest, and a git install lands in a managed checkout keyed by the ref
+(`git-<sha256("git:<url>@<ref>")[:16]>/repo`), so the MCP entry would pin a
+path that moves on every tag bump.
+
 Setup verified against the existing extension wiring: every loaded extension
 id is listed in `openclaw.json` → `plugins.allow` (e.g. `browser-lease`), and
 extensions are discovered from `~/.openclaw/extensions/<id>/` — openclaw.json
 carries no explicit extensions path; the browser-lease extension lives at
 `~/.openclaw/extensions/browser-lease/` with its own `openclaw.plugin.json`.
 
-1. Install the plugin: copy or symlink `plugins/openclaw/winch-meta/` →
+1. Install the server once with npm (`npm install -g .` or `npm link`) so
+   `winch` is a stable PATH entry.
+2. Install the hook: copy or symlink `plugins/openclaw/winch-meta/` →
    `~/.openclaw/extensions/winch-meta/`.
-2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
+3. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
 
 ```json
 "mcp": {
   "servers": {
-    "winch": { "command": "winch", "args": ["mcp"] }
+    "winch": {
+      "command": "winch",
+      "args": ["mcp", "--harness", "openclaw"]
+    }
   }
 },
 "plugins": {
   "allow": [ "...existing entries...", "winch-meta" ]
 }
 ```
+
+`--harness` is the one construction flag; `--agent` and `--session` are not
+accepted there because the hook stamps them on every call.
 
 Calls arrive as `mcp__winch__backlog_next` etc.; the hook filters on the
 `winch` substring and stamps meta from `ctx.sessionKey` → `ctx.runId` (the

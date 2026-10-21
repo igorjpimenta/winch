@@ -17,10 +17,15 @@ extraction.
 
 - Node 22+ (uses `node:sqlite`; runtime deps are the MCP SDK and its `zod`
   peer only).
-- `npm install`, then `./bin/winch.js <command>` — or `npm link` for a global
-  `winch`.
-- `winch mcp` serves the five backlog tools over MCP stdio (stdout is
-  JSON-RPC; logs go to stderr).
+- `npm install`, then `./bin/winch.js <command>` — or `npm install -g .`
+  (`npm link` also works) for a stable `winch` on PATH. Point MCP clients at
+  that command, never at a ref-keyed openclaw git checkout: the managed
+  directory name is a hash of `git:<url>@<ref>`, so it changes on every tag
+  bump.
+- `winch mcp --harness <name>` (or `WINCH_HARNESS`) serves the five backlog
+  tools over MCP stdio (stdout is JSON-RPC; logs go to stderr). The harness
+  is the only declared dimension; agent and session are stamped per call by
+  the companion plugin — see [plugins/README.md](plugins/README.md).
 
 ## CLI
 
