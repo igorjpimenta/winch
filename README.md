@@ -48,16 +48,17 @@ new row to all connected clients as JSON text frames:
   story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
   insert, in id order.
 
-Kinds wired so far: the `task.*` family plus the gate family —
-`gate.opened`, `gate.resolved`, `gate.dissolved` — each declared by its
-producer at write time and stored on the row (`openGate`, `resumeGate`,
+Kinds on the wire come in two families — `task.*` for task lifecycle and
+`gate.*` for gate lifecycle — each declared by its producer at write time
+and stored on the row's `kind` column (`openGate`, `resumeGate`,
 merge-detect's dissolve path; human gates open exclusively through
 `openGate`). The emitter feeds the stored kind straight through; otherwise
 a row maps by transition structure alone. Notes never classify anything:
 they are free text and can change, so pre-kind rows keep exactly the
 meanings they streamed with — an append-only log keeps its history.
-Budget and release kinds land in follow-up PRs. History and live rows
-share one envelope shape.
+The closed catalog lives in `src/events-ws.js` and is named here by family
+only, so the two cannot drift. Budget and release kinds land in follow-up
+PRs. History and live rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.

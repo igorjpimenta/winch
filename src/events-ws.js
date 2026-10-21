@@ -57,8 +57,11 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
 }
 
-// Stable kind for a stored transition. The stored `kind` wins — producers
-// declare it at write time (see insertEvent callers and kindForUpdate) and
+// Stable kind for a stored transition. The closed catalog lives here, in
+// one place — task.*: created, claimed, progressed, completed, released,
+// blocked, cancelled, updated; gate.*: opened, resolved, dissolved — and
+// the README names it by family only so the two cannot drift. The stored
+// `kind` wins — producers declare it at write time (see insertEvent callers and kindForUpdate) and
 // the emitter feeds it straight through. Otherwise the row maps by
 // transition structure alone: notes are free text and can change, so no
 // branch here may read note content — a renamed note must never reclassify
