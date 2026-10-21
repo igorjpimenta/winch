@@ -285,3 +285,13 @@ test("handle refuses an unknown-flavoured identity instead of minting a key", as
   // and nothing was charged or claimed in the attempt
   assert.equal(store.task.list({ status: "todo" }).length, 1);
 });
+
+test("backlog_block with gateType opens through openGate and stamps the kind", async () => {
+  const { task } = seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
+  const res = await call("backlog_block", { taskId: task.id, reason: "ADR review", gateType: "architecture" });
+  assert.equal(res.details.status, "ok");
+  assert.equal(store.task.get(task.id).gate_type, "architecture");
+  const row = store.db.prepare("SELECT kind, note FROM events WHERE task_id=? AND to_status='blocked'").get(task.id);
+  assert.equal(row.kind, "gate.opened", "declared by the producer, not inferred");
+  assert.match(row.note, /^gate open: architecture — ADR review/);
+});

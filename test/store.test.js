@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore, MAX_ATTEMPTS } from "../src/store.js";
+import Database from "better-sqlite3";
 
 function tempDb() {
   const dir = mkdtempSync(path.join(tmpdir(), "backlog-store-"));
@@ -163,4 +164,59 @@ test("task.update: actor/note optional — defaults to system", (t) => {
   const ev = eventsFor(store, task.id)[1];
   assert.equal(ev.actor, "system");
   assert.equal(ev.note, null);
+});
+
+test("0001 backfill stamps provable gate.opened rows; sweeper and plain rows stay out", (t) => {
+  const { dir, dbPath } = tempDb();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const mkTask = (db, id, status, gate) =>
+    db.prepare("INSERT INTO tasks(id,story_id,title,status,execution_kind,created_at,updated_at,gate_type) VALUES (?,?,?,?,?,?,?,?)")
+      .run(id, "STORY-1", id, status, "manual", 1, 2, gate);
+  const mkEvent = (db, taskId, from, to, actor, note, at) =>
+    db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES (?,?,?,?,?,?)")
+      .run(taskId, from, to, actor, note, at);
+
+  // legacy-shaped database: kind column never existed here
+  {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
+        status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
+        gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+        from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, at INTEGER NOT NULL);`);
+    mkTask(db, "TASK-G", "blocked", "release");   // gate still held
+    mkEvent(db, "TASK-G", "in_progress", "blocked", "a", "blocked: need signoff", 2000);
+    mkTask(db, "TASK-R", "todo", null);            // gate opened, then resumed
+    mkEvent(db, "TASK-R", "in_progress", "blocked", "a", "blocked: vendor", 3000);
+    mkEvent(db, "TASK-R", "blocked", "todo", "op", "gate resume", 4000);
+    mkTask(db, "TASK-S", "todo", null);            // sweeper row, later resumed by operator
+    mkEvent(db, "TASK-S", "todo", "blocked", "sweeper", "blocked: max attempts", 5000);
+    mkEvent(db, "TASK-S", "blocked", "todo", "op", "gate resume", 6000);
+    mkTask(db, "TASK-P", "blocked", null);         // plain block, no testimony
+    mkEvent(db, "TASK-P", "in_progress", "blocked", "a", "blocked: waiting", 7000);
+    mkEvent(db, "TASK-V", "todo", "blocked", "sys", "gate open: roadmap", 8000);
+    db.close();
+  }
+
+  // forge a 0000-only ledger so open applies exactly the new migration:
+  // the migrator skips journal entries at or below the latest created_at
+  {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC NOT NULL);
+      INSERT INTO __drizzle_migrations(hash, created_at) VALUES ('0000-ledger', 1792607841256);`);
+    db.close();
+  }
+
+  const store = createStore({ dbPath });
+  t.after(() => store.close());
+  const kind = (taskId, at) =>
+    store.db.prepare("SELECT kind FROM events WHERE task_id=? AND at=?").get(taskId, at).kind;
+  assert.equal(kind("TASK-G", 2000), "gate.opened", "still-held gate: latest entry testified by current state");
+  assert.equal(kind("TASK-R", 3000), "gate.opened", "resumed gate: opening testified by its resume");
+  assert.equal(kind("TASK-R", 4000), "gate.resolved", "vocabulary-exact resume");
+  assert.equal(kind("TASK-S", 5000), null, "sweeper row never a gate, even with a later resume");
+  assert.equal(kind("TASK-S", 6000), "gate.resolved", "the resume note still declares a resume");
+  assert.equal(kind("TASK-P", 7000), null, "plain block with no testimony stays unstamped");
+  assert.equal(kind("TASK-V", 8000), "gate.opened", "vocabulary-exact opening");
 });

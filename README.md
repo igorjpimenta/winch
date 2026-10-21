@@ -48,11 +48,15 @@ new row to all connected clients as JSON text frames:
   story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
   insert, in id order.
 
-Kinds wired so far (`task.*` family — gate, budget and release kinds land in
-follow-up PRs): `task.created` (birth row, `from` is null), `task.claimed`,
-`task.progressed`, `task.completed`, `task.released`, `task.blocked`,
-`task.cancelled`, plus the `task.updated` fallback no current transition
-should ever hit. History and live rows share one envelope shape.
+Kinds wired so far: the `task.*` family plus the gate family —
+`gate.opened`, `gate.resolved`, `gate.dissolved` — each declared by its
+producer at write time and stored on the row (`openGate`, `resumeGate`,
+merge-detect's dissolve path; human gates open exclusively through
+`openGate`). The wire reads the stored kind; vocabulary/transition matching
+survives only as backfill for pre-kind rows. The old gate_type join is gone:
+it read mutable current state to classify immutable history, so migration
+`0001` stamps provable gate.opened rows instead. Budget and release kinds
+land in follow-up PRs. History and live rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.

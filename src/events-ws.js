@@ -57,18 +57,24 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
 }
 
-// Stable kind for a stored transition, task family. Pure function of the
-// row: the note vocabulary is the primary signal. Gate rows (note starting
-// "gate open:", or a gate_type on the joined task) intentionally fall through
-// to task.blocked here — gate.opened lands in the follow-up gate PR, and a
-// temporarily coarse name beats a dropped row. Anything not matched is a
-// store change that needs a new kind, not a silent default: every row must
-// stream with a name subscribers can filter on.
+// Stable kind for a stored transition. The stored `kind` wins — producers
+// declare it at write time (see insertEvent callers and kindForUpdate), so
+// the wire reads the contract instead of inferring it. The rules below run
+// only for pre-kind rows and exist solely as backfill over immutable note
+// and transition text: the gate_type join is gone, retired by the migration
+// that stamps provable gate.opened rows, because a join against mutable
+// current state cannot classify immutable history. A mismatch between a
+// stored kind and these rules means the producer lied, not that the rules
+// need widening.
 export function kindForEvent(row) {
+  if (row.kind) return row.kind;
   const from = row.from_status;
   const to = row.to_status;
   const note = row.note ?? "";
   if (from == null) return "task.created";
+  if (to === "blocked" && note.startsWith("gate open:")) return "gate.opened";
+  if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
+  if (from === "blocked" && to === "todo" && note.startsWith("gate dissolved")) return "gate.dissolved";
   if (from === "todo" && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";

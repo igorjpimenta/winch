@@ -287,9 +287,16 @@ export function createToolHandlers(store, logger) {
       if (task.status !== "in_progress" && task.status !== "todo") return err(`${task.id} is ${task.status}; blocking applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
       try {
         const reason = clampNote(args.reason, 1000);
-        const patch = { status: "blocked", actor: agentId, note: `blocked: ${reason}` };
-        if (args?.gateType) patch.gateType = args.gateType;
-        const updated = store.task.update(task.id, patch);
+        let updated;
+        if (args?.gateType) {
+          // Human gates open through openGate — the one path that stamps
+          // gate.opened rows — never the generic update. Plain blocks keep
+          // the generic path and its task.blocked kind.
+          updated = store.task.openGate({ id: task.id, gateType: args.gateType, reason, actor: agentId });
+          if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
+        } else {
+          updated = store.task.update(task.id, { status: "blocked", actor: agentId, note: `blocked: ${reason}` });
+        }
         let depResult = null;
         if (args?.blockedBy) {
           const r = addDep(store, task.id, args.blockedBy.id);
