@@ -43,7 +43,15 @@ new row to all connected clients as JSON text frames:
 
 - `{"type":"welcome","lastEventId":N}` on connect, then
   `{"type":"history","events":[...]}` (newest 200), then
-- `{"type":"event","event":{...row...}}` per insert, in id order.
+- `{"type":"event","kind":"task.completed","id":N,"at":T,"task":{id,title,
+  story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
+  insert, in id order.
+
+Kinds wired so far (`task.*` family — gate, budget and release kinds land in
+follow-up PRs): `task.created` (birth row, `from` is null), `task.claimed`,
+`task.progressed`, `task.completed`, `task.released`, `task.blocked`,
+`task.cancelled`, plus the `task.updated` fallback no current transition
+should ever hit. History and live rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.

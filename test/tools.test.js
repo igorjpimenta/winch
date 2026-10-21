@@ -47,9 +47,10 @@ test("backlog_next claims the task for the session's agent, with handoff payload
   assert.equal(body.task.assigned, "atlas");
   assert.equal(body.handoff.acceptance_criteria, "AC-1");
   const ev = store.db.prepare("SELECT * FROM events WHERE task_id=?").all(task.id);
-  assert.equal(ev.length, 1);
-  assert.equal(ev[0].note, "claim");
-  assert.equal(ev[0].session_ref, "test:atlas:sess-1");
+  assert.equal(ev.length, 2);
+  assert.equal(ev[0].note, "task created");
+  assert.equal(ev[1].note, "claim");
+  assert.equal(ev[1].session_ref, "test:atlas:sess-1");
   assert.ok(story.id);
 });
 

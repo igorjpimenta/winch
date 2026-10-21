@@ -343,10 +343,18 @@ export function createStore({ dbPath, logger } = {}) {
       const ek = executionKind || "manual";
       if (!TASK_STATUSES.includes(s))     throw new Error(`invalid task status: ${s}`);
       if (!EXECUTION_KINDS.includes(ek))  throw new Error(`invalid execution_kind: ${ek}`);
-      db.prepare(`
-        INSERT INTO tasks(id, story_id, title, description, status, execution_kind, execution_args, capabilities, assigned, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(taskId, storyId, title, description ?? null, s, ek, JSON.stringify(executionArgs ?? {}), jsonOut(capabilities), assigned ?? null, t, t);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(`
+          INSERT INTO tasks(id, story_id, title, description, status, execution_kind, execution_args, capabilities, assigned, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(taskId, storyId, title, description ?? null, s, ek, JSON.stringify(executionArgs ?? {}), jsonOut(capabilities), assigned ?? null, t, t);
+        insertEvent({ taskId, fromStatus: null, toStatus: s, actor: null, note: "task created", at: t });
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
       return taskApi.get(taskId);
     },
     get(id) {

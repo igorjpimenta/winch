@@ -148,11 +148,14 @@ test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release
   assert.equal(claimed.lease_seconds, 1800);
 
   const evs = eventsFor(store, task.id);
-  assert.equal(evs.length, 1);
-  assert.equal(evs[0].from_status, "todo");
-  assert.equal(evs[0].to_status, "in_progress");
-  assert.equal(evs[0].actor, "agent-a");
-  assert.equal(evs[0].note, "claim");
+  assert.equal(evs.length, 2);
+  assert.equal(evs[0].from_status, null);
+  assert.equal(evs[0].to_status, "todo");
+  assert.equal(evs[0].note, "task created");
+  assert.equal(evs[1].from_status, "todo");
+  assert.equal(evs[1].to_status, "in_progress");
+  assert.equal(evs[1].actor, "agent-a");
+  assert.equal(evs[1].note, "claim");
 
   assert.equal(store.task.claim({ id: task.id, agentId: "agent-b" }), null);
   assert.equal(store.task.claim({ id: task.id, agentId: "agent-a" }), null);
@@ -194,8 +197,8 @@ test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) 
   }
 
   const evs = eventsFor(store, task.id);
-  // 3 claims + 3 sweep-releases + 1 escalation
-  assert.equal(evs.length, 1 + 2 * MAX_ATTEMPTS);
+  // birth + 3 claims + 3 sweep-releases + 1 escalation
+  assert.equal(evs.length, 2 + 2 * MAX_ATTEMPTS);
   const sweeps = evs.filter((e) => e.note === "sweeper");
   assert.equal(sweeps.length, MAX_ATTEMPTS);
   for (const e of sweeps) {
@@ -231,7 +234,7 @@ test("heartbeat: advances last_heartbeat only for the assigned in_progress agent
   assert.equal(store.task.heartbeat(task.id, "agent-b"), null, "wrong agent rejected");
 
   const evCount = eventsFor(store, task.id).length;
-  assert.equal(evCount, 1, "heartbeats write no event rows");
+  assert.equal(evCount, 2, "heartbeats write no event rows (birth + claim only)");
 });
 
 // ────────────────────────────────────────────────────── UPDATE EVENTS
@@ -241,23 +244,23 @@ test("task.update: status change writes an event; other patches do not", (t) => 
   const { task } = seedHierarchy(store);
 
   store.task.update(task.id, { description: "clarified" });
-  assert.equal(eventsFor(store, task.id).length, 0);
+  assert.equal(eventsFor(store, task.id).length, 1, "birth row only");
 
   const done = store.task.update(task.id, { status: "done", actor: "agent-a", note: "finished" });
   assert.equal(done.status, "done");
   const evs = eventsFor(store, task.id);
-  assert.equal(evs.length, 1);
-  assert.equal(evs[0].from_status, "todo");
-  assert.equal(evs[0].to_status, "done");
-  assert.equal(evs[0].actor, "agent-a");
-  assert.equal(evs[0].note, "finished");
+  assert.equal(evs.length, 2);
+  assert.equal(evs[1].from_status, "todo");
+  assert.equal(evs[1].to_status, "done");
+  assert.equal(evs[1].actor, "agent-a");
+  assert.equal(evs[1].note, "finished");
 });
 
 test("task.update: actor/note optional — defaults to system", (t) => {
   const store = makeStore(t);
   const { task } = seedHierarchy(store);
   store.task.update(task.id, { status: "blocked" });
-  const ev = eventsFor(store, task.id)[0];
+  const ev = eventsFor(store, task.id)[1];
   assert.equal(ev.actor, "system");
   assert.equal(ev.note, null);
 });
