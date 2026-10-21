@@ -7,13 +7,13 @@
 export function failureReport(store, { now = Date.now(), windowMs = 30 * 24 * 3_600_000 } = {}) {
   const since = now - windowMs;
 
-  // system design: coordination machinery gave up — sweeper escalations and
-  // latched budget halts are both "the substrate refused the work".
+  // system design: coordination machinery gave up — sweeper escalations are
+  // "the substrate refused the work".
   const systemDesign = store.db.prepare(`
     SELECT ev.id, ev.task_id AS taskId, ev.note, ev.at
       FROM events ev
      WHERE ev.at >= ?
-       AND (ev.note = 'blocked: max attempts' OR ev.note LIKE 'session budget exhausted%' OR ev.note LIKE 'agent budget exhausted%')
+       AND (ev.note = 'blocked: max attempts')
      ORDER BY ev.at DESC
   `).all(since);
 

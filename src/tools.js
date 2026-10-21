@@ -13,20 +13,9 @@ import { readyTasks } from "./ready-queue.js";
 import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 
-// Session budgets count backlog tool calls per sessionKey, not model turns.
-// The agent rollup sums every session a single agent ever charged, so a fresh
-// wake cannot respawn a full allowance — the latch that stops a runaway
-// session, plus the rollup that stops a runaway campaign. Latching is one-way:
-// exhausted sessions halt new claims mid-session by design. If the runner ever
-// grows an agent-loop turn cap, wire budgets there and retire this counter.
-export const SESSION_TOOL_BUDGETS = { atlas: 120, scout: 40, forge: 60, builder: 120, lens: 60, herald: 40 };
-const DEFAULT_SESSION_BUDGET = 60;
-// Campaign allowance per agent, defaulting to a multiple of the session
-// budget: a campaign that needs more than ~5 sessions of calls is itself the
-// runaway the session latch cannot see. Per-agent overrides win.
-export const AGENT_TOOL_BUDGETS = {};
-const DEFAULT_AGENT_BUDGET_MULTIPLE = 5;
-
+// No spend metering here: every call that reaches a handler runs. Claim
+// pacing is the store's lease plus the watcher's per-agent routing cap;
+// semantic stop stays backlog_done.
 function ok(text, details) {
   return { content: [{ type: "text", text }], details };
 }
@@ -69,12 +58,6 @@ function renderReceiverPrompt({ task, story, epic, artifacts }) {
 }
 
 export function createToolHandlers(store, logger) {
-  function chargeBudget(identity) {
-    const limit = SESSION_TOOL_BUDGETS[identity.agent] ?? DEFAULT_SESSION_BUDGET;
-    const agentLimit = AGENT_TOOL_BUDGETS[identity.agent] ?? limit * DEFAULT_AGENT_BUDGET_MULTIPLE;
-    return store.sessionBudget.charge({ sessionKey: identitySessionKey(identity), agentId: identity.agent, limit, agentLimit });
-  }
-
   const TOOL_DEFS = [
     {
       name: "backlog_next",
@@ -182,37 +165,9 @@ export function createToolHandlers(store, logger) {
     async backlog_next(args, identity) {
       const agentId = identity.agent;
       const sessionKey = identitySessionKey(identity);
-      const budget = chargeBudget(identity);
-      if (budget.exhausted || budget.agentExhausted) {
-        // Latch marker goes on the wire even with no current task: NULL
-        // task_id + NULL statuses is the taskless shape, matched by note
-        // vocabulary ahead of every status rule.
-        // Session exhaustion keeps its exact note and guidance (existing
-        // tests and the metrics bucket match on the prefix); agent-only
-        // exhaustion gets its own vocabulary. When both trip, the session
-        // note wins — the agent is ending this session either way.
-        const sessionScope = budget.exhausted;
-        const note = sessionScope
-          ? `session budget exhausted: ${budget.tool_calls}/${budget.limit_calls} backlog calls; claims halted`
-          : `agent budget exhausted: ${budget.agentToolCalls}/${budget.agentLimitCalls} backlog calls across sessions; claims halted`;
-        const cur = store.db.prepare(
-          "SELECT id FROM tasks WHERE assigned=? AND status='in_progress' ORDER BY claimed_at DESC LIMIT 1"
-        ).get(agentId);
-        store.db.prepare(
-          "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).run(cur?.id ?? null, cur ? "in_progress" : null, cur ? "in_progress" : null, agentId, note, Date.now());
-        const guidance = sessionScope
-          ? "Session budget exhausted — finish the current task with backlog_done, then end the session with a final summary. Do not retry claiming."
-          : "Agent budget exhausted across sessions — finish the current task with backlog_done, then end the session. Further wakes will also halt: this needs an operator, not a retry.";
-        return ok(
-          JSON.stringify({ exhausted: true, scope: sessionScope ? "session" : "agent", toolCalls: budget.tool_calls, limit: budget.limit_calls, agentToolCalls: budget.agentToolCalls, agentLimit: budget.agentLimitCalls, guidance }),
-          { status: "budget_exhausted", scope: sessionScope ? "session" : "agent", agentId, toolCalls: budget.tool_calls, limit: budget.limit_calls }
-        );
-      }
       try {
         const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities, limit: 5 });
         if (candidates.length === 0) {
-          store.sessionBudget.recordEmptyWake(budget.session_key);
           return ok(JSON.stringify({ empty: true }), { status: "empty", agentId });
         }
         if (args?.dryRun) {
@@ -240,7 +195,6 @@ export function createToolHandlers(store, logger) {
             { status: "ok", agentId, taskId: claimed.id }
           );
         }
-        store.sessionBudget.recordEmptyWake(budget.session_key);
         return ok(JSON.stringify({ empty: true, raced: true }), { status: "empty", reason: "all_candidates_raced", agentId });
       } catch (e) {
         logger?.warn?.(`backlog_next failed: ${e?.message}`);
@@ -250,7 +204,6 @@ export function createToolHandlers(store, logger) {
 
     async backlog_update(args, identity) {
       const agentId = identity.agent;
-      const budget = chargeBudget(identity);
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_update: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress — claim it with backlog_next first.`, "not_claimed", { taskId: task.id });
@@ -271,7 +224,7 @@ export function createToolHandlers(store, logger) {
           ).run(task.id, task.status, task.status, agentId, noteParts.join(" | "), Date.now());
         }
         const fresh = store.task.get(task.id);
-        return ok(JSON.stringify({ ok: true, task: { id: fresh.id, status: fresh.status, last_heartbeat: fresh.last_heartbeat, attempt_count: fresh.attempt_count } }), { status: "ok", taskId: task.id, agentId, budget: { toolCalls: budget.tool_calls, limit: budget.limit_calls, exhausted: budget.exhausted } });
+        return ok(JSON.stringify({ ok: true, task: { id: fresh.id, status: fresh.status, last_heartbeat: fresh.last_heartbeat, attempt_count: fresh.attempt_count } }), { status: "ok", taskId: task.id, agentId });
       } catch (e) {
         return err(`backlog_update failed: ${e?.message}`, "error");
       }
@@ -279,7 +232,6 @@ export function createToolHandlers(store, logger) {
 
     async backlog_done(args, identity) {
       const agentId = identity.agent;
-      const budget = chargeBudget(identity);
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
@@ -290,7 +242,7 @@ export function createToolHandlers(store, logger) {
         const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
         const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done" });
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
-        return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, result_summary: updated.result_summary } }), { status: "ok", taskId: task.id, agentId, budget: { toolCalls: budget.tool_calls, limit: budget.limit_calls, exhausted: budget.exhausted } });
+        return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, result_summary: updated.result_summary } }), { status: "ok", taskId: task.id, agentId });
       } catch (e) {
         return err(`backlog_done failed: ${e?.message}`, "error");
       }
@@ -298,7 +250,6 @@ export function createToolHandlers(store, logger) {
 
     async backlog_block(args, identity) {
       const agentId = identity.agent;
-      const budget = chargeBudget(identity);
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
       if (task.assigned && task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
@@ -326,7 +277,7 @@ export function createToolHandlers(store, logger) {
           }
         }
         logger?.warn?.(`backlog: ${agentId} blocked ${task.id} (${reason})`);
-        return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status }, dep: depResult }), { status: "ok", taskId: task.id, agentId, dep: depResult, budget: { toolCalls: budget.tool_calls, limit: budget.limit_calls, exhausted: budget.exhausted } });
+        return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status }, dep: depResult }), { status: "ok", taskId: task.id, agentId, dep: depResult });
       } catch (e) {
         return err(`backlog_block failed: ${e?.message}`, "error");
       }

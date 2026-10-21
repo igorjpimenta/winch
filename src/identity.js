@@ -9,7 +9,7 @@
 //
 // Nothing here defaults, ever: an unnamed harness refuses construction, and
 // an unstamped call refuses execution. A key that cannot say which harness
-// and which of its calls it belongs to would poison claims and budgets.
+// and which of its calls it belongs to would poison claims.
 
 // A usable layer names something: non-empty, and neither of the two tokens
 // no key may carry ("unknown", "instance:*").
@@ -90,7 +90,7 @@ export function resolveIdentity({ meta, base }) {
   };
 }
 
-// Budget/claim key: one slot per harness×agent×session triple. The mint
+// Claim key: one slot per harness×agent×session triple. The mint
 // point is guarded too, so a key the constructor and resolver both missed
 // still fails here — nowhere mints a poisoned key.
 export function identitySessionKey(id) {

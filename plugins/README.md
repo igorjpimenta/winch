@@ -1,6 +1,6 @@
 # winch companion plugins — the identity contract
 
-The winch server keys every budget and claim to three dimensions
+The winch server keys every claim to three dimensions
 (`src/identity.js`), and only one of them is declared: the **harness**,
 named at construction (`--harness` / `WINCH_HARNESS`). The **agent** and
 **session** of each call arrive with the call itself — the calling harness's
@@ -10,9 +10,9 @@ default. Unstamped agent/session fail the call; nothing defaults, ever.
 
 | dimension | construction                     | per-call source                          | who reads                                   |
 | --------- | -------------------------------- | ---------------------------------------- | ------------------------------------------- |
-| harness   | `--harness` / `WINCH_HARNESS` (**required**) | `_meta.winch.harness` if stamped (never overrides a matching declaration) | winch server: logs, `harness:agent:session` budget key |
+| harness   | `--harness` / `WINCH_HARNESS` (**required**) | `_meta.winch.harness` if stamped (never overrides a matching declaration) | winch server: logs, `harness:agent:session` claim key |
 | agent     | — (never declared)               | plugin: ctx `agentId`                    | winch server: claim attribution, per-agent caps |
-| session   | — (never declared)               | plugin: ctx `sessionKey`/`runId`         | winch server: budget/claim key |
+| session   | — (never declared)               | plugin: ctx `sessionKey`/`runId`         | winch server: claim key |
 
 **Anti-impersonation:** the openclaw plugin's `before_tool_call` hook runs
 before MCP dispatch and returns a full replacement of `event.params` with

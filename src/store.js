@@ -15,7 +15,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { newEpicId, newStoryId, newTaskId, classifyId } from "./ids.js";
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 6;
 
 // Tasks that exhaust this many sweeper re-releases escalate to 'blocked';
 // claim/release and sweepExpired both read it.
@@ -93,12 +93,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE TABLE IF NOT EXISTS events (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  -- NULL task_id is session/agent-scoped markers (budget latch with no
-  -- current task): the only taskless rows the store writes. Consumers must
-  -- handle a null task, as the WS envelope already does.
-  task_id     TEXT,
+  task_id     TEXT NOT NULL,
   from_status TEXT,
-  to_status   TEXT,
+  to_status   TEXT NOT NULL,
   actor       TEXT,
   note        TEXT,
   session_ref TEXT,
@@ -121,16 +118,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned     ON tasks(status, assign
 CREATE INDEX IF NOT EXISTS idx_events_task               ON events(task_id);
 CREATE INDEX IF NOT EXISTS idx_deps_from                 ON deps(from_id);
 CREATE INDEX IF NOT EXISTS idx_deps_to                   ON deps(to_id);
-
-CREATE TABLE IF NOT EXISTS session_budgets (
-  session_key   TEXT PRIMARY KEY,
-  agent_id      TEXT NOT NULL,
-  tool_calls    INTEGER NOT NULL DEFAULT 0,
-  limit_calls   INTEGER NOT NULL,
-  exhausted_at  INTEGER,
-  empty_wakes   INTEGER NOT NULL DEFAULT 0,
-  updated_at    INTEGER NOT NULL
-);
 `;
 
 function now() { return Date.now(); }
@@ -212,40 +199,6 @@ export function createStore({ dbPath, logger } = {}) {
     }
   }
 
-  // v6 → v7 migration: events.task_id becomes nullable so session/agent
-  // budgets can write a latch marker when the agent holds no task. Rebuild
-  // is PRAGMA-guarded — fresh v7 stores already match, only legacy stores
-  // pay for the rewrite. to_status relaxes alongside: a marker row asserts
-  // no transition, so NULL/NULL with a note prefix is the honest shape.
-  const evTaskId = db.prepare("PRAGMA table_info(events)").all().find((c) => c.name === "task_id");
-  if (evTaskId && evTaskId.notnull) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.exec(`
-        CREATE TABLE events_rebuild (
-          id          INTEGER PRIMARY KEY AUTOINCREMENT,
-          task_id     TEXT,
-          from_status TEXT,
-          to_status   TEXT,
-          actor       TEXT,
-          note        TEXT,
-          session_ref TEXT,
-          at          INTEGER NOT NULL
-        );
-        INSERT INTO events_rebuild (id, task_id, from_status, to_status, actor, note, session_ref, at)
-        SELECT id, task_id, from_status, to_status, actor, note, session_ref, at FROM events;
-        DROP TABLE events;
-        ALTER TABLE events_rebuild RENAME TO events;
-        CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
-      `);
-      db.exec("COMMIT");
-      logger?.info?.("backlog: events.task_id nullable (table rebuilt for taskless budget markers)");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-  }
-
   // v1 → v2 migration. The ALTERs are PRAGMA-guarded so a v2 store reopens
   // clean; events table/index already exist via SCHEMA above. Existing rows
   // survive untouched.
@@ -258,8 +211,6 @@ export function createStore({ dbPath, logger } = {}) {
     if (!cols.has("attempt_count"))  db.exec("ALTER TABLE tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
     if (!cols.has("gate_type"))      db.exec("ALTER TABLE tasks ADD COLUMN gate_type TEXT");
     if (!cols.has("blocked_at"))     db.exec("ALTER TABLE tasks ADD COLUMN blocked_at INTEGER");
-    const sbCols = new Set(db.prepare("PRAGMA table_info(session_budgets)").all().map((c) => c.name));
-    if (!sbCols.has("empty_wakes"))  db.exec("ALTER TABLE session_budgets ADD COLUMN empty_wakes INTEGER NOT NULL DEFAULT 0");
     const evCols = new Set(db.prepare("PRAGMA table_info(events)").all().map((c) => c.name));
     if (!evCols.has("session_ref"))  db.exec("ALTER TABLE events ADD COLUMN session_ref TEXT");
     db.prepare("INSERT INTO meta(key,value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
@@ -704,65 +655,9 @@ export function createStore({ dbPath, logger } = {}) {
     return row ? cls : null;
   }
 
-  // ──────────────────────────────────────── SESSION BUDGETS (S1.3)
-  const sessionBudgetApi = {
-    /**
-     * Charge one backlog tool call against the session's budget and return
-     * post-increment state. Exceeding limit_calls latches exhausted_at —
-     * latching is one-way: a session that ran out of claims never resumes
-     * mid-session, so a runaway loop cannot re-arm by burning calls.
-     *
-     * agentLimit bounds the campaign, not the session: spend sums across
-     * every session_key the agent ever charged, so a fresh wake cannot
-     * respawn a full allowance. Derived from a live SUM, which only grows —
-     * the agent latch is monotonic without a stored flag.
-     */
-    charge({ sessionKey, agentId, limit, agentLimit = null }) {
-      const t = now();
-      db.prepare(`
-        INSERT INTO session_budgets(session_key, agent_id, tool_calls, limit_calls, updated_at)
-        VALUES (?, ?, 1, ?, ?)
-        ON CONFLICT(session_key) DO UPDATE SET
-          tool_calls = tool_calls + 1, updated_at = excluded.updated_at
-      `).run(sessionKey, agentId, limit, t);
-      const row = db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey);
-      const agentTotal = db.prepare(
-        "SELECT COALESCE(SUM(tool_calls),0) AS total FROM session_budgets WHERE agent_id=?"
-      ).get(agentId).total;
-      const agentExhausted = agentLimit != null && agentTotal >= agentLimit;
-      const exhausted = row.tool_calls >= row.limit_calls;
-      if (exhausted && !row.exhausted_at) {
-        db.prepare("UPDATE session_budgets SET exhausted_at=? WHERE session_key=?").run(t, sessionKey);
-        return { ...row, tool_calls: row.tool_calls, exhausted: true, exhausted_at: t, agentToolCalls: agentTotal, agentLimitCalls: agentLimit, agentExhausted };
-      }
-      return { ...row, exhausted, exhausted_at: row.exhausted_at, agentToolCalls: agentTotal, agentLimitCalls: agentLimit, agentExhausted };
-    },
-    get(sessionKey) {
-      return db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey) ?? null;
-    },
-    /**
-     * A wake that found nothing to claim. Charged rows exist first (backlog_next
-     * charges before it computes), so this is an UPDATE — the wasted-wake
-     * metric is per-session and feeds the burn-in gate (S3.5's <30% target).
-     */
-    recordEmptyWake(sessionKey) {
-      const r = db.prepare(
-        "UPDATE session_budgets SET empty_wakes = empty_wakes + 1 WHERE session_key=?"
-      ).run(sessionKey);
-      return r.changes > 0;
-    },
-    wastedWakeRatio() {
-      const row = db.prepare(
-        "SELECT COALESCE(SUM(empty_wakes),0) AS empty, COALESCE(SUM(tool_calls),0) AS calls FROM session_budgets"
-      ).get();
-      return { ...row, ratio: row.calls > 0 ? row.empty / row.calls : 0 };
-    },
-  };
-
   return {
     db,
     path: finalPath,
-    sessionBudget: sessionBudgetApi,
     epic:  epicApi,
     story: storyApi,
     task:  taskApi,

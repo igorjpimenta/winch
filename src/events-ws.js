@@ -58,17 +58,15 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
 }
 
 // Stable kind for a stored transition. Pure function of the row plus the
-// task's current gate flag. Note vocabulary is the primary signal throughout:
-// budget markers match first (they can be taskless, with NULL statuses),
-// gate waiting precedes the generic blocked branch (same-status rows), and
-// the gate_type join covers gate rows whose note predates the vocabulary.
-// Anything not matched here is a store change that needs a new kind, not a
-// silent default: every row must stream with a name subscribers can filter on.
+// task's current gate flag. Note vocabulary is the primary signal for gate
+// waiting; the gate_type join covers gate rows whose note predates the
+// vocabulary. Anything not matched here is a store change that needs a new
+// kind, not a silent default: every row must stream with a name subscribers
+// can filter on.
 export function kindForEvent(row, taskRow = null) {
   const from = row.from_status;
   const to = row.to_status;
   const note = row.note ?? "";
-  if (note.startsWith("session budget exhausted") || note.startsWith("agent budget exhausted")) return "budget.exhausted";
   const gated = note.startsWith("gate open:") || (taskRow?.gate_type != null && taskRow.gate_type !== "");
   if (from == null) return "task.created";
   if (note.startsWith("gate waiting:")) return "gate.waiting";

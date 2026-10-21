@@ -122,7 +122,7 @@ test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", (t) => 
   assert.equal(migrated.attempt_count, 0);
   assert.equal(
     store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value,
-    "7"
+    "6"
   );
   store.close();
 
@@ -130,7 +130,7 @@ test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", (t) => 
   assert.equal(reopened.task.get("TASK-v1-1").title, "legacy task 1");
   assert.equal(
     reopened.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value,
-    "7"
+    "6"
   );
   reopened.close();
 });
@@ -326,39 +326,4 @@ test("heartbeat renews the claim lease — a live agent is never swept", (t) => 
   assert.equal(store.task.get(task.id).status, "in_progress");
 });
 
-test("session budgets roll up per agent across sessions", (t) => {
-  const store = makeStore(t);
-  const a = store.sessionBudget.charge({ sessionKey: "s-1", agentId: "x", limit: 100, agentLimit: 3 });
-  assert.equal(a.agentToolCalls, 1);
-  assert.equal(a.agentExhausted, false);
-  store.sessionBudget.charge({ sessionKey: "s-2", agentId: "x", limit: 100, agentLimit: 3 });
-  const c = store.sessionBudget.charge({ sessionKey: "s-2", agentId: "x", limit: 100, agentLimit: 3 });
-  assert.equal(c.agentToolCalls, 3);
-  assert.equal(c.agentExhausted, true, "campaign total trips the agent latch");
-  assert.equal(c.exhausted, false, "session latch untouched");
-});
 
-test("v6 store gains nullable events.task_id, rows preserved, reopen idempotent", (t) => {
-  const { dir, dbPath } = tempDb();
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const raw = new DatabaseSync(dbPath);
-  raw.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
-      from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, session_ref TEXT, at INTEGER NOT NULL);
-    INSERT INTO meta(key,value) VALUES('schema_version','6');
-    INSERT INTO events(task_id, from_status, to_status, actor, note, at)
-      VALUES('TASK-x','todo','in_progress','a','claim',1700000000000);`);
-  raw.close();
-  const store = createStore({ dbPath });
-  const flags = store.db.prepare("PRAGMA table_info(events)").all();
-  assert.equal(flags.find((c) => c.name === "task_id").notnull, 0, "task_id nullable after rebuild");
-  assert.equal(flags.find((c) => c.name === "to_status").notnull, 0, "to_status nullable after rebuild");
-  assert.equal(store.db.prepare("SELECT note FROM events").get().note, "claim", "row survives");
-  // The taskless latch marker the migration exists for is now insertable.
-  store.db.prepare("INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (NULL, NULL, NULL, 'a', 'session budget exhausted: 1/1 backlog calls; claims halted', 1)").run();
-  assert.equal(store.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value, "7");
-  store.close();
-  const reopened = createStore({ dbPath });
-  assert.equal(reopened.db.prepare("SELECT COUNT(*) AS n FROM events").get().n, 2);
-  reopened.close();
-});

@@ -49,13 +49,10 @@ new row to all connected clients as JSON text frames:
 
 Kinds wired so far: `task.*` family, `gate.opened` / `gate.resolved` /
 `gate.waiting` (24h/72h age thresholds, one row per gate per level, written
-by the watcher tick), `budget.exhausted` (session latch, plus an
-agent-scoped rollup across sessions so a fresh wake cannot respawn a full
-allowance; latch markers with no current task are taskless rows matched by
-note vocabulary), and `release.shipped` (written by merge-detect onto the
-release task when an epic closes with a version marker — tag first, event
-only on a successful tag; reruns deduplicate on the note). History and
-live rows share one envelope shape.
+by the watcher tick), and `release.shipped` (written by merge-detect onto
+the release task when an epic closes with a version marker — tag first,
+event only on a successful tag; reruns deduplicate on the note). History
+and live rows share one envelope shape.
 
 Kinds above are the full catalog the store can emit today; anything not
 matched is a store change that needs a new kind, not a silent default.
@@ -88,7 +85,7 @@ the CAS transaction boundary under WAL contention.
 
 ## Identity
 
-Every claim and budget is keyed `harness:agent:session`. The **harness is
+Every claim is keyed `harness:agent:session`. The **harness is
 declared at construction** — `winch mcp` will not start without `--harness`
 (or `WINCH_HARNESS`), because an unnamed server cannot attribute anything.
 The agent and session of each call are stamped per call by the calling

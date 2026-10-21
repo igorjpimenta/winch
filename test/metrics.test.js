@@ -25,13 +25,12 @@ const note = (n, at) => store.db.prepare(
   "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, 'todo', 'blocked', 'watcher', ?, ?)"
 ).run(task.id, n, at);
 
-test("system_design: sweeper escalations and budget halts land in the bucket", () => {
+test("system_design: sweeper escalations land in the bucket", () => {
   const now = Date.now();
   note("blocked: max attempts", now - 1000);
-  note("session budget exhausted: 40/40 backlog calls; claims halted", now - 2000);
-  note("plain progress: fine", now - 3000); // not a failure
+  note("plain progress: fine", now - 2000); // not a failure
   const r = failureReport(store, { now });
-  assert.equal(r.counts.system_design, 2);
+  assert.equal(r.counts.system_design, 1);
   assert.equal(r.counts.misalignment, 0);
   assert.ok(r.unmapped.length === 1 && r.unmapped[0].includes("misalignment"));
 });
