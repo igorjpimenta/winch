@@ -51,7 +51,8 @@ carries no explicit extensions path; the browser-lease extension lives at
 Calls arrive as `mcp__winch__backlog_next` etc.; the hook filters on the
 `winch` substring and stamps meta from `ctx.sessionKey` → `ctx.runId` (the
 same field chain browser-lease's `ownerFor` resolves from). No resolvable
-session or agent → the hook returns `undefined` and the call degrades to env.
+session or agent → the hook returns `undefined`; the call reaches the server
+unstamped and is refused (there is no env fallback).
 
 ## opencode
 
