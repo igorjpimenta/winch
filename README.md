@@ -37,7 +37,6 @@ contract itself is the only integration surface.
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
 | `migrate-store --from <path> [--to <path>]`                   | copy a store to `~/.winch/store.sqlite`                 |
-| `check-slugs --config <path>`                                 | live-verify registered model slugs                      |
 | `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
 
 ## Events stream
