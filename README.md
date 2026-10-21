@@ -52,11 +52,12 @@ Kinds wired so far: the `task.*` family plus the gate family —
 `gate.opened`, `gate.resolved`, `gate.dissolved` — each declared by its
 producer at write time and stored on the row (`openGate`, `resumeGate`,
 merge-detect's dissolve path; human gates open exclusively through
-`openGate`). The wire reads the stored kind; vocabulary/transition matching
-survives only as backfill for pre-kind rows. The old gate_type join is gone:
-it read mutable current state to classify immutable history, so migration
-`0001` stamps provable gate.opened rows instead. Budget and release kinds
-land in follow-up PRs. History and live rows share one envelope shape.
+`openGate`). The emitter feeds the stored kind straight through; otherwise
+a row maps by transition structure alone. Notes never classify anything:
+they are free text and can change, so pre-kind rows keep exactly the
+meanings they streamed with — an append-only log keeps its history.
+Budget and release kinds land in follow-up PRs. History and live rows
+share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.

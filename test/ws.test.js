@@ -150,7 +150,7 @@ test("history and live rows share one envelope", async () => {
   assert.equal(history.events[0].kind, live.kind);
 });
 
-test("kindForEvent: task family plus gate kinds; stored kind wins", () => {
+test("kindForEvent: stored kind wins; kind-less rows map by structure, notes inert", () => {
   const cases = [
     [{ from_status: null, to_status: "todo", note: "task created" }, "task.created"],
     [{ from_status: "todo", to_status: "in_progress", note: "claim" }, "task.claimed"],
@@ -158,9 +158,10 @@ test("kindForEvent: task family plus gate kinds; stored kind wins", () => {
     [{ from_status: "todo", to_status: "done", note: "done" }, "task.completed"],
     [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, "task.released"],
     [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, "task.blocked"],
-    [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, "gate.opened"],
-    [{ from_status: "blocked", to_status: "todo", note: "gate resume" }, "gate.resolved"],
-    [{ from_status: "blocked", to_status: "todo", note: "gate dissolved: closed unmerged PR #9" }, "gate.dissolved"],
+    [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, "task.blocked"],
+    [{ from_status: "blocked", to_status: "todo", note: "gate resume" }, "task.released"],
+    [{ from_status: "blocked", to_status: "todo", note: "gate dissolved: closed unmerged PR #9" }, "task.released"],
+    [{ from_status: "blocked", to_status: "todo", kind: "gate.dissolved", note: "whatever the note says" }, "gate.dissolved"],
     [{ from_status: "todo", to_status: "blocked", kind: "task.blocked", note: "gate open: architecture" }, "task.blocked"],
     [{ from_status: "todo", to_status: "cancelled", note: "cut" }, "task.cancelled"],
   ];

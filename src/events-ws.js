@@ -58,23 +58,17 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
 }
 
 // Stable kind for a stored transition. The stored `kind` wins — producers
-// declare it at write time (see insertEvent callers and kindForUpdate), so
-// the wire reads the contract instead of inferring it. The rules below run
-// only for pre-kind rows and exist solely as backfill over immutable note
-// and transition text: the gate_type join is gone, retired by the migration
-// that stamps provable gate.opened rows, because a join against mutable
-// current state cannot classify immutable history. A mismatch between a
-// stored kind and these rules means the producer lied, not that the rules
-// need widening.
+// declare it at write time (see insertEvent callers and kindForUpdate) and
+// the emitter feeds it straight through. Otherwise the row maps by
+// transition structure alone: notes are free text and can change, so no
+// branch here may read note content — a renamed note must never reclassify
+// history. Pre-kind rows therefore keep exactly the meanings they streamed
+// with before the column existed: an append-only log keeps its history.
 export function kindForEvent(row) {
   if (row.kind) return row.kind;
   const from = row.from_status;
   const to = row.to_status;
-  const note = row.note ?? "";
   if (from == null) return "task.created";
-  if (to === "blocked" && note.startsWith("gate open:")) return "gate.opened";
-  if (from === "blocked" && to === "todo" && note === "gate resume") return "gate.resolved";
-  if (from === "blocked" && to === "todo" && note.startsWith("gate dissolved")) return "gate.dissolved";
   if (from === "todo" && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";

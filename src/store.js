@@ -154,18 +154,17 @@ export function createStore({ dbPath, logger } = {}) {
 
   // Kind declared at write time from the transition plus gate context —
   // the single table every update() event goes through, so producers never
-  // reimplement it and readers never infer it. Gate endings stay distinct:
-  // approval (resume note) resolves, anything else that ends a gate
-  // dissolves; both beat the generic released branch by construction.
-  function kindForUpdate(existing, merged, patch) {
-    const note = patch.note ?? "";
+  // reimplement it and readers never infer it. Reads state, never note text:
+  // notes are free text and can change, but whether the row held a gate is
+  // a fact — a gated exit outside the approval path dissolves, always.
+  // Approval itself flows exclusively through resumeGate's explicit stamp;
+  // no vocabulary is consulted here, so no rewording can reclassify a row.
+  function kindForUpdate(existing, merged) {
     if (merged.status === "blocked" && existing.status !== "blocked") {
       return merged.gate_type ? "gate.opened" : "task.blocked";
     }
     if (existing.status === "blocked" && merged.status === "todo") {
-      if (note === "gate resume") return "gate.resolved";
-      if (note.startsWith("gate dissolved")) return "gate.dissolved";
-      return "task.released";
+      return existing.gate_type ? "gate.dissolved" : "task.released";
     }
     if (merged.status === "done") return "task.completed";
     if (merged.status === "cancelled") return "task.cancelled";
@@ -256,7 +255,7 @@ export function createStore({ dbPath, logger } = {}) {
             taskId: id,
             fromStatus: existing.status,
             toStatus: merged.status,
-            kind: kindForUpdate(existing, merged, patch),
+            kind: kindForUpdate(existing, merged),
             actor: patch.actor ?? "system",
             note: patch.note ?? null,
             at: merged.updated_at,
