@@ -90,3 +90,20 @@ test("backlog_block with gateType + watcher manifest carries gate fields", async
   assert.equal(m.blocked[0].gate_type, "architecture");
   assert.ok(m.blocked[0].blocked_at > 0);
 });
+
+test("gate rows carry producer-stamped kinds, not inference", () => {
+  const { task } = seed({ assigned: "builder", taskStatus: "in_progress" });
+  store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "builder" });
+  const opened = store.db.prepare("SELECT kind FROM events WHERE task_id=? AND to_status='blocked'").get(task.id);
+  assert.equal(opened.kind, "gate.opened");
+  store.task.resumeGate({ id: task.id, actor: "operator" });
+  const resolved = store.db.prepare("SELECT kind FROM events WHERE task_id=? AND note='gate resume'").get(task.id);
+  assert.equal(resolved.kind, "gate.resolved");
+});
+
+test("update() entering blocked with gateType stamps gate.opened at write", () => {
+  const { task } = seed({ taskStatus: "todo" });
+  store.task.update(task.id, { status: "blocked", gateType: "release", actor: "x", note: "blocked: need signoff" });
+  const row = store.db.prepare("SELECT kind FROM events WHERE task_id=? AND to_status='blocked'").get(task.id);
+  assert.equal(row.kind, "gate.opened", "gate context at write time beats note sniffing");
+});

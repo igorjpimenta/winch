@@ -8,6 +8,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore, MAX_ATTEMPTS } from "../src/store.js";
+import { kindForEvent } from "../src/events-ws.js";
+import Database from "better-sqlite3";
 
 function tempDb() {
   const dir = mkdtempSync(path.join(tmpdir(), "backlog-store-"));
@@ -163,4 +165,38 @@ test("task.update: actor/note optional — defaults to system", (t) => {
   const ev = eventsFor(store, task.id)[1];
   assert.equal(ev.actor, "system");
   assert.equal(ev.note, null);
+});
+
+test("0001 adds events.kind without rewriting history", (t) => {
+  const { dir, dbPath } = tempDb();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // legacy-shaped database: kind column never existed here
+  {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
+        status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
+        gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+        from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, at INTEGER NOT NULL);
+      INSERT INTO meta(key,value) VALUES('schema_version','6');
+      INSERT INTO tasks(id,story_id,title,status,execution_kind,gate_type,created_at,updated_at) VALUES
+        ('TASK-G','STORY-1','g','blocked','manual','release',1,2);
+      INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES
+        ('TASK-G','in_progress','blocked','a','blocked: need signoff',2000),
+        ('TASK-G','blocked','todo','op','gate resume',3000);`);
+    // forge a 0000-only ledger so open applies exactly the new migration:
+    // the migrator skips journal entries at or below the latest created_at
+    db.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC NOT NULL);
+      INSERT INTO __drizzle_migrations(hash, created_at) VALUES ('0000-ledger', 1792607841256);`);
+    db.close();
+  }
+  const store = createStore({ dbPath });
+  t.after(() => store.close());
+  assert.ok(store.db.prepare("PRAGMA table_info(events)").all().some((c) => c.name === "kind"));
+  // no backfill: pre-kind rows keep NULL and map by structure, as streamed
+  const kinds = store.db.prepare("SELECT kind FROM events ORDER BY id").all().map((r) => r.kind);
+  assert.deepEqual(kinds, [null, null]);
+  assert.equal(kindForEvent({ from_status: "in_progress", to_status: "blocked", kind: null, note: "blocked: need signoff" }), "task.blocked");
+  assert.equal(kindForEvent({ from_status: "blocked", to_status: "todo", kind: null, note: "gate resume" }), "task.released");
 });

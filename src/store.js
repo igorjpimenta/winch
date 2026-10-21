@@ -143,14 +143,35 @@ export function createStore({ dbPath, logger } = {}) {
   // Every status-changing caller writes its event row inside the same
   // transaction as the UPDATE — a status change committed without its event
   // desyncs the audit trail the sweeper and operators read.
-  function insertEvent({ taskId, fromStatus, toStatus, actor, note, at, sessionRef }) {
+  function insertEvent({ taskId, fromStatus, toStatus, kind = null, actor, note, at, sessionRef }) {
     const r = db.prepare(`
-      INSERT INTO events(task_id, from_status, to_status, actor, note, session_ref, at) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(taskId, fromStatus ?? null, toStatus, actor ?? null, note ?? null, sessionRef ?? null, at);
+      INSERT INTO events(task_id, from_status, to_status, kind, actor, note, session_ref, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(taskId, fromStatus ?? null, toStatus, kind, actor ?? null, note ?? null, sessionRef ?? null, at);
     return Number(r.lastInsertRowid);
   }
 
   function rowEvent(r) { return r ? { ...r } : null; }
+
+  // Kind declared at write time from the transition plus gate context —
+  // the single table every update() event goes through, so producers never
+  // reimplement it and readers never infer it. Reads state, never note text:
+  // notes are free text and can change, but whether the row held a gate is
+  // a fact — a gated exit outside the approval path dissolves, always.
+  // Approval itself flows exclusively through resumeGate's explicit stamp;
+  // no vocabulary is consulted here, so no rewording can reclassify a row.
+  function kindForUpdate(existing, merged) {
+    if (merged.status === "blocked" && existing.status !== "blocked") {
+      return merged.gate_type ? "gate.opened" : "task.blocked";
+    }
+    if (existing.status === "blocked" && merged.status === "todo") {
+      return existing.gate_type ? "gate.dissolved" : "task.released";
+    }
+    if (merged.status === "done") return "task.completed";
+    if (merged.status === "cancelled") return "task.cancelled";
+    if (existing.status === "todo" && merged.status === "in_progress") return "task.claimed";
+    if (merged.status === "todo") return "task.released";
+    return "task.updated";
+  }
 
   const taskApi = {
     create({ storyId, title, description, status, executionKind, executionArgs, capabilities, assigned, id }) {
@@ -167,7 +188,7 @@ export function createStore({ dbPath, logger } = {}) {
           INSERT INTO tasks(id, story_id, title, description, status, execution_kind, execution_args, capabilities, assigned, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(taskId, storyId, title, description ?? null, s, ek, JSON.stringify(executionArgs ?? {}), jsonOut(capabilities), assigned ?? null, t, t);
-        insertEvent({ taskId, fromStatus: null, toStatus: s, actor: null, note: "task created", at: t });
+        insertEvent({ taskId, fromStatus: null, toStatus: s, kind: "task.created", actor: null, note: "task created", at: t });
         db.exec("COMMIT");
       } catch (err) {
         db.exec("ROLLBACK");
@@ -234,6 +255,7 @@ export function createStore({ dbPath, logger } = {}) {
             taskId: id,
             fromStatus: existing.status,
             toStatus: merged.status,
+            kind: kindForUpdate(existing, merged),
             actor: patch.actor ?? "system",
             note: patch.note ?? null,
             at: merged.updated_at,
@@ -269,7 +291,7 @@ export function createStore({ dbPath, logger } = {}) {
           WHERE id=? AND status IN ('todo','in_progress')
         `).run(gateType, t, t, id);
         insertEvent({
-          taskId: id, fromStatus: cur.status, toStatus: "blocked", actor,
+          taskId: id, fromStatus: cur.status, toStatus: "blocked", kind: "gate.opened", actor,
           note: `gate open: ${gateType}${reason ? ` — ${reason}` : ""}`, at: t,
         });
         db.exec("COMMIT");
@@ -298,7 +320,7 @@ export function createStore({ dbPath, logger } = {}) {
                            gate_type=NULL, blocked_at=NULL, updated_at=?
           WHERE id=? AND status='blocked'
         `).run(t, id);
-        insertEvent({ taskId: id, fromStatus: "blocked", toStatus: "todo", actor, note: "gate resume", at: t });
+        insertEvent({ taskId: id, fromStatus: "blocked", toStatus: "todo", kind: "gate.resolved", actor, note: "gate resume", at: t });
         db.exec("COMMIT");
         return taskApi.get(id);
       } catch (e) {
@@ -325,7 +347,7 @@ export function createStore({ dbPath, logger } = {}) {
         `).run(agentId, t, expires, leaseSeconds, t, t, id, agentId);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
         const eventsId = insertEvent({
-          taskId: id, fromStatus: "todo", toStatus: "in_progress",
+          taskId: id, fromStatus: "todo", toStatus: "in_progress", kind: "task.claimed",
           actor: agentId, note: "claim", at: t, sessionRef: sessionKey ?? null,
         });
         db.exec("COMMIT");
@@ -364,7 +386,7 @@ export function createStore({ dbPath, logger } = {}) {
         `).run(at, id);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
         const eventsId = insertEvent({
-          taskId: id, fromStatus: "in_progress", toStatus: "todo",
+          taskId: id, fromStatus: "in_progress", toStatus: "todo", kind: "task.released",
           actor: null, note, at,
         });
         db.exec("COMMIT");
@@ -398,7 +420,7 @@ export function createStore({ dbPath, logger } = {}) {
             `).run(at, id);
             if (r.changes > 0) {
               insertEvent({
-                taskId: id, fromStatus: "todo", toStatus: "blocked",
+                taskId: id, fromStatus: "todo", toStatus: "blocked", kind: "task.blocked",
                 actor: "sweeper", note: "blocked: max attempts", at,
               });
             }

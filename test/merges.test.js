@@ -102,3 +102,25 @@ test("collectPRs builds the gh query", () => {
   assert.deepEqual(args.slice(0, 4), ["pr", "list", "--state", "merged"]);
   assert.ok(args.includes("--json") && args.join(" ").includes("body,state"));
 });
+
+test("closed-unmerged PR on a gated task dissolves the gate with its own note and kind", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  store.task.update(task.id, { status: "in_progress", assigned: "builder" });
+  store.task.openGate({ id: task.id, gateType: "release", reason: "sign-off", actor: "builder" });
+  const s = applyMergeOutcomes(store, [{ number: 10, state: "CLOSED", title: "x", body }]);
+  assert.deepEqual(s.reopenedTasks, [task.id]);
+  const t = store.task.get(task.id);
+  assert.equal(t.status, "todo");
+  assert.equal(t.gate_type, null, "gate metadata cleared");
+  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  assert.match(ev.note, /^gate dissolved: closed unmerged PR #10/);
+  assert.equal(ev.kind, "gate.dissolved", "dissolution declared at write");
+});
+
+test("closed-unmerged PR on a plain task keeps the generic note", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  store.task.update(task.id, { status: "in_progress", assigned: "builder" });
+  applyMergeOutcomes(store, [{ number: 11, state: "CLOSED", title: "x", body }]);
+  const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  assert.match(ev.note, /^closed unmerged: PR #11/);
+});

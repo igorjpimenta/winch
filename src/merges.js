@@ -64,10 +64,16 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
       if (markers.taskId) {
         const task = store.task.get(markers.taskId);
         if (task && ["in_progress", "review", "blocked"].includes(task.status)) {
+          // A gate dissolved this way is not a resolution — nobody approved —
+          // but it must still stream as a gate ending, not a plain release.
+          // Otherwise kind-filtering subscribers count opened gates that can
+          // never resolve and their pending set leaks.
+          const dissolved = task.status === "blocked" && task.gate_type;
           if (!dryRun) {
             store.task.update(task.id, {
               status: "todo", assigned: null, gate_type: null, blocked_at: null,
-              actor: "merge-detector", note: `closed unmerged: PR #${pr.number}`,
+              actor: "merge-detector",
+              note: dissolved ? `gate dissolved: closed unmerged PR #${pr.number}` : `closed unmerged: PR #${pr.number}`,
             });
           }
           out.reopenedTasks.push(task.id);

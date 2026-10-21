@@ -90,6 +90,10 @@ export const events = sqliteTable("events", {
   taskId: text("task_id").notNull(),
   fromStatus: text("from_status"),
   toStatus: text("to_status").notNull(),
+  // Declared by the producer at write time (openGate stamps gate.opened,
+  // resumeGate gate.resolved, claim task.claimed, …). NULL means pre-kind
+  // row: the wire infers via the legacy rules, which exist only as backfill.
+  kind: text("kind"),
   actor: text("actor"),
   note: text("note"),
   sessionRef: text("session_ref"),

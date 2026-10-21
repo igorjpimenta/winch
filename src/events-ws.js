@@ -57,17 +57,20 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
 }
 
-// Stable kind for a stored transition, task family. Pure function of the
-// row: the note vocabulary is the primary signal. Gate rows (note starting
-// "gate open:", or a gate_type on the joined task) intentionally fall through
-// to task.blocked here — gate.opened lands in the follow-up gate PR, and a
-// temporarily coarse name beats a dropped row. Anything not matched is a
-// store change that needs a new kind, not a silent default: every row must
-// stream with a name subscribers can filter on.
+// Stable kind for a stored transition. The closed catalog lives here, in
+// one place — task.*: created, claimed, progressed, completed, released,
+// blocked, cancelled, updated; gate.*: opened, resolved, dissolved — and
+// the README names it by family only so the two cannot drift. The stored
+// `kind` wins — producers declare it at write time (see insertEvent callers and kindForUpdate) and
+// the emitter feeds it straight through. Otherwise the row maps by
+// transition structure alone: notes are free text and can change, so no
+// branch here may read note content — a renamed note must never reclassify
+// history. Pre-kind rows therefore keep exactly the meanings they streamed
+// with before the column existed: an append-only log keeps its history.
 export function kindForEvent(row) {
+  if (row.kind) return row.kind;
   const from = row.from_status;
   const to = row.to_status;
-  const note = row.note ?? "";
   if (from == null) return "task.created";
   if (from === "todo" && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";

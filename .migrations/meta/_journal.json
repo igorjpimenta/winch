@@ -8,6 +8,13 @@
       "when": 1792607841256,
       "tag": "0000_next_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792609467403,
+      "tag": "0001_add-events-kind",
+      "breakpoints": true
     }
   ]
 }
