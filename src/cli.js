@@ -9,13 +9,10 @@ import { readyTasks } from "./ready-queue.js";
 import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
-import { failureReport, formatFailureReport } from "./metrics.js";
-import { dispatchFraction } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
-import { migrateStore } from "./migrate.js";
 
 export { resolveDbPath };
 
@@ -31,12 +28,8 @@ const USAGE = `usage: winch <command>
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
-  metrics [--json] [--window-days N]     per-hop failure report
-  rollup [--json]                        dispatch fraction
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  migrate-store --from <path> [--to <path>]
-                                         copy a store to ~/.winch
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
@@ -122,34 +115,6 @@ export async function runCli(argv) {
       return;
     }
 
-    case "metrics": {
-      const { values } = parseArgs({
-        args: rest,
-        options: { json: { type: "boolean" }, "window-days": { type: "string" } },
-      });
-      const windowMs = values["window-days"] !== undefined ? Number(values["window-days"]) * 86_400_000 : undefined;
-      const store = openStore();
-      try {
-        const report = failureReport(store, { windowMs });
-        console.log(values.json ? JSON.stringify(report, null, 2) : formatFailureReport(report));
-      } finally {
-        store.close();
-      }
-      return;
-    }
-
-    case "rollup": {
-      const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
-      const store = openStore();
-      try {
-        const out = { dispatch: dispatchFraction(store) };
-        console.log(values.json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
-      } finally {
-        store.close();
-      }
-      return;
-    }
-
     case "release-epic": {
       const { values } = parseArgs({
         args: rest,
@@ -189,20 +154,6 @@ export async function runCli(argv) {
         fail(`merge-detect failed: ${e.message ?? e}`, 1);
       } finally {
         store.close();
-      }
-      return;
-    }
-
-    case "migrate-store": {
-      const { values } = parseArgs({
-        args: rest,
-        options: { from: { type: "string" }, to: { type: "string" } },
-      });
-      try {
-        const result = migrateStore({ from: values.from, to: values.to });
-        console.log(JSON.stringify(result, null, 2));
-      } catch (e) {
-        fail(`migrate-store failed: ${e.message ?? e}`, 1);
       }
       return;
     }
