@@ -94,9 +94,8 @@ Agent/session on opencode: the `WINCH_AGENT_ID` / `WINCH_SESSION` env
 fallback is gone by design — opencode's hooks cannot carry per-call identity,
 so winch refuses unstamped calls there instead of attributing them to a
 configured default that was never true. Per-agent, per-session opencode
-support needs a future meta-capable hook; until then opencode uses winch
-read-only in practice (dry-runs, metrics, rollups still need no identity —
-they are planned surface, not shipped).
+support needs a future meta-capable hook; until then identity-bearing calls
+are refused on opencode.
 
 ## Remote servers: URL + credentials
 
