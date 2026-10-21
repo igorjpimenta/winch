@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test test/ plugins/",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

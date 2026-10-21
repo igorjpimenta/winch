@@ -69,9 +69,12 @@ DB path resolution: `WINCH_DB` → `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
 Schema lives in `src/schema.js` as Drizzle tables. `npm run db:generate`
-turns schema changes into SQL in `drizzle/`; `src/db.js` applies pending
-migrations on open. The migration files are snapshots — append a new one,
-never edit an applied file.
+turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
+migrations on open, and `npm run db:migrate` does the same explicitly for a
+deploy. The files are plain SQL and may be edited before they are applied for
+data backfills, triggers, or renames; an applied migration is a snapshot, so
+append a new one instead of editing it. `npx drizzle-kit generate --custom
+--name=<name>` creates an empty SQL file for a hand-written data migration.
 
 Concurrency note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and
