@@ -217,3 +217,20 @@ test("backlog_block with gateType opens through openGate and stamps the kind", a
   assert.equal(row.kind, "gate.opened", "declared by the producer, not inferred");
   assert.match(row.note, /^gate open: architecture — ADR review/);
 });
+
+test("backlog_resume refuses a mismatched actor instead of minting another key's approval", async () => {
+  const { task } = seedReadyTask({ assigned: "builder", taskStatus: "in_progress" });
+  store.task.openGate({ id: task.id, gateType: "release", reason: "sign-off", actor: "builder" });
+  const forged = await call(
+    "backlog_resume", { taskId: task.id, actor: "igor" },
+    { harness: "test", agent: "operator", session: "op-1" }
+  );
+  assert.equal(forged.details.reason, "actor_mismatch");
+  assert.equal(store.task.get(task.id).status, "blocked", "gate untouched by the refused call");
+  const own = await call(
+    "backlog_resume", { taskId: task.id, actor: "operator" },
+    { harness: "test", agent: "operator", session: "op-1" }
+  );
+  assert.equal(own.details.status, "ok", "matching actor is the caller's own key");
+  assert.equal(own.details.actor, "operator");
+});

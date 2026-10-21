@@ -155,7 +155,7 @@ export function createToolHandlers(store, logger) {
         required: ["taskId"],
         properties: {
           taskId: { type: "string", description: "Task id (TASK-…)." },
-          actor: { type: "string", description: "Identity recorded on the resume event; defaults to the caller's agent." },
+          actor: { type: "string", description: "Must equal the caller's agent when given; anyone else's name is rejected as actor_mismatch. Defaults to the caller." },
         },
       },
     },
@@ -284,7 +284,14 @@ export function createToolHandlers(store, logger) {
     },
 
     async backlog_resume(args, identity) {
-      const actor = args?.actor ?? identity.agent;
+      // The actor is the caller, never the caller's claim about who acts: a
+      // mismatched actor would mint another key's approval on the trail, so
+      // the call fails instead. Humans approve through `winch resume --actor`
+      // on stdin trust; over MCP there is no speaking for another key.
+      if (args?.actor != null && args.actor !== identity.agent) {
+        return err(`backlog_resume: refused actor ${JSON.stringify(args.actor)} — approvals record the caller (${identity.agent}).`, "actor_mismatch", { taskId: args?.taskId ?? null });
+      }
+      const actor = identity.agent;
       const task = store.task.resumeGate({ id: args?.taskId, actor });
       if (!task) return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
       logger?.info?.(`backlog: ${actor} resumed ${task.id}`);
