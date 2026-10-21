@@ -116,12 +116,3 @@ export const deps = sqliteTable("deps", {
   index("idx_deps_to").on(table.toId),
 ]);
 
-export const sessionBudgets = sqliteTable("session_budgets", {
-  sessionKey: text("session_key").primaryKey(),
-  agentId: text("agent_id").notNull(),
-  toolCalls: integer("tool_calls").notNull().default(0),
-  limitCalls: integer("limit_calls").notNull(),
-  exhaustedAt: integer("exhausted_at"),
-  emptyWakes: integer("empty_wakes").notNull().default(0),
-  updatedAt: integer("updated_at").notNull(),
-});
