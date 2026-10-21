@@ -98,3 +98,19 @@ test("agent under the cap still routes", () => {
   assert.equal(m.routed[0].assigned, "lens");
   assert.equal(m.deferred.length, 0);
 });
+
+test("tick writes gate-waiting rows for stale gates and reports waiting age", () => {
+  const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
+  store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "lens" });
+  store.db.prepare("UPDATE tasks SET blocked_at=? WHERE id=?").run(Date.now() - 25 * 3600 * 1000, task.id);
+  const u = seed({ assigned: null });
+  const m = tick(store);
+  assert.equal(m.waits.length, 1);
+  assert.equal(m.waits[0].taskId, task.id);
+  assert.equal(m.waits[0].label, "24h");
+  const idle = m.unrouted.find((r) => r.taskId === u.task.id);
+  assert.ok(idle, "unrouted task reported");
+  assert.ok(typeof idle.idleMs === "number" && idle.idleMs >= 0, "waiting age carried");
+  const m2 = tick(store);
+  assert.deepEqual(m2.waits, [], "second tick writes nothing new");
+});

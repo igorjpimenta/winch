@@ -33,12 +33,17 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
       if (markers.taskId) {
         const task = store.task.get(markers.taskId);
         if (task && task.status !== "done") {
+          // A merge lands regardless of who holds the claim. When it takes
+          // a task out from under a working agent, the note names the
+          // displacement — the agent's next tool call would otherwise fail
+          // with no account of why its task completed itself.
+          const displaced = task.status === "in_progress" && task.assigned ? ` (displaced ${task.assigned})` : "";
           if (!dryRun) {
             store.task.update(task.id, {
               status: "done",
               result_summary: `merged via PR #${pr.number}: ${pr.title}`,
               actor: "merge-detector",
-              note: `merged: PR #${pr.number}`,
+              note: `merged: PR #${pr.number}${displaced}`,
             });
           }
           out.doneTasks.push(task.id);

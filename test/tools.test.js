@@ -234,3 +234,13 @@ test("backlog_resume refuses a mismatched actor instead of minting another key's
   assert.equal(own.details.status, "ok", "matching actor is the caller's own key");
   assert.equal(own.details.actor, "operator");
 });
+
+test("backlog_resume on a dissolved gate answers gate_dissolved", async () => {
+  const { task } = seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
+  await call("backlog_block", { taskId: task.id, reason: "need signoff", gateType: "release" });
+  // Unmerged close dissolves the gate and requeues the task.
+  store.task.update(task.id, { status: "todo", assigned: null, actor: "merge-detector", note: "closed unmerged: PR #1" });
+  const res = await call("backlog_resume", { taskId: task.id }, { harness: "test", agent: "operator", session: "op-1" });
+  assert.equal(res.details.reason, "gate_dissolved");
+  assert.equal(res.details.taskStatus, "todo");
+});
