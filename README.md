@@ -62,6 +62,13 @@ The closed catalog lives in `src/events-ws.js` and is named here by family
 only, so the two cannot drift. History and live
 rows share one envelope shape.
 
+Delivery-dynamics notes the wire will not tell you: heartbeats renew the
+claim lease (only silence gets swept); an unmerged close dissolves its gate
+(late approvals answer `gate_dissolved`); starvation lives in the watcher
+manifest (`deferred` list, per-task `idleMs`), not the stream; a disputed
+completion is a new ticket linked by dep edge with a `supersedes: TASK-x`
+note, never a rewrite of history.
+
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.
 

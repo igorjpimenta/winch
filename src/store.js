@@ -365,9 +365,14 @@ export function createStore({ dbPath, logger } = {}) {
      */
     heartbeat(id, agentId) {
       const t = now();
+      // A heartbeat renews the lease, not just the liveness timestamp: an
+      // agent actively reporting progress must never read as a corpse. The
+      // sweeper keeps sole authority to end a claim — but only for silence.
+      // lease_seconds is per-task seconds; legacy rows without one fall back
+      // to the claim default of 30 minutes.
       const r = db.prepare(`
-        UPDATE tasks SET last_heartbeat=?, updated_at=? WHERE id=? AND status='in_progress' AND assigned=?
-      `).run(t, t, id, agentId);
+        UPDATE tasks SET last_heartbeat=?, updated_at=?, claim_expires_at=?+COALESCE(lease_seconds*1000, 1800000) WHERE id=? AND status='in_progress' AND assigned=?
+      `).run(t, t, t, id, agentId);
       if (r.changes === 0) return null;
       return taskApi.get(id);
     },
@@ -435,6 +440,37 @@ export function createStore({ dbPath, logger } = {}) {
         }
       }
       return swept;
+    },
+    /**
+     * Age-threshold events for unanswered gates: one row per gate per level
+     * (24h, 72h), each written once — dedupe is the exact note after
+     * blocked_at, so reruns and restarts never double-page. Kind stamped at
+     * write, like every producer. Only gates with a blocked_at stamp
+     * age-track; legacy rows without one stay silent.
+     * Returns the rows written ({taskId, label, eventId}).
+     */
+    recordGateWaits({ now: at = Date.now(), levels = [{ ms: 24 * 3600 * 1000, label: "24h" }, { ms: 72 * 3600 * 1000, label: "72h" }] } = {}) {
+      const gates = db.prepare(
+        "SELECT id, blocked_at FROM tasks WHERE status='blocked' AND gate_type IS NOT NULL AND blocked_at IS NOT NULL"
+      ).all();
+      const written = [];
+      for (const g of gates) {
+        const age = at - g.blocked_at;
+        for (const { ms, label } of levels) {
+          if (age < ms) continue;
+          const note = `gate waiting: ${label} unanswered`;
+          const dup = db.prepare(
+            "SELECT 1 FROM events WHERE task_id=? AND note=? AND at>? LIMIT 1"
+          ).get(g.id, note, g.blocked_at);
+          if (dup) continue;
+          const eventId = insertEvent({
+            taskId: g.id, fromStatus: "blocked", toStatus: "blocked", kind: "gate.waiting",
+            actor: "watcher", note, at,
+          });
+          written.push({ taskId: g.id, label, eventId });
+        }
+      }
+      return written;
     },
   };
 

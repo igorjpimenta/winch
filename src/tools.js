@@ -293,7 +293,20 @@ export function createToolHandlers(store, logger) {
       }
       const actor = identity.agent;
       const task = store.task.resumeGate({ id: args?.taskId, actor });
-      if (!task) return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
+      if (!task) {
+        // Name the common false alarm: the task was gated before (a gate
+        // note sits in its trail) but the gate has since dissolved — e.g. an
+        // unmerged close requeued it. The operator approved something real;
+        // "not resumable" alone would read as operator error. A trailing
+        // 'gate resume' is the opposite case (already resolved), so only an
+        // opened-but-never-resolved gate dissolves.
+        const current = args?.taskId ? store.task.get(args.taskId) : null;
+        const lastGate = current && store.db.prepare(
+          "SELECT note FROM events WHERE task_id=? AND (note LIKE 'gate open:%' OR note='gate resume') ORDER BY id DESC LIMIT 1"
+        ).get(current.id);
+        if (lastGate && lastGate.note.startsWith("gate open:")) return err(`backlog_resume: ${current.id} was gated but the gate has dissolved (status ${current.status}) — nothing to resume; re-gate with backlog_block if approval is still needed.`, "gate_dissolved", { taskId: current.id, taskStatus: current.status });
+        return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
+      }
       logger?.info?.(`backlog: ${actor} resumed ${task.id}`);
       return ok(JSON.stringify({ ok: true, task: { id: task.id, status: task.status, gate_type: task.gate_type, assigned: task.assigned } }), { status: "ok", taskId: task.id, actor });
     },

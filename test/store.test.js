@@ -205,3 +205,16 @@ test("0001 adds events.kind without rewriting history", (t) => {
   assert.equal(kindForEvent({ from_status: "in_progress", to_status: "blocked", kind: null, note: "blocked: need signoff" }), "task.blocked");
   assert.equal(kindForEvent({ from_status: "blocked", to_status: "todo", kind: null, note: "gate resume" }), "task.released");
 });
+
+test("heartbeat renews the claim lease — a live agent is never swept", (t) => {
+  const store = makeStore(t);
+  const { task } = seedHierarchy(store);
+  store.task.claim({ id: task.id, agentId: "agent-a", watchdogMs: 60 * 1000 });
+  // Expire the lease out from under a live agent, then heartbeat.
+  store.db.prepare("UPDATE tasks SET claim_expires_at=? WHERE id=?").run(1, task.id);
+  const beat = store.task.heartbeat(task.id, "agent-a");
+  assert.ok(beat, "heartbeat accepted");
+  assert.ok(beat.claim_expires_at > Date.now(), "lease renewed into the future");
+  assert.deepEqual(store.task.sweepExpired({}), [], "nothing swept");
+  assert.equal(store.task.get(task.id).status, "in_progress");
+});

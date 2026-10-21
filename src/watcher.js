@@ -21,13 +21,17 @@ import { readyTasks } from "./ready-queue.js";
 export const MAX_ACTIVE_PER_AGENT = 2;
 
 /**
- * @returns {{ts:number, swept:string[], routed:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
+ * @returns {{ts:number, swept:string[], waits:object[], routed:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
+ *   swept    — lease-expired tasks the sweep requeued or escalated this tick
+ *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
  *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
  *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
- *   unrouted — claimable but unassigned: heartbeat polls own these, never woken
+ *   unrouted — claimable but unassigned, each with idleMs since last activity: heartbeat polls own these, never woken
  */
 export function tick(store) {
+  const nowTs = Date.now();
   const swept = store.task.sweepExpired({});
+  const waits = store.task.recordGateWaits({ now: nowTs });
   const claimable = readyTasks(store, { limit: 50 }).map((r) => ({
     taskId: r.task.id,
     title: r.task.title,
@@ -62,11 +66,19 @@ export function tick(store) {
   const deferred = claimable
     .filter((c) => c.assigned && (active.get(c.assigned) ?? 0) >= MAX_ACTIVE_PER_AGENT)
     .map((c) => ({ ...c, activeCount: active.get(c.assigned) }));
-  const unrouted = claimable.filter((c) => !c.assigned);
+  const unrouted = claimable
+    .filter((c) => !c.assigned)
+    // Waiting-age gauge: the wire streams transitions, never waiting, so the
+    // manifest carries how long each unrouted task has sat idle instead.
+    .map((c) => {
+      const row = store.task.get(c.taskId);
+      return { ...c, idleMs: row ? nowTs - (row.updated_at ?? nowTs) : 0 };
+    });
 
   return {
-    ts: Date.now(),
+    ts: nowTs,
     swept: swept.map((t) => t.id),
+    waits,
     routed,
     deferred,
     unrouted,
