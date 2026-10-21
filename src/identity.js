@@ -1,8 +1,8 @@
 // identity.js — harness declared, agent and session stamped per call.
 //
 // One thing is declared, two things arrive with the work. The server is
-// CONSTRUCTED with the harness it serves (langgraph declares langgraph, the
-// openclaw MCP entry declares openclaw); the agent and session of each call
+// CONSTRUCTED with the harness it serves (each MCP entry names its own
+// consumer); the agent and session of each call
 // are the calling harness's job to stamp — via the before_tool_call
 // companion plugin — exactly the way lineage attributes per-call cost to an
 // agent and a session instead of a configured default.

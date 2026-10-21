@@ -2,7 +2,6 @@
 // needs the DB resolves it through paths.js: WINCH_DB, else
 // ~/.winch/store.sqlite.
 
-import path from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store.js";
@@ -11,7 +10,7 @@ import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
-import { dispatchFraction, epicTokenRollup } from "./rollup.js";
+import { dispatchFraction } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
@@ -33,12 +32,11 @@ const USAGE = `usage: winch <command>
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
   metrics [--json] [--window-days N]     per-hop failure report
-  rollup [--json]                        dispatch fraction + epic token rollup
+  rollup [--json]                        dispatch fraction
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  migrate-store [--from <path>] [--to <path>]
-                                         copy the legacy store to ~/.winch
-  check-slugs [--config <path>]          live-verify registered model slugs
+  migrate-store --from <path> [--to <path>]
+                                         copy a store to ~/.winch
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
@@ -144,7 +142,7 @@ export async function runCli(argv) {
       const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
       const store = openStore();
       try {
-        const out = { dispatch: dispatchFraction(store), rollup: epicTokenRollup(store) };
+        const out = { dispatch: dispatchFraction(store) };
         console.log(values.json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
       } finally {
         store.close();
@@ -206,12 +204,6 @@ export async function runCli(argv) {
       } catch (e) {
         fail(`migrate-store failed: ${e.message ?? e}`, 1);
       }
-      return;
-    }
-
-    case "check-slugs": {
-      const script = path.join(import.meta.dirname, "check-slugs.mjs");
-      execFileSync(process.execPath, [script, ...rest], { stdio: "inherit" });
       return;
     }
 

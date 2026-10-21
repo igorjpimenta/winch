@@ -5,10 +5,11 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { defaultDbPath, legacyDbPath } from "./paths.js";
+import { defaultDbPath } from "./paths.js";
 
 export function migrateStore({ from, to, home } = {}) {
-  const source = from ?? legacyDbPath(home);
+  if (!from) throw new Error("source required: pass --from <path>");
+  const source = from;
   const target = to ?? defaultDbPath(home);
 
   if (!existsSync(source)) throw new Error(`source store not found: ${source}`);

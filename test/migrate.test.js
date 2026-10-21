@@ -1,4 +1,4 @@
-// migrate.test.js — copying the legacy store is additive: the source stays
+// migrate.test.js — copying a store is additive: the source stays
 // readable and the target is a consistent snapshot, not a file move.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +24,7 @@ function seed(file) {
 
 test("copies rows to the target and leaves the source intact", (t) => {
   const dir = tempDir(t);
-  const from = path.join(dir, "legacy", "store.sqlite");
+  const from = path.join(dir, "source", "store.sqlite");
   const to = path.join(dir, "winch", "store.sqlite");
   seed(from);
 
@@ -42,7 +42,7 @@ test("copies rows to the target and leaves the source intact", (t) => {
 
 test("refuses to overwrite an existing target", (t) => {
   const dir = tempDir(t);
-  const from = path.join(dir, "legacy.sqlite");
+  const from = path.join(dir, "source.sqlite");
   const to = path.join(dir, "winch.sqlite");
   seed(from);
   writeFileSync(to, "do not clobber");
@@ -58,4 +58,9 @@ test("reports a missing source instead of creating an empty store", (t) => {
 
   assert.throws(() => migrateStore({ from, to }), /source store not found/);
   assert.equal(existsSync(to), false);
+});
+
+test("requires an explicit source", (t) => {
+  const dir = tempDir(t);
+  assert.throws(() => migrateStore({ to: path.join(dir, "winch.sqlite") }), /source required/);
 });
