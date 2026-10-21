@@ -2,28 +2,29 @@
 // check-slugs.mjs — re-validate registered model slugs against the live
 // provider endpoints (the S0.5 ground truth, made re-runnable).
 //
-// Usage: winch check-slugs [--config <path>]
+// Usage: winch check-slugs --config <path>
 //       — exits 0 when config and endpoints agree.
-// Keys come from ~/.openclaw/service-env/ai.openclaw.gateway.env (read, never
-// printed) or the ambient environment.
+// The config is `{ models: { providers: { <name>: { baseUrl, models } } } }`.
+// Keys come from the ambient environment, or from WINCH_ENV_FILE if set
+// (read, never printed).
 
 import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 
-// Config path: --config flag, else WINCH_MODELS_CONFIG, else the default
-// openclaw.json under the user's home. A missing config is a hard error —
-// validating against nothing is worse than not running.
+// Config path: --config flag or WINCH_MODELS_CONFIG. A missing config is a
+// hard error — validating against nothing is worse than not running.
 const argv = process.argv.slice(2);
 const cfgFlag = argv.indexOf("--config");
-const cfgPath = cfgFlag >= 0
-  ? argv[cfgFlag + 1]
-  : (process.env.WINCH_MODELS_CONFIG || path.join(os.homedir(), ".openclaw", "openclaw.json"));
+const cfgPath = cfgFlag >= 0 ? argv[cfgFlag + 1] : process.env.WINCH_MODELS_CONFIG;
+if (!cfgPath) {
+  console.error("usage: winch check-slugs --config <path>");
+  process.exit(2);
+}
 const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
 
 function loadKeys() {
   const keys = { ...process.env };
-  const envFile = path.join(os.homedir(), ".openclaw", "service-env", "ai.openclaw.gateway.env");
+  const envFile = process.env.WINCH_ENV_FILE;
+  if (!envFile) return keys;
   try {
     for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
       const m = line.match(/^(?:export\s+)?([A-Z0-9_]+)=(.*)$/);

@@ -15,7 +15,7 @@
 // WINCH_HARNESS=opencode, WINCH_AGENT_ID=<agent> — with session degrading
 // server-side to instance:<pid> (one MCP process per opencode instance).
 // Env is operator configuration, not model-controlled per-call input, so the
-// overwrite property openclaw gets from the hook holds here by construction.
+// overwrite property a hook-based adapter gets holds here by construction.
 //
 // The export stays a registered no-op so the hook point exists for an
 // opencode version that grows request-level meta mutation; see plugins/README.

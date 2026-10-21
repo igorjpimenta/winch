@@ -11,6 +11,10 @@ PR → merge, `metrics` / `rollup` report per-hop failures and dispatch
 fractions, and `serve --ws` streams every store event for subscribers to
 handle however they want.
 
+Winch is harness-agnostic: the server contains no harness-specific code. The
+adapters under `plugins/` are optional and installed per harness; the MCP
+contract itself is the only integration surface.
+
 ## Install / run
 
 - Node 22+ (uses `node:sqlite`; runtime deps are the MCP SDK, its `zod`
@@ -29,11 +33,11 @@ handle however they want.
 | `resume <taskId> [--actor <name>]`                            | resolve a human gate: blocked → todo                    |
 | `next`                                                        | list the current ready queue                            |
 | `metrics [--json] [--window-days N]`                          | per-hop failure report                                  |
-| `rollup [--json]`                                             | dispatch fraction + epic token rollup                   |
+| `rollup [--json]`                                             | dispatch fraction + epic token rollup (`WINCH_OPS_DB`)  |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
-| `migrate-store [--from <path>] [--to <path>]`                 | copy the legacy store to `~/.winch/store.sqlite`        |
-| `check-slugs [--config <path>]`                               | live-verify registered model slugs                      |
+| `migrate-store --from <path> [--to <path>]`                   | copy a store to `~/.winch/store.sqlite`                 |
+| `check-slugs --config <path>`                                 | live-verify registered model slugs                      |
 | `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
 
 ## Events stream
@@ -90,5 +94,5 @@ The agent and session of each call are stamped per call by the calling
 harness's companion plugin (`_meta.winch`), which overwrites unconditionally,
 so model-supplied meta cannot impersonate an agent. A call whose agent or
 session is unstamped fails loudly instead of minting a default key. The contract, the
-per-dimension table and the openclaw/opencode/generic-client setup snippets
+per-dimension table and the harness adapter setup snippets
 live in [plugins/README.md](plugins/README.md).

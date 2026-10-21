@@ -8,8 +8,8 @@ import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey
 const BASE = { harness: "langgraph" };
 
 test("assertDeclaration: harness passes, extra keys are ignored", () => {
-  const d = assertDeclaration({ harness: " openclaw ", agent: "ignored", session: "ignored" });
-  assert.deepEqual(d, { harness: "openclaw" });
+  const d = assertDeclaration({ harness: " test-harness ", agent: "ignored", session: "ignored" });
+  assert.deepEqual(d, { harness: "test-harness" });
 });
 
 test("assertDeclaration: missing harness throws and names it", () => {
@@ -84,8 +84,8 @@ test("resolveIdentity: incomplete base throws even with full meta", () => {
 
 test("sessionKey format: harness:agent:session", () => {
   assert.equal(
-    identitySessionKey({ harness: "openclaw", agent: "main", session: "s1" }),
-    "openclaw:main:s1"
+    identitySessionKey({ harness: "test-harness", agent: "main", session: "s1" }),
+    "test-harness:main:s1"
   );
 });
 
