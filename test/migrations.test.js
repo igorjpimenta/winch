@@ -1,5 +1,5 @@
-// migrations.test.js — the runner owns the version counter and refuses a
-// store from the future. Legacy fixtures exercise the consolidated v6 step.
+// migrations.test.js — Umzug owns the ledger; the version counters mirror it.
+// A store from the future (or one with unknown migrations) refuses to open.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,6 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 import { createStore } from "../src/store.js";
 import { SCHEMA } from "../src/schema.js";
 import { SCHEMA_VERSION } from "../src/migrations.js";
+
+const BASELINE = "0001-consolidated-v1-v6";
 
 function tempDb(t) {
   const dir = mkdtempSync(path.join(tmpdir(), "winch-migrations-"));
@@ -23,15 +25,20 @@ function counter(db) {
   };
 }
 
-test("fresh store writes both version counters", (t) => {
+function ledger(db) {
+  return db.prepare("SELECT name FROM schema_migrations ORDER BY name").all().map((r) => r.name);
+}
+
+test("fresh store writes both counters and the baseline ledger row", async (t) => {
   const { dbPath } = tempDb(t);
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   t.after(() => store.close());
 
   assert.deepEqual(counter(store.db), { pragma: SCHEMA_VERSION, meta: String(SCHEMA_VERSION) });
+  assert.deepEqual(ledger(store.db), [BASELINE]);
 });
 
-test("a v1 store migrates, repairs graph_flow, and is idempotent", (t) => {
+test("a v1 store migrates, repairs graph_flow, and is idempotent", async (t) => {
   const { dbPath } = tempDb(t);
   const raw = new DatabaseSync(dbPath);
   raw.exec(`
@@ -71,10 +78,11 @@ test("a v1 store migrates, repairs graph_flow, and is idempotent", (t) => {
   `);
   raw.close();
 
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   t.after(() => { if (store.db.isOpen) store.close(); });
 
   assert.deepEqual(counter(store.db), { pragma: SCHEMA_VERSION, meta: String(SCHEMA_VERSION) });
+  assert.deepEqual(ledger(store.db), [BASELINE]);
   assert.equal(store.task.get("TASK-1").execution_kind, "pipeclaw");
   const tasksSql = store.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get().sql;
   assert.match(tasksSql, /'pipeclaw'/);
@@ -85,25 +93,28 @@ test("a v1 store migrates, repairs graph_flow, and is idempotent", (t) => {
   assert.equal(created.execution_kind, "pipeclaw");
 
   store.close();
-  const reopened = createStore({ dbPath });
+  const reopened = await createStore({ dbPath });
   t.after(() => reopened.close());
   assert.deepEqual(counter(reopened.db), { pragma: SCHEMA_VERSION, meta: String(SCHEMA_VERSION) });
+  assert.deepEqual(ledger(reopened.db), [BASELINE]);
   assert.equal(reopened.task.get("TASK-1").title, "legacy");
 });
 
-test("a meta-only version counter bootstraps PRAGMA user_version", (t) => {
+test("a pre-ledger v6 store records the baseline instead of replaying it", async (t) => {
   const { dbPath } = tempDb(t);
   const raw = new DatabaseSync(dbPath);
   raw.exec(SCHEMA);
   raw.prepare("INSERT INTO meta(key,value) VALUES('schema_version', ?)").run(String(SCHEMA_VERSION));
+  raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   raw.close();
 
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   t.after(() => store.close());
   assert.deepEqual(counter(store.db), { pragma: SCHEMA_VERSION, meta: String(SCHEMA_VERSION) });
+  assert.deepEqual(ledger(store.db), [BASELINE]);
 });
 
-test("a store from the future refuses to open instead of guessing", (t) => {
+test("a store from the future refuses to open instead of guessing", async (t) => {
   const { dbPath } = tempDb(t);
   const raw = new DatabaseSync(dbPath);
   raw.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
@@ -111,5 +122,20 @@ test("a store from the future refuses to open instead of guessing", (t) => {
   raw.exec("PRAGMA user_version = 99");
   raw.close();
 
-  assert.throws(() => createStore({ dbPath }), /newer than this build/);
+  await assert.rejects(createStore({ dbPath }), /newer than this build/);
+});
+
+test("an unknown ledger row refuses to open", async (t) => {
+  const { dbPath } = tempDb(t);
+  const raw = new DatabaseSync(dbPath);
+  raw.exec(SCHEMA);
+  raw.prepare("INSERT INTO meta(key,value) VALUES('schema_version', ?)").run(String(SCHEMA_VERSION));
+  raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  raw.exec(`
+    CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
+    INSERT INTO schema_migrations(name, applied_at) VALUES('9999-future', 1);
+  `);
+  raw.close();
+
+  await assert.rejects(createStore({ dbPath }), /unknown to this build/);
 });

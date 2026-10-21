@@ -9,9 +9,9 @@ import { failureReport, formatFailureReport } from "../src/metrics.js";
 
 let dir, store, epic, story, task;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-metrics-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   epic = store.epic.create({ title: "E", status: "planned" });
   story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });

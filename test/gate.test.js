@@ -11,9 +11,9 @@ import { tick } from "../src/watcher.js";
 
 let dir, store, handle;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "winch-gates-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   ({ handle } = createToolHandlers(store, null));
 });
 

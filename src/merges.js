@@ -97,7 +97,7 @@ if (invokedDirectly) {
   const { execFileSync } = await import("node:child_process");
   const { createStore } = await import("./store.js");
   const dryRun = process.argv.includes("--dry-run");
-  const store = createStore();
+  const store = await createStore();
   try {
     const prs = collectPRs({ exec: execFileSync });
     const summary = applyMergeOutcomes(store, prs, { exec: execFileSync, dryRun });

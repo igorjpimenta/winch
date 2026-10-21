@@ -1,15 +1,22 @@
-// migrations.js — schema migrations for the sqlite store. This is not the
-// data-copy command (`winch migrate-store`, migrate.js); this advances the
-// schema in place.
+// migrations.js — Umzug owns the migration ledger; this module supplies the
+// node:sqlite context, the schema_migrations storage, and the version guard.
 //
-// Canonical counter: PRAGMA user_version. meta.schema_version is mirrored
-// for stores created before user_version was written and for tooling that
-// reads the old key. A store newer than this build refuses to open rather
-// than operating on a schema it does not know.
+// PRAGMA user_version remains the canonical integer (meta.schema_version is
+// mirrored for pre-ledger stores). Umzug's schema_migrations table records
+// which migration files ran, so future changes are append-only files rather
+// than edits to a switch in store.js.
+//
+// This is not `winch migrate-store` (migrate.js); that copies a database.
 
-import { SCHEMA } from "./schema.js";
+import { readdirSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { Umzug } from "umzug";
 
 export const SCHEMA_VERSION = 6;
+
+const MIGRATIONS_DIR = path.join(import.meta.dirname, "migrations");
+const BASELINE_NAME = "0001-consolidated-v1-v6";
 
 function pragmaVersion(db) {
   const n = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
@@ -39,101 +46,79 @@ function writeVersion(db, version) {
   ).run(String(version));
 }
 
-function columns(db, table) {
-  return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
-}
-
-// v1 → v6 column upgrades. PRAGMA-guarded so the step is idempotent on a
-// store that already has the columns; CREATE TABLE IF NOT EXISTS in SCHEMA
-// cannot add columns to a pre-existing table.
-function ensureColumns(db) {
-  const tasks = columns(db, "tasks");
-  if (!tasks.has("lease_seconds"))  db.exec("ALTER TABLE tasks ADD COLUMN lease_seconds INTEGER");
-  if (!tasks.has("last_heartbeat")) db.exec("ALTER TABLE tasks ADD COLUMN last_heartbeat INTEGER");
-  if (!tasks.has("attempt_count"))  db.exec("ALTER TABLE tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
-  if (!tasks.has("gate_type"))      db.exec("ALTER TABLE tasks ADD COLUMN gate_type TEXT");
-  if (!tasks.has("blocked_at"))     db.exec("ALTER TABLE tasks ADD COLUMN blocked_at INTEGER");
-
-  const budgets = columns(db, "session_budgets");
-  if (!budgets.has("empty_wakes")) {
-    db.exec("ALTER TABLE session_budgets ADD COLUMN empty_wakes INTEGER NOT NULL DEFAULT 0");
+class SqliteStorage {
+  constructor(db) {
+    this.db = db;
   }
 
-  const events = columns(db, "events");
-  if (!events.has("session_ref")) db.exec("ALTER TABLE events ADD COLUMN session_ref TEXT");
+  ensure() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name       TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+  }
+
+  async executed() {
+    this.ensure();
+    return this.db.prepare("SELECT name FROM schema_migrations ORDER BY name").all().map((r) => r.name);
+  }
+
+  async logMigration({ name }) {
+    this.ensure();
+    this.db.prepare(
+      "INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?)"
+    ).run(name, Date.now());
+  }
+
+  async unlogMigration({ name }) {
+    this.ensure();
+    this.db.prepare("DELETE FROM schema_migrations WHERE name = ?").run(name);
+  }
 }
 
-// The graph-flow→pipeclaw rename changed code, not CHECK constraints:
-// CREATE TABLE IF NOT EXISTS never rewrites a legacy table's vocabulary, so
-// a store born before the rename rejects every pipeclaw-kind insert. Detect
-// the stale constraint and rebuild the table (renaming stored values too) —
-// otherwise execution_kind='pipeclaw' is uninsertable on migrated stores.
-function repairGraphFlowCheck(db, logger) {
-  const tasksSql = db.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
-  ).get()?.sql ?? "";
-  if (!tasksSql.includes("'graph_flow'")) return;
-
-  const oldCols = db.prepare("PRAGMA table_info(tasks)").all().map((r) => r.name);
-  const keep = oldCols.map((c) => `"${c}"`).join(", ");
-  // Rename in-flight: inserting the legacy 'graph_flow' value first would
-  // violate the rebuilt table's CHECK before any UPDATE could fix it.
-  const sel = oldCols.map((c) => (c === "execution_kind"
-    ? `CASE WHEN "execution_kind"='graph_flow' THEN 'pipeclaw' ELSE "execution_kind" END`
-    : `"${c}"`)).join(", ");
-
-  db.exec(`
-    CREATE TABLE tasks_rebuild (
-      id               TEXT PRIMARY KEY,
-      story_id         TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
-      title            TEXT NOT NULL,
-      description      TEXT,
-      status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
-      execution_kind   TEXT NOT NULL CHECK (execution_kind IN ('pipeclaw','subagent','cli','gate','manual')),
-      execution_args   TEXT NOT NULL DEFAULT '{}',
-      assigned         TEXT,
-      capabilities     TEXT,
-      flow_id          TEXT,
-      task_run_id      TEXT,
-      claim_expires_at INTEGER,
-      lease_seconds    INTEGER,
-      last_heartbeat   INTEGER,
-      attempt_count    INTEGER NOT NULL DEFAULT 0,
-      gate_type        TEXT,
-      blocked_at       INTEGER,
-      result_summary   TEXT,
-      created_at       INTEGER NOT NULL,
-      updated_at       INTEGER NOT NULL,
-      claimed_at       INTEGER,
-      closed_at        INTEGER
-    );
-    INSERT INTO tasks_rebuild (${keep})
-    SELECT ${sel} FROM tasks;
-    DROP TABLE tasks;
-    ALTER TABLE tasks_rebuild RENAME TO tasks;
-    CREATE INDEX IF NOT EXISTS idx_tasks_story            ON tasks(story_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned  ON tasks(status, assigned);
-  `);
-  logger?.info?.("backlog: repaired stale graph_flow execution_kind CHECK (table rebuilt, values renamed)");
+// Every migration runs in its own transaction. Umzug logs the migration after
+// up() returns; a crash between COMMIT and logMigration replays the file on
+// the next open, so migration files must stay idempotent.
+function transactional(fn) {
+  return async (params) => {
+    const db = params.context.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = await fn(params);
+      db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  };
 }
 
-// Version 6 is the consolidated baseline: the latest SCHEMA plus every
-// guarded repair needed by v1–v5. Older stores jump straight here; stores
-// already at 6 skip it. New schema changes append a migration with a higher
-// version, never edit this one.
-const MIGRATIONS = [
-  {
-    version: 6,
-    name: "consolidated schema (v1–v6)",
-    up(db, { logger } = {}) {
-      db.exec(SCHEMA);
-      ensureColumns(db);
-      repairGraphFlowCheck(db, logger);
-    },
-  },
-];
+async function loadMigrations() {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((file) => file.endsWith(".mjs"))
+    .sort();
 
-export function applyMigrations(db, { logger } = {}) {
+  return Promise.all(files.map(async (file) => {
+    const name = path.basename(file, ".mjs");
+    const url = pathToFileURL(path.join(MIGRATIONS_DIR, file)).href;
+    const mod = await import(url);
+    if (typeof mod.up !== "function") {
+      throw new Error(`winch: migration ${name} has no up()`);
+    }
+    return {
+      name,
+      up: transactional((params) => mod.up(params)),
+      ...(typeof mod.down === "function"
+        ? { down: transactional((params) => mod.down(params)) }
+        : {}),
+    };
+  }));
+}
+
+export async function applyMigrations(db, { logger } = {}) {
   const from = currentVersion(db);
   if (from > SCHEMA_VERSION) {
     throw new Error(
@@ -141,32 +126,38 @@ export function applyMigrations(db, { logger } = {}) {
     );
   }
 
-  const pending = MIGRATIONS
-    .filter((m) => m.version > from)
-    .sort((a, b) => a.version - b.version);
+  const migrations = await loadMigrations();
+  const known = new Set(migrations.map((m) => m.name));
+  const storage = new SqliteStorage(db);
+  const executed = await storage.executed();
 
-  const reachable = pending.at(-1)?.version ?? from;
-  if (reachable < SCHEMA_VERSION) {
+  const unknown = executed.filter((name) => !known.has(name));
+  if (unknown.length > 0) {
     throw new Error(
-      `winch: no schema migration path from v${from} to v${SCHEMA_VERSION}`
+      `winch: store has migrations unknown to this build: ${unknown.join(", ")}; upgrade winch`
     );
   }
 
-  for (const migration of pending) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      migration.up(db, { logger });
-      db.exec("COMMIT");
-      logger?.info?.(`winch: schema migration v${migration.version} applied (${migration.name})`);
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw new Error(
-        `winch: schema migration v${migration.version} (${migration.name}) failed: ${err?.message ?? err}`,
-        { cause: err }
-      );
-    }
+  // A pre-ledger store already carries the consolidated schema as a version
+  // counter. Record the baseline so Umzug does not replay it; the file is
+  // idempotent anyway, but the ledger should tell the truth.
+  if (from >= SCHEMA_VERSION && !executed.includes(BASELINE_NAME)) {
+    await storage.logMigration({ name: BASELINE_NAME });
   }
 
+  const log = logger ?? { info() {}, warn() {}, error() {} };
+  const umzug = new Umzug({
+    migrations,
+    context: { db, logger: log },
+    storage,
+    logger: log,
+  });
+
+  const applied = await umzug.up();
   writeVersion(db, SCHEMA_VERSION);
-  return { from, to: SCHEMA_VERSION, applied: pending.map((m) => m.version) };
+  return {
+    from,
+    to: SCHEMA_VERSION,
+    applied: applied.map((m) => m.name),
+  };
 }

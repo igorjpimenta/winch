@@ -94,7 +94,7 @@ if (invokedDirectly) {
   const { createStore } = await import("./store.js");
   const argv = process.argv.slice(2);
   const num = (flag, dflt) => { const i = argv.indexOf(flag); return i >= 0 ? Number(argv[i + 1]) : dflt; };
-  const store = createStore();
+  const store = await createStore();
   try {
     const windowMs = argv.includes("--window-days") ? num("--window-days", 30) * DAY : undefined;
     const out = { dispatch: dispatchFraction(store, { windowMs }), rollup: epicTokenRollup(store, { windowMs }) };

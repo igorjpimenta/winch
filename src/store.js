@@ -1,8 +1,8 @@
 // store.js — sqlite-backed backlog data layer.
 //
-// Schema lives in schema.js; migrations.js advances it and tracks the
-// version in PRAGMA user_version. node:sqlite (built-in, Node 22+) — zero
-// npm deps.
+// Schema lives in schema.js; Umzug (migrations.js) applies the versioned
+// files and tracks the ledger. node:sqlite (built-in, Node 22+) — zero
+// native deps.
 //
 // Tables: epics, stories, tasks, deps, meta. JSON columns hold capability
 // arrays + execution_args opaquely. Statuses validated via CHECK constraints
@@ -50,7 +50,7 @@ function rowTask(r) {
   return { ...r, capabilities: jsonIn(r.capabilities), execution_args: jsonIn(r.execution_args) ?? {} };
 }
 
-export function createStore({ dbPath, logger } = {}) {
+export async function createStore({ dbPath, logger } = {}) {
   const finalPath = dbPath || resolveDbPath();
   const dir = path.dirname(finalPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -60,7 +60,7 @@ export function createStore({ dbPath, logger } = {}) {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA busy_timeout = 5000;");
   try {
-    applyMigrations(db, { logger });
+    await applyMigrations(db, { logger });
   } catch (err) {
     db.close();
     throw err;

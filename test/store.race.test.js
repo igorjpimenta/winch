@@ -22,7 +22,7 @@ afterEach(() => {
 test("four processes race one claim: exactly one winner, exactly one claim event", async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-race-"));
   const dbPath = path.join(dir, "store.sqlite");
-  const seed = createStore({ dbPath });
+  const seed = await createStore({ dbPath });
   const epic = seed.epic.create({ title: "E", status: "planned" });
   const story = seed.story.create({ epicId: epic.id, title: "S", status: "ready" });
   const task = seed.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
@@ -30,7 +30,7 @@ test("four processes race one claim: exactly one winner, exactly one claim event
 
   const childScript = `
     import { createStore } from ${JSON.stringify(storeUrl)};
-    const s = createStore({ dbPath: process.env.RACE_DB });
+    const s = await createStore({ dbPath: process.env.RACE_DB });
     const r = s.task.claim({ id: process.env.RACE_TASK, agentId: process.env.RACE_AGENT });
     process.stdout.write(JSON.stringify({ ok: !!r }));
     s.close();
@@ -53,7 +53,7 @@ test("four processes race one claim: exactly one winner, exactly one claim event
   assert.equal(winners.length, 1, `exactly one winner, got ${winners.length}: ${JSON.stringify(results)}`);
   assert.equal(losers.length, 3);
 
-  const check = createStore({ dbPath });
+  const check = await createStore({ dbPath });
   const claimEvents = check.db
     .prepare("SELECT * FROM events WHERE task_id=? AND note='claim'")
     .all(task.id);

@@ -62,7 +62,7 @@ if (invokedDirectly) {
   const { createStore } = await import("./store.js");
   const argv = process.argv.slice(2);
   const wIdx = argv.indexOf("--window-days");
-  const store = createStore();
+  const store = await createStore();
   try {
     const windowMs = wIdx >= 0 ? Number(argv[wIdx + 1]) * 86_400_000 : undefined;
     const report = failureReport(store, { windowMs });

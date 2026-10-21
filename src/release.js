@@ -83,7 +83,7 @@ if (invokedDirectly) {
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
   const epicId = get("--epic");
   if (!epicId) { console.error("usage: release.js --epic EPIC-x [--task TASK-y] [--version vX.Y.Z] [--base main]"); process.exit(2); }
-  const store = createStore();
+  const store = await createStore();
   try {
     const r = shipRelease(store, { epicId, taskId: get("--task"), version: get("--version"), base: get("--base") || "main" });
     console.log(r.prUrl);

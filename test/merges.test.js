@@ -10,9 +10,9 @@ import { parseMarkers, applyMergeOutcomes, collectPRs } from "../src/merges.js";
 
 let dir, store, epic, story, task;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-merges-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   epic = store.epic.create({ title: "Ship v1", status: "in_progress" });
   story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });

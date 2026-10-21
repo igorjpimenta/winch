@@ -11,9 +11,9 @@ let dir, store, handle;
 
 const DEFAULT_IDENTITY = { harness: "test", agent: "atlas", session: "sess-1" };
 
-function setup() {
+async function setup() {
   dir = mkdtempSync(path.join(tmpdir(), "winch-tools-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   ({ handle } = createToolHandlers(store, null));
 }
 

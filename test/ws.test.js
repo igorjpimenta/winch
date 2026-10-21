@@ -12,9 +12,9 @@ import { startEventServer, kindForEvent } from "../src/events-ws.js";
 
 let dir, store, srv, sockets;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-ws-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   sockets = [];
 });
 afterEach(async () => {

@@ -77,7 +77,7 @@ export function tick(store) {
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
-  const store = createStore();
+  const store = await createStore();
   try {
     console.log(JSON.stringify(tick(store)));
   } finally {

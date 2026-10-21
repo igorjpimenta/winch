@@ -15,9 +15,9 @@ function tempDb() {
   return { dir, dbPath: path.join(dir, "store.sqlite") };
 }
 
-function makeStore(t) {
+async function makeStore(t) {
   const { dir, dbPath } = tempDb();
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   t.after(() => {
     store.close();
     rmSync(dir, { recursive: true, force: true });
@@ -97,12 +97,12 @@ function seedV1(dbPath) {
   raw.close();
 }
 
-test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", (t) => {
+test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", async (t) => {
   const { dir, dbPath } = tempDb();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   seedV1(dbPath);
 
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   const cols = new Set(store.db.prepare("PRAGMA table_info(tasks)").all().map((c) => c.name));
   assert.ok(cols.has("lease_seconds"),  "lease_seconds column added");
   assert.ok(cols.has("last_heartbeat"), "last_heartbeat column added");
@@ -126,7 +126,7 @@ test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", (t) => 
   );
   store.close();
 
-  const reopened = createStore({ dbPath });
+  const reopened = await createStore({ dbPath });
   assert.equal(reopened.task.get("TASK-v1-1").title, "legacy task 1");
   assert.equal(
     reopened.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value,
@@ -137,8 +137,8 @@ test("S0.2: v1 store migrates to v2, rows preserved, reopen idempotent", (t) => 
 
 // ───────────────────────────────────────────────────────────── S0.3 CAS
 
-test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release wins", (t) => {
-  const store = makeStore(t);
+test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release wins", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
 
   const claimed = store.task.claim({ id: task.id, agentId: "agent-a" });
@@ -166,8 +166,8 @@ test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release
   assert.equal(again.status, "in_progress");
 });
 
-test("S0.3 atomicity: claim event `at` equals the claim's `claimed_at`", (t) => {
-  const store = makeStore(t);
+test("S0.3 atomicity: claim event `at` equals the claim's `claimed_at`", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
   const claimed = store.task.claim({ id: task.id, agentId: "agent-a" });
   assert.equal(claimed.lastEvent.at, claimed.claimed_at);
@@ -176,8 +176,8 @@ test("S0.3 atomicity: claim event `at` equals the claim's `claimed_at`", (t) => 
 
 // ───────────────────────────────────────────────────────── S0.4 SWEEPER
 
-test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) => {
-  const store = makeStore(t);
+test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
 
   let sweepAt = Date.now() + 10;
@@ -211,8 +211,8 @@ test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) 
   assert.equal(last.to_status, "blocked");
 });
 
-test("S0.4: sweeper ignores unexpired and non-in_progress tasks", (t) => {
-  const store = makeStore(t);
+test("S0.4: sweeper ignores unexpired and non-in_progress tasks", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
   store.task.claim({ id: task.id, agentId: "agent-a", watchdogMs: 60_000 });
   assert.deepEqual(store.task.sweepExpired({ now: Date.now() }), []);
@@ -221,8 +221,8 @@ test("S0.4: sweeper ignores unexpired and non-in_progress tasks", (t) => {
 
 // ─────────────────────────────────────────────────────────── HEARTBEAT
 
-test("heartbeat: advances last_heartbeat only for the assigned in_progress agent", (t) => {
-  const store = makeStore(t);
+test("heartbeat: advances last_heartbeat only for the assigned in_progress agent", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
 
   assert.equal(store.task.heartbeat(task.id, "agent-a"), null, "todo task cannot heartbeat");
@@ -239,8 +239,8 @@ test("heartbeat: advances last_heartbeat only for the assigned in_progress agent
 
 // ────────────────────────────────────────────────────── UPDATE EVENTS
 
-test("task.update: status change writes an event; other patches do not", (t) => {
-  const store = makeStore(t);
+test("task.update: status change writes an event; other patches do not", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
 
   store.task.update(task.id, { description: "clarified" });
@@ -256,8 +256,8 @@ test("task.update: status change writes an event; other patches do not", (t) => 
   assert.equal(evs[1].note, "finished");
 });
 
-test("task.update: actor/note optional — defaults to system", (t) => {
-  const store = makeStore(t);
+test("task.update: actor/note optional — defaults to system", async (t) => {
+  const store = await makeStore(t);
   const { task } = seedHierarchy(store);
   store.task.update(task.id, { status: "blocked" });
   const ev = eventsFor(store, task.id)[1];
@@ -266,7 +266,7 @@ test("task.update: actor/note optional — defaults to system", (t) => {
 });
 
 // ──────────────────────────────── S1.3 fixup: stale graph_flow CHECK
-test("stale graph_flow CHECK is repaired and stored values are renamed", (t) => {
+test("stale graph_flow CHECK is repaired and stored values are renamed", async (t) => {
   const { dir } = tempDb();
   const dbPath = path.join(dir, "legacy.sqlite");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -303,7 +303,7 @@ test("stale graph_flow CHECK is repaired and stored values are renamed", (t) => 
   `);
   raw.close();
 
-  const store = createStore({ dbPath });
+  const store = await createStore({ dbPath });
   // value renamed, constraint accepts the new vocabulary, inserts work
   assert.equal(store.task.get("TASK-legacy").execution_kind, "pipeclaw");
   const created = store.task.create({ storyId: "STORY-1", title: "fresh", executionKind: "pipeclaw" });

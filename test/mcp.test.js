@@ -17,22 +17,24 @@ afterEach(() => {
   dir = store = undefined;
 });
 
-function freshStore() {
+async function freshStore() {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-mcp-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   return store;
 }
 
 test("startMcpServer rejects a missing harness before connecting", async () => {
+  const store = await freshStore();
   await assert.rejects(
-    () => startMcpServer({ store: freshStore(), base: { agent: "a", session: "s" } }),
+    () => startMcpServer({ store, base: { agent: "a", session: "s" } }),
     /missing: harness/
   );
 });
 
 test("startMcpServer rejects a reserved harness before connecting", async () => {
+  const store = await freshStore();
   await assert.rejects(
-    () => startMcpServer({ store: freshStore(), base: { harness: "unknown" } }),
+    () => startMcpServer({ store, base: { harness: "unknown" } }),
     /refused declaration/
   );
 });

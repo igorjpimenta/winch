@@ -9,9 +9,9 @@ import { tick } from "../src/watcher.js";
 
 let dir, store;
 
-function setup() {
+async function setup() {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-watcher-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
 }
 
 function teardown() {

@@ -10,9 +10,9 @@ import { renderReleaseNotes, shipRelease } from "../src/release.js";
 
 let dir, store, epic, story, task;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-release-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   epic = store.epic.create({ title: "Ship v1", status: "in_progress", priority: 90, acceptance: "All gates passed" });
   story = store.story.create({ epicId: epic.id, title: "Core flow", status: "review", acceptance: "Works end-to-end" });
   task = store.task.create({ storyId: story.id, title: "Build it", executionKind: "manual" });

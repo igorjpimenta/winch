@@ -21,7 +21,7 @@ import { migrateStore } from "./migrate.js";
 export { resolveDbPath };
 
 // stdout is the data channel for every subcommand; diagnostics go to stderr.
-function openStore() {
+async function openStore() {
   return createStore({ dbPath: resolveDbPath() });
 }
 
@@ -63,7 +63,7 @@ export async function runCli(argv) {
           harness: { type: "string" },
         },
       });
-      const store = openStore();
+      const store = await openStore();
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),
@@ -82,7 +82,7 @@ export async function runCli(argv) {
     }
 
     case "watch": {
-      const store = openStore();
+      const store = await openStore();
       try {
         console.log(JSON.stringify(tick(store)));
       } finally {
@@ -99,7 +99,7 @@ export async function runCli(argv) {
       });
       const taskId = positionals[0];
       if (!taskId) fail("usage: winch resume <taskId> [--actor <name>]");
-      const store = openStore();
+      const store = await openStore();
       try {
         const r = store.task.resumeGate({ id: taskId, actor: values.actor ?? "operator" });
         if (!r) fail(`not resumable: ${taskId}`, 1);
@@ -111,7 +111,7 @@ export async function runCli(argv) {
     }
 
     case "next": {
-      const store = openStore();
+      const store = await openStore();
       try {
         const rows = readyTasks(store, { limit: 20 });
         console.log(JSON.stringify(
@@ -130,7 +130,7 @@ export async function runCli(argv) {
         options: { json: { type: "boolean" }, "window-days": { type: "string" } },
       });
       const windowMs = values["window-days"] !== undefined ? Number(values["window-days"]) * 86_400_000 : undefined;
-      const store = openStore();
+      const store = await openStore();
       try {
         const report = failureReport(store, { windowMs });
         console.log(values.json ? JSON.stringify(report, null, 2) : formatFailureReport(report));
@@ -142,7 +142,7 @@ export async function runCli(argv) {
 
     case "rollup": {
       const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
-      const store = openStore();
+      const store = await openStore();
       try {
         const out = { dispatch: dispatchFraction(store), rollup: epicTokenRollup(store) };
         console.log(values.json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
@@ -163,7 +163,7 @@ export async function runCli(argv) {
         },
       });
       if (!values.epic) fail("usage: winch release-epic --epic <id> [--task ID] [--version V] [--base B]");
-      const store = openStore();
+      const store = await openStore();
       try {
         const r = shipRelease(store, {
           epicId: values.epic,
@@ -182,7 +182,7 @@ export async function runCli(argv) {
 
     case "merge-detect": {
       const { values } = parseArgs({ args: rest, options: { "dry-run": { type: "boolean" } } });
-      const store = openStore();
+      const store = await openStore();
       try {
         const prs = collectPRs({ exec: execFileSync });
         const summary = applyMergeOutcomes(store, prs, { exec: execFileSync, dryRun: !!values["dry-run"] });
@@ -225,7 +225,7 @@ export async function runCli(argv) {
         },
       });
       if (!values.ws) fail("usage: winch serve --ws [--port N] [--host H]");
-      const store = openStore();
+      const store = await openStore();
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),

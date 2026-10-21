@@ -10,9 +10,9 @@ import { dispatchFraction, epicTokenRollup } from "../src/rollup.js";
 
 let dir, store, opsPath;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-rollup-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+  store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
   opsPath = path.join(dir, "ops.sqlite");
   const ops = new DatabaseSync(opsPath);
   ops.exec(`
