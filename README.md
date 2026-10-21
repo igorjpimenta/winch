@@ -33,7 +33,7 @@ contract itself is the only integration surface.
 | `resume <taskId> [--actor <name>]`                            | resolve a human gate: blocked → todo                    |
 | `next`                                                        | list the current ready queue                            |
 | `metrics [--json] [--window-days N]`                          | per-hop failure report                                  |
-| `rollup [--json]`                                             | dispatch fraction + epic token rollup (`WINCH_OPS_DB`)  |
+| `rollup [--json]`                                             | dispatch fraction                                       |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
 | `migrate-store --from <path> [--to <path>]`                   | copy a store to `~/.winch/store.sqlite`                 |

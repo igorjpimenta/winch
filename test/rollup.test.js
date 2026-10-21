@@ -1,30 +1,17 @@
-// rollup.test.js — S3.3: dispatch fraction + cross-DB epic token rollup.
+// rollup.test.js — S3.3: dispatch fraction from store rows only.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { createStore } from "../src/store.js";
-import { dispatchFraction, epicTokenRollup } from "../src/rollup.js";
+import { dispatchFraction } from "../src/rollup.js";
 
-let dir, store, opsPath;
+let dir, store;
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-rollup-"));
   store = await createStore({ dbPath: path.join(dir, "store.sqlite") });
-  opsPath = path.join(dir, "ops.sqlite");
-  const ops = new DatabaseSync(opsPath);
-  ops.exec(`
-    CREATE TABLE cost_by_call (
-      session_key TEXT, ts INTEGER, total_tokens INTEGER, cost_total REAL
-    );
-    INSERT INTO cost_by_call VALUES
-      ('agent:atlas:s1', 1000, 100, 0.01),
-      ('agent:atlas:s1', 2000, 200, 0.02),
-      ('agent:forge:s2', 3000, 50, 0.005);
-  `);
-  ops.close();
 });
 afterEach(() => {
   store.close();
@@ -63,33 +50,9 @@ test("dispatch fraction separates self-dispatched from operator-CLI claims", () 
   assert.ok(Math.abs(d.fraction - 2 / 3) < 1e-9);
 });
 
-test("epic token rollup joins claim sessions to cost_by_call, flags shared sessions", () => {
-  const a = claim("agent:atlas:s1");  // epic A: session atlas (2 calls, 300 tok, $0.03)
-  claim("agent:forge:s2", { epic: a.epic }); // epic A, second session (1 call, 50 tok, $0.005)
-  // epic B shares the forge session → shared
-  const epicB = store.epic.create({ title: "E-B", status: "planned" });
-  const storyB = store.story.create({ epicId: epicB.id, title: "SB", status: "ready" });
-  const taskB = store.task.create({ storyId: storyB.id, title: "TB", executionKind: "manual" });
-  store.task.claim({ id: taskB.id, agentId: "y", sessionKey: "agent:forge:s2" });
-
-  const r = epicTokenRollup(store, { opsDbPath: opsPath });
-  const epicA = r.epics.find((e) => e.epicId === a.epic.id);
-  const foundB = r.epics.find((e) => e.epicId === epicB.id);
-  assert.ok(epicA && foundB);
-  assert.equal(epicA.sessions, 2);
-  assert.equal(epicA.calls, 3);
-  assert.equal(epicA.tokens, 350);
-  assert.ok(Math.abs(epicA.costUsd - 0.035) < 1e-9);
-  assert.equal(foundB.sessions, 1);
-  assert.equal(foundB.tokens, 50);
-  assert.ok(epicA.sharedWithOtherEpics, "forge session touched both epics");
-  assert.deepEqual(r.sharedSessions, ["agent:forge:s2"]);
-  assert.equal(r.totals.sessions, 3);
-});
-
-test("rollup skips epics with no claims in window", () => {
+test("dispatch fraction ignores claims outside the window", () => {
   claim("agent:atlas:s1");
-  const r = epicTokenRollup(store, { opsDbPath: opsPath, windowMs: -60_000 }); // claims fall outside
-  assert.equal(r.epics.length, 0);
-  assert.deepEqual(r.sharedSessions, []);
+  const d = dispatchFraction(store, { windowMs: -60_000 }); // claim falls outside
+  assert.equal(d.total, 0);
+  assert.equal(d.fraction, 0);
 });
