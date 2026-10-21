@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../src/store.js";
-import { createToolHandlers, SESSION_TOOL_BUDGETS } from "../src/tools.js";
+import { createToolHandlers, SESSION_TOOL_BUDGETS, AGENT_TOOL_BUDGETS } from "../src/tools.js";
 
 let dir, store, handle;
 
@@ -284,4 +284,63 @@ test("handle refuses an unknown-flavoured identity instead of minting a key", as
   );
   // and nothing was charged or claimed in the attempt
   assert.equal(store.task.list({ status: "todo" }).length, 1);
+});
+
+// ───────────────────────────────────────────── DM fixes: budgets, gates
+
+test("budget exhaustion with no current task still writes a taskless marker", async () => {
+  SESSION_TOOL_BUDGETS["solo"] = 1;
+  try {
+    const identity = { harness: "test", agent: "solo", session: "sess-9" };
+    const res = await call("backlog_next", { dryRun: true }, identity);
+    assert.equal(res.details.status, "budget_exhausted");
+    assert.equal(res.details.scope, "session");
+    const rows = store.db.prepare("SELECT * FROM events WHERE note LIKE 'session budget exhausted%'").all();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].task_id, null, "taskless marker row");
+    assert.equal(rows[0].from_status, null);
+    assert.equal(rows[0].actor, "solo");
+  } finally {
+    delete SESSION_TOOL_BUDGETS["solo"];
+  }
+});
+
+test("agent budget halts a fresh session after cross-session spend", async () => {
+  SESSION_TOOL_BUDGETS["camp"] = 100;
+  AGENT_TOOL_BUDGETS["camp"] = 2;
+  try {
+    seedReadyTask();
+    const r1 = await call("backlog_next", { dryRun: true }, { harness: "test", agent: "camp", session: "s-a" });
+    assert.equal(r1.details.status, "ok");
+    const r2 = await call("backlog_next", { dryRun: true }, { harness: "test", agent: "camp", session: "s-b" });
+    assert.equal(r2.details.status, "budget_exhausted", "new session, same agent — halted");
+    assert.equal(r2.details.scope, "agent");
+    assert.match(r2.content[0].text, /Agent budget exhausted/);
+    const rows = store.db.prepare("SELECT * FROM events WHERE note LIKE 'agent budget exhausted%'").all();
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].note, /2\/2/);
+  } finally {
+    delete SESSION_TOOL_BUDGETS["camp"];
+    delete AGENT_TOOL_BUDGETS["camp"];
+  }
+});
+
+test("backlog_block with gateType opens a canonical gate event", async () => {
+  const { task } = seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
+  const res = await call("backlog_block", { taskId: task.id, reason: "ADR review", gateType: "architecture" });
+  assert.equal(res.details.status, "ok");
+  assert.equal(store.task.get(task.id).gate_type, "architecture");
+  const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'gate open:%'").all(task.id);
+  assert.equal(ev.length, 1, "canonical vocabulary, not a plain blocked note");
+  assert.match(ev[0].note, /gate open: architecture — ADR review/);
+});
+
+test("backlog_resume on a dissolved gate answers gate_dissolved", async () => {
+  const { task } = seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
+  await call("backlog_block", { taskId: task.id, reason: "need signoff", gateType: "release" });
+  // Unmerged close dissolves the gate and requeues the task.
+  store.task.update(task.id, { status: "todo", assigned: null, actor: "merge-detector", note: "closed unmerged: PR #1" });
+  const res = await call("backlog_resume", { taskId: task.id }, { harness: "test", agent: "operator", session: "op-1" });
+  assert.equal(res.details.reason, "gate_dissolved");
+  assert.equal(res.details.taskStatus, "todo");
 });

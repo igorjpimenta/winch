@@ -136,3 +136,27 @@ test("epic close with version but no release task records a skip, writes nothing
     0
   );
 });
+
+test("failed tag writes no release event — the wire never claims an untagged ship", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}\nRelease: v9.9.9`;
+  store.task.update(task.id, { status: "done", actor: "herald", note: "done" });
+  const exec = () => { throw new Error("fatal: cannot lock ref 'refs/tags/v9.9.9'"); };
+  const out = applyMergeOutcomes(store, [{ number: 21, state: "MERGED", title: "ship", body }], { exec });
+  assert.deepEqual(out.tagged, [], "nothing tagged");
+  assert.deepEqual(out.skipped, ["tag:v9.9.9"], "failure recorded, no event alongside");
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE note LIKE 'release shipped:%'").get().n,
+    0, "no shipped row without a tag"
+  );
+  assert.deepEqual(out.closedEpics, [epic.id], "epic close reflects the merged PR, not the tag");
+});
+
+test("merge completing a held task names the displaced holder in the note", () => {
+  store.task.claim({ id: task.id, agentId: "builder" });
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  const out = applyMergeOutcomes(store, [pr(22, "MERGED", body, "feat: landed")]);
+  assert.deepEqual(out.doneTasks, [task.id]);
+  const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'merged: PR%'").all(task.id);
+  assert.equal(ev.length, 1);
+  assert.match(ev[0].note, /merged: PR #22 \(displaced builder\)/);
+});

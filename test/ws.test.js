@@ -165,6 +165,9 @@ test("kindForEvent: task family maps; gate rows key on note vocabulary or joined
     [{ from_status: "in_progress", to_status: "in_progress", note: "session budget exhausted: 40/40" }, null, "budget.exhausted"],
     [{ from_status: "done", to_status: "done", note: "release shipped: v2.0.0" }, null, "release.shipped"],
     [{ from_status: "blocked", to_status: "todo", note: "manual reopen" }, null, "task.released"],
+    [{ from_status: "blocked", to_status: "blocked", note: "gate waiting: 24h unanswered" }, { gate_type: "roadmap" }, "gate.waiting"],
+    [{ from_status: "in_progress", to_status: "in_progress", note: "agent budget exhausted: 300/300 backlog calls across sessions; claims halted" }, null, "budget.exhausted"],
+    [{ from_status: null, to_status: null, note: "session budget exhausted: 60/60 backlog calls; claims halted" }, null, "budget.exhausted"],
     [{ from_status: "todo", to_status: "cancelled", note: "cut" }, null, "task.cancelled"],
   ];
   for (const [row, task, want] of cases) {

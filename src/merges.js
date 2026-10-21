@@ -33,12 +33,17 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
       if (markers.taskId) {
         const task = store.task.get(markers.taskId);
         if (task && task.status !== "done") {
+          // A merge lands regardless of who holds the claim. When it takes
+          // a task out from under a working agent, the note names the
+          // displacement — the agent's next tool call would otherwise fail
+          // with no account of why its task completed itself.
+          const displaced = task.status === "in_progress" && task.assigned ? ` (displaced ${task.assigned})` : "";
           if (!dryRun) {
             store.task.update(task.id, {
               status: "done",
               result_summary: `merged via PR #${pr.number}: ${pr.title}`,
               actor: "merge-detector",
-              note: `merged: PR #${pr.number}`,
+              note: `merged: PR #${pr.number}${displaced}`,
             });
           }
           out.doneTasks.push(task.id);
@@ -52,12 +57,25 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
         }
         // The shipped marker hangs off the release task: events are
         // task-scoped, so an epic-level milestone without a task anchor has
-        // nowhere honest to live. No task anchor, no event.
+        // nowhere honest to live. No task anchor, no event — but the missing
+        // anchor is recorded before the tag attempt, so a tag failure still
+        // reports both skips instead of hiding the unanchored release.
         const releaseTask = markers.taskId ? store.task.get(markers.taskId) : null;
         const releaseNote = `release shipped: ${markers.version}`;
         const already = releaseTask
           ? store.db.prepare("SELECT 1 FROM events WHERE task_id=? AND note=?").get(releaseTask.id, releaseNote)
           : null;
+        if (!releaseTask && !already) out.skipped.push(`release:${markers.version} (no release task)`);
+        // Tag before the event write: the shipped event asserts a tag exists,
+        // so a failed tag records a skip and writes nothing — the wire must
+        // never claim an untagged shipment. No tag backend (library use
+        // without exec) means nothing to verify, and the write stands.
+        if (exec && !out.tagged.includes(markers.version)) {
+          if (!dryRun) {
+            try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
+          }
+          out.tagged.push(markers.version);
+        }
         if (releaseTask && !already) {
           if (!dryRun) {
             const cur = store.task.get(releaseTask.id);
@@ -65,14 +83,6 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
               "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
             ).run(releaseTask.id, cur.status, cur.status, "merge-detector", releaseNote, Date.now());
           }
-        } else if (!already) {
-          out.skipped.push(`release:${markers.version} (no release task)`);
-        }
-        if (exec && !out.tagged.includes(markers.version)) {
-          if (!dryRun) {
-            try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
-          }
-          out.tagged.push(markers.version);
         }
       }
     } else if (state === "CLOSED") {

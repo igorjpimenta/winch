@@ -90,3 +90,32 @@ test("backlog_block with gateType + watcher manifest carries gate fields", async
   assert.equal(m.blocked[0].gate_type, "architecture");
   assert.ok(m.blocked[0].blocked_at > 0);
 });
+
+test("recordGateWaits writes one 24h/72h row per gate, never twice", () => {
+  const { task } = seed({ assigned: "builder", taskStatus: "in_progress" });
+  store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "builder" });
+  assert.deepEqual(store.task.recordGateWaits({}), [], "fresh gate is silent");
+  store.db.prepare("UPDATE tasks SET blocked_at=? WHERE id=?").run(Date.now() - 25 * 3600 * 1000, task.id);
+  const w1 = store.task.recordGateWaits({});
+  assert.equal(w1.length, 1);
+  assert.equal(w1[0].taskId, task.id);
+  assert.equal(w1[0].label, "24h");
+  const rows = store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'gate waiting:%'").all(task.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note, "gate waiting: 24h unanswered");
+  assert.equal(rows[0].from_status, "blocked");
+  assert.equal(rows[0].to_status, "blocked");
+  assert.deepEqual(store.task.recordGateWaits({}), [], "rerun writes nothing");
+  store.db.prepare("UPDATE tasks SET blocked_at=? WHERE id=?").run(Date.now() - 73 * 3600 * 1000, task.id);
+  const w2 = store.task.recordGateWaits({});
+  assert.deepEqual(w2.map((w) => w.label), ["72h"], "next threshold fires once");
+  assert.deepEqual(store.task.recordGateWaits({}), [], "both levels recorded — silent after");
+});
+
+test("recordGateWaits ignores plain blocks and unstamped legacy gates", () => {
+  const a = seed();
+  store.task.update(a.task.id, { status: "blocked", actor: "x", note: "blocked: reason" });
+  // Legacy shape: gate_type stamped but no blocked_at to age from.
+  store.db.prepare("UPDATE tasks SET gate_type='roadmap', blocked_at=NULL WHERE id=?").run(a.task.id);
+  assert.deepEqual(store.task.recordGateWaits({}), [], "nothing to age from, nothing written");
+});

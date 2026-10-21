@@ -14,12 +14,18 @@ import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 
 // Session budgets count backlog tool calls per sessionKey, not model turns.
-// The economic termination key is this latch plus the claim lease in the
-// store; semantic stop stays backlog_done. Latching is one-way: exhausted
-// sessions halt new claims mid-session by design. If the runner ever grows an
-// agent-loop turn cap, wire budgets there and retire this counter.
+// The agent rollup sums every session a single agent ever charged, so a fresh
+// wake cannot respawn a full allowance — the latch that stops a runaway
+// session, plus the rollup that stops a runaway campaign. Latching is one-way:
+// exhausted sessions halt new claims mid-session by design. If the runner ever
+// grows an agent-loop turn cap, wire budgets there and retire this counter.
 export const SESSION_TOOL_BUDGETS = { atlas: 120, scout: 40, forge: 60, builder: 120, lens: 60, herald: 40 };
 const DEFAULT_SESSION_BUDGET = 60;
+// Campaign allowance per agent, defaulting to a multiple of the session
+// budget: a campaign that needs more than ~5 sessions of calls is itself the
+// runaway the session latch cannot see. Per-agent overrides win.
+export const AGENT_TOOL_BUDGETS = {};
+const DEFAULT_AGENT_BUDGET_MULTIPLE = 5;
 
 function ok(text, details) {
   return { content: [{ type: "text", text }], details };
@@ -65,7 +71,8 @@ function renderReceiverPrompt({ task, story, epic, artifacts }) {
 export function createToolHandlers(store, logger) {
   function chargeBudget(identity) {
     const limit = SESSION_TOOL_BUDGETS[identity.agent] ?? DEFAULT_SESSION_BUDGET;
-    return store.sessionBudget.charge({ sessionKey: identitySessionKey(identity), agentId: identity.agent, limit });
+    const agentLimit = AGENT_TOOL_BUDGETS[identity.agent] ?? limit * DEFAULT_AGENT_BUDGET_MULTIPLE;
+    return store.sessionBudget.charge({ sessionKey: identitySessionKey(identity), agentId: identity.agent, limit, agentLimit });
   }
 
   const TOOL_DEFS = [
@@ -176,19 +183,30 @@ export function createToolHandlers(store, logger) {
       const agentId = identity.agent;
       const sessionKey = identitySessionKey(identity);
       const budget = chargeBudget(identity);
-      if (budget.exhausted) {
+      if (budget.exhausted || budget.agentExhausted) {
+        // Latch marker goes on the wire even with no current task: NULL
+        // task_id + NULL statuses is the taskless shape, matched by note
+        // vocabulary ahead of every status rule.
+        // Session exhaustion keeps its exact note and guidance (existing
+        // tests and the metrics bucket match on the prefix); agent-only
+        // exhaustion gets its own vocabulary. When both trip, the session
+        // note wins — the agent is ending this session either way.
+        const sessionScope = budget.exhausted;
+        const note = sessionScope
+          ? `session budget exhausted: ${budget.tool_calls}/${budget.limit_calls} backlog calls; claims halted`
+          : `agent budget exhausted: ${budget.agentToolCalls}/${budget.agentLimitCalls} backlog calls across sessions; claims halted`;
         const cur = store.db.prepare(
           "SELECT id FROM tasks WHERE assigned=? AND status='in_progress' ORDER BY claimed_at DESC LIMIT 1"
         ).get(agentId);
-        if (cur) {
-          store.db.prepare(
-            "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
-          ).run(cur.id, "in_progress", "in_progress", agentId,
-            `session budget exhausted: ${budget.tool_calls}/${budget.limit_calls} backlog calls; claims halted`, Date.now());
-        }
+        store.db.prepare(
+          "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(cur?.id ?? null, cur ? "in_progress" : null, cur ? "in_progress" : null, agentId, note, Date.now());
+        const guidance = sessionScope
+          ? "Session budget exhausted — finish the current task with backlog_done, then end the session with a final summary. Do not retry claiming."
+          : "Agent budget exhausted across sessions — finish the current task with backlog_done, then end the session. Further wakes will also halt: this needs an operator, not a retry.";
         return ok(
-          JSON.stringify({ exhausted: true, toolCalls: budget.tool_calls, limit: budget.limit_calls, guidance: "Session budget exhausted — finish the current task with backlog_done, then end the session with a final summary. Do not retry claiming." }),
-          { status: "budget_exhausted", agentId, toolCalls: budget.tool_calls, limit: budget.limit_calls }
+          JSON.stringify({ exhausted: true, scope: sessionScope ? "session" : "agent", toolCalls: budget.tool_calls, limit: budget.limit_calls, agentToolCalls: budget.agentToolCalls, agentLimit: budget.agentLimitCalls, guidance }),
+          { status: "budget_exhausted", scope: sessionScope ? "session" : "agent", agentId, toolCalls: budget.tool_calls, limit: budget.limit_calls }
         );
       }
       try {
@@ -287,9 +305,16 @@ export function createToolHandlers(store, logger) {
       if (task.status !== "in_progress" && task.status !== "todo") return err(`${task.id} is ${task.status}; blocking applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
       try {
         const reason = clampNote(args.reason, 1000);
-        const patch = { status: "blocked", actor: agentId, note: `blocked: ${reason}` };
-        if (args?.gateType) patch.gateType = args.gateType;
-        const updated = store.task.update(task.id, patch);
+        let updated;
+        if (args?.gateType) {
+          // Human gates open through openGate, not the generic update path:
+          // same-transaction `gate open:` event, canonical note vocabulary,
+          // exactly-once CAS. The generic path stays for plain blocks.
+          updated = store.task.openGate({ id: task.id, gateType: args.gateType, reason, actor: agentId });
+          if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
+        } else {
+          updated = store.task.update(task.id, { status: "blocked", actor: agentId, note: `blocked: ${reason}` });
+        }
         let depResult = null;
         if (args?.blockedBy) {
           const r = addDep(store, task.id, args.blockedBy.id);
@@ -310,7 +335,21 @@ export function createToolHandlers(store, logger) {
     async backlog_resume(args, identity) {
       const actor = args?.actor ?? identity.agent;
       const task = store.task.resumeGate({ id: args?.taskId, actor });
-      if (!task) return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
+      if (!task) {
+        // Name the common false alarm: the task was gated before (a gate
+        // note sits in its trail) but the gate has since dissolved — e.g. an
+        // unmerged close requeued it. The operator approved something real;
+        // "not resumable" alone would read as operator error.
+        const current = args?.taskId ? store.task.get(args.taskId) : null;
+        const lastGate = current && store.db.prepare(
+          "SELECT note FROM events WHERE task_id=? AND (note LIKE 'gate open:%' OR note='gate resume') ORDER BY id DESC LIMIT 1"
+        ).get(current.id);
+        // An opened-but-never-resolved gate on a non-blocked task dissolved
+        // without approval — e.g. an unmerged close requeued it. A trailing
+        // 'gate resume' is the opposite: already resolved, plain not_resumable.
+        if (lastGate && lastGate.note.startsWith("gate open:")) return err(`backlog_resume: ${current.id} was gated but the gate has dissolved (status ${current.status}) — nothing to resume; re-gate with backlog_block if approval is still needed.`, "gate_dissolved", { taskId: current.id, taskStatus: current.status });
+        return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
+      }
       logger?.info?.(`backlog: ${actor} resumed ${task.id}`);
       return ok(JSON.stringify({ ok: true, task: { id: task.id, status: task.status, gate_type: task.gate_type, assigned: task.assigned } }), { status: "ok", taskId: task.id, actor });
     },

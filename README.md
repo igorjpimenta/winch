@@ -47,14 +47,27 @@ new row to all connected clients as JSON text frames:
   story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
   insert, in id order.
 
-Kinds wired so far: `task.*` family, `gate.opened` / `gate.resolved`,
-`budget.exhausted` (latch note), and now `release.shipped` (written by
-merge-detect onto the release task when an epic closes with a version
-marker; reruns deduplicate on the note). History and live rows share one
-envelope shape.
+Kinds wired so far: `task.*` family, `gate.opened` / `gate.resolved` /
+`gate.waiting` (24h/72h age thresholds, one row per gate per level, written
+by the watcher tick), `budget.exhausted` (session latch, plus an
+agent-scoped rollup across sessions so a fresh wake cannot respawn a full
+allowance; latch markers with no current task are taskless rows matched by
+note vocabulary), and `release.shipped` (written by merge-detect onto the
+release task when an epic closes with a version marker — tag first, event
+only on a successful tag; reruns deduplicate on the note). History and
+live rows share one envelope shape.
 
 Kinds above are the full catalog the store can emit today; anything not
 matched is a store change that needs a new kind, not a silent default.
+
+Delivery-dynamics notes the wire will not tell you: heartbeats renew the
+claim lease (only silence gets swept); human gates open through `openGate`
+with canonical `gate open:` notes; a merge can complete a task out from
+under its holder and names the displacement in the note; an unmerged close
+dissolves its gate (late approvals answer `gate_dissolved`); starvation
+lives in the watcher manifest (`deferred` list, per-task `idleMs`), not the
+stream; a disputed completion is a new ticket linked by dep edge with a
+`supersedes: TASK-x` note, never a rewrite of history.
 
 The server never interprets a row — a gate opening is just another event,
 and reminders, digests and dashboards are subscriber code. Reconnect replays

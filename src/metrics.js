@@ -13,7 +13,7 @@ export function failureReport(store, { now = Date.now(), windowMs = 30 * 24 * 3_
     SELECT ev.id, ev.task_id AS taskId, ev.note, ev.at
       FROM events ev
      WHERE ev.at >= ?
-       AND (ev.note = 'blocked: max attempts' OR ev.note LIKE 'session budget exhausted%')
+       AND (ev.note = 'blocked: max attempts' OR ev.note LIKE 'session budget exhausted%' OR ev.note LIKE 'agent budget exhausted%')
      ORDER BY ev.at DESC
   `).all(since);
 
