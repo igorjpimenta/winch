@@ -50,11 +50,33 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
           if (!dryRun) store.epic.update(epic.id, { status: "done" });
           out.closedEpics.push(epic.id);
         }
+        // The shipped marker hangs off the release task: events are
+        // task-scoped, so a version without a task anchor has nowhere honest
+        // to live. The missing anchor reports before the tag attempt, so a
+        // tag failure still surfaces both skips instead of hiding one.
+        const releaseTask = markers.taskId ? store.task.get(markers.taskId) : null;
+        const releaseNote = `release shipped: ${markers.version}`;
+        const already = releaseTask
+          ? store.db.prepare("SELECT 1 FROM events WHERE task_id=? AND note=?").get(releaseTask.id, releaseNote)
+          : null;
+        if (!releaseTask && !already) out.skipped.push(`release:${markers.version} (no release task)`);
+        // Tag before the event: the shipped row asserts a tag exists, so a
+        // failed tag records a skip and writes nothing — the wire never
+        // claims an untagged shipment. No tag backend (library use without
+        // exec) means nothing to verify, and the write stands.
         if (exec && !out.tagged.includes(markers.version)) {
           if (!dryRun) {
             try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
           }
           out.tagged.push(markers.version);
+        }
+        if (releaseTask && !already) {
+          if (!dryRun) {
+            const cur = store.task.get(releaseTask.id);
+            store.db.prepare(
+              "INSERT INTO events(task_id, from_status, to_status, kind, actor, note, at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            ).run(releaseTask.id, cur.status, cur.status, "release.shipped", "merge-detector", releaseNote, Date.now());
+          }
         }
       }
     } else if (state === "CLOSED") {

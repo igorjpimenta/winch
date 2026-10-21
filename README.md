@@ -48,17 +48,19 @@ new row to all connected clients as JSON text frames:
   story,epic,acceptance,artifacts,assignee},"actor":"…","note":"…"}` per
   insert, in id order.
 
-Kinds on the wire come in two families — `task.*` for task lifecycle and
-`gate.*` for gate lifecycle — each declared by its producer at write time
-and stored on the row's `kind` column (`openGate`, `resumeGate`,
-merge-detect's dissolve path; human gates open exclusively through
-`openGate`). The emitter feeds the stored kind straight through; otherwise
-a row maps by transition structure alone. Notes never classify anything:
-they are free text and can change, so pre-kind rows keep exactly the
-meanings they streamed with — an append-only log keeps its history.
+Kinds on the wire come in three families — `task.*` for task lifecycle,
+`gate.*` for gate lifecycle, `release.*` for shipment — each declared by its
+producer at write time and stored on the row's `kind` column (`openGate`,
+`resumeGate`, merge-detect's dissolve and ship paths; human gates open
+exclusively through `openGate`). A shipped row asserts a tag exists:
+merge-detect tags first and writes nothing on tag failure. The emitter feeds
+the stored kind straight through; otherwise a row maps by transition
+structure alone. Notes never classify anything: they are free text and can
+change, so pre-kind rows keep exactly the meanings they streamed with — an
+append-only log keeps its history.
 The closed catalog lives in `src/events-ws.js` and is named here by family
-only, so the two cannot drift. Budget and release kinds land in follow-up
-PRs. History and live rows share one envelope shape.
+only, so the two cannot drift. Budget kinds ride the follow-up that retires
+spend metering. History and live rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.
