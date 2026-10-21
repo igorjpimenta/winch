@@ -10,7 +10,7 @@ import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { failureReport, formatFailureReport } from "./metrics.js";
-import { dispatchFraction, epicTokenRollup } from "./rollup.js";
+import { dispatchFraction } from "./rollup.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
@@ -32,7 +32,7 @@ const USAGE = `usage: winch <command>
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
   metrics [--json] [--window-days N]     per-hop failure report
-  rollup [--json]                        dispatch fraction + epic token rollup
+  rollup [--json]                        dispatch fraction
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
   migrate-store --from <path> [--to <path>]
@@ -142,7 +142,7 @@ export async function runCli(argv) {
       const { values } = parseArgs({ args: rest, options: { json: { type: "boolean" } } });
       const store = openStore();
       try {
-        const out = { dispatch: dispatchFraction(store), rollup: epicTokenRollup(store) };
+        const out = { dispatch: dispatchFraction(store) };
         console.log(values.json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
       } finally {
         store.close();
