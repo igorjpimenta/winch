@@ -28,11 +28,12 @@ export const MAX_ACTIVE_PER_AGENT = 2;
  *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
  *   unrouted — claimable but unassigned, each with idleMs since last activity: heartbeat polls own these, never woken
  */
-export function tick(store) {
+export function tick(store, { config: override = null } = {}) {
+  const cfg = override ?? store.config;
   const nowTs = Date.now();
   const swept = store.task.sweepExpired({});
   const waits = store.task.recordGateWaits({ now: nowTs });
-  const claimable = readyTasks(store, { limit: 50 }).map((r) => ({
+  const claimable = readyTasks(store, { limit: cfg.scanLimit }).map((r) => ({
     taskId: r.task.id,
     title: r.task.title,
     executionKind: r.task.execution_kind,
@@ -43,8 +44,8 @@ export function tick(store) {
     epicId: r.epic.id,
   }));
   const blocked = store.db
-    .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM tasks WHERE status='blocked' ORDER BY updated_at DESC LIMIT 20")
-    .all();
+    .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM tasks WHERE status='blocked' ORDER BY updated_at DESC LIMIT ?")
+    .all(cfg.blockedLimit);
   // Gated tasks are separated from plain blocks for visibility. Who should
   // be told about them is a subscriber decision — the events WebSocket
   // streams every row, and clients track their own seen state.
@@ -61,10 +62,10 @@ export function tick(store) {
     active.set(r.assigned, r.n);
   }
   const routed = claimable.filter(
-    (c) => c.assigned && (active.get(c.assigned) ?? 0) < MAX_ACTIVE_PER_AGENT
+    (c) => c.assigned && (active.get(c.assigned) ?? 0) < cfg.maxActivePerAgent
   );
   const deferred = claimable
-    .filter((c) => c.assigned && (active.get(c.assigned) ?? 0) >= MAX_ACTIVE_PER_AGENT)
+    .filter((c) => c.assigned && (active.get(c.assigned) ?? 0) >= cfg.maxActivePerAgent)
     .map((c) => ({ ...c, activeCount: active.get(c.assigned) }));
   const unrouted = claimable
     .filter((c) => !c.assigned)

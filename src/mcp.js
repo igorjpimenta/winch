@@ -70,7 +70,9 @@ export async function startMcpServer({ store, base, logger }) {
         try {
           const identity = resolveIdentity({ meta: extra?._meta, base: declared });
           logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
-          const res = await handle(def.name, args, identity);
+          // Per-call config overlay rides the same trusted meta channel as
+          // agent/session; malformed knobs refuse the call, never the server.
+          const res = await handle(def.name, args, identity, extra?._meta);
           return { content: res.content };
         } catch (err) {
           return toolErrorResult(err);

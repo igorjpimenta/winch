@@ -2,6 +2,7 @@
 // needs the DB resolves it through paths.js: WINCH_DB, else
 // ~/.winch/store.sqlite.
 
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store.js";
@@ -10,15 +11,32 @@ import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
-import { startEventServer, DEFAULT_WS_PORT } from "./events-ws.js";
+import { startEventServer } from "./events-ws.js";
 import { assertDeclaration } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 
 export { resolveDbPath };
 
 // stdout is the data channel for every subcommand; diagnostics go to stderr.
-function openStore() {
-  return createStore({ dbPath: resolveDbPath() });
+function openStore(explicitConfig) {
+  return createStore({ dbPath: resolveDbPath(), config: explicitConfig });
+}
+
+// --config takes a JSON object or a path to a JSON file, the way --harness
+// takes a name: explicit object > WINCH_* env > code defaults. Malformed
+// config fails the command, naming the key.
+function loadConfig(values) {
+  if (!values.config) return undefined;
+  const raw = String(values.config);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(readFileSync(raw, "utf8"));
+    } catch (err) {
+      fail(`winch: --config is neither JSON nor a readable file: ${err?.message ?? err}`);
+    }
+  }
 }
 
 const USAGE = `usage: winch <command>
@@ -52,9 +70,10 @@ export async function runCli(argv) {
         args: rest,
         options: {
           harness: { type: "string" },
+          config: { type: "string" },
         },
       });
-      const store = openStore();
+      const store = openStore(loadConfig(values));
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),
@@ -73,7 +92,12 @@ export async function runCli(argv) {
     }
 
     case "watch": {
-      const store = openStore();
+      const { values } = parseArgs({
+        args: rest,
+        options: { config: { type: "string" } },
+        allowPositionals: true,
+      });
+      const store = openStore(loadConfig(values));
       try {
         console.log(JSON.stringify(tick(store)));
       } finally {
@@ -165,10 +189,11 @@ export async function runCli(argv) {
           ws: { type: "boolean" },
           port: { type: "string" },
           host: { type: "string" },
+          config: { type: "string" },
         },
       });
-      if (!values.ws) fail("usage: winch serve --ws [--port N] [--host H]");
-      const store = openStore();
+      if (!values.ws) fail("usage: winch serve --ws [--port N] [--host H] [--config JSON|PATH]");
+      const store = openStore(loadConfig(values));
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),
@@ -177,9 +202,14 @@ export async function runCli(argv) {
       // localhost-only unless asked: the stream carries raw store rows,
       // so it stays behind the loopback interface or a bearer-checked proxy.
       const host = values.host ?? "127.0.0.1";
-      const port = values.port ? Number(values.port) : DEFAULT_WS_PORT;
+      // Explicit --port wins; otherwise the store's resolved config applies
+      // (explicit --config object > WINCH_WS_PORT env > 38291 default).
+      const port = values.port ? Number(values.port) : undefined;
+      if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
+        fail(`winch: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
+      }
       await startEventServer({ store, port, host, logger });
-      logger.info(`winch: events on ws://${host}:${port} (append-only; subscribers track their own state)`);
+      logger.info(`winch: events on ws://${host}:${port ?? store.config.wsPort} (append-only; subscribers track their own state)`);
       return;
     }
 

@@ -110,7 +110,11 @@ export function toEventMessage(store, row) {
   };
 }
 
-export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.0.1", intervalMs = 1000, logger } = {}) {
+export function startEventServer({ store, port = null, host = "127.0.0.1", intervalMs = null, historyLimit = null, logger } = {}) {
+  const cfg = store.config ?? {};
+  const listenPort = port ?? cfg.wsPort ?? DEFAULT_WS_PORT;
+  const pollMs = intervalMs ?? cfg.wsIntervalMs ?? 1000;
+  const histLimit = historyLimit ?? cfg.wsHistoryLimit ?? HISTORY_LIMIT;
   const clients = new Set();
   let cursor = lastEventId(store);
 
@@ -146,7 +150,7 @@ export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
       socket.write(encodeFrame(JSON.stringify({ type: "welcome", payload: "v2", lastEventId: cursor })));
-      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0).map((row) => toEventMessage(store, row)) })));
+      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) })));
     } catch {
       clients.delete(socket);
     }
@@ -191,19 +195,19 @@ export function startEventServer({ store, port = DEFAULT_WS_PORT, host = "127.0.
 
   const timer = setInterval(() => {
     try {
-      const rows = eventsSince(store, cursor);
+      const rows = eventsSince(store, cursor, histLimit);
       if (!rows.length) return;
       cursor = rows[rows.length - 1].id;
       for (const row of rows) broadcast(toEventMessage(store, row));
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }
-  }, intervalMs);
+  }, pollMs);
   if (typeof timer.unref === "function") timer.unref();
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, host, () => {
+    server.listen(listenPort, host, () => {
       resolve({
         port: server.address().port,
         host,
