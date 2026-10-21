@@ -1,8 +1,8 @@
 // store.js — sqlite-backed backlog data layer.
 //
-// Schema lives in schema.js; Umzug (migrations.js) applies the versioned
-// files and tracks the ledger. node:sqlite (built-in, Node 22+) — zero
-// native deps.
+// Schema lives in src/migrations/; Umzug (migrations.js) applies the
+// versioned files and tracks the ledger. node:sqlite (built-in, Node 22+)
+// — zero native deps.
 //
 // Tables: epics, stories, tasks, deps, events, session_budgets. JSON columns hold capability
 // arrays + execution_args opaquely. Statuses validated via CHECK constraints
