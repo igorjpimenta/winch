@@ -15,6 +15,13 @@
       "when": 1792609467403,
       "tag": "0001_add-events-kind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792612691655,
+      "tag": "0002_drop-session-budgets",
+      "breakpoints": true
     }
   ]
 }

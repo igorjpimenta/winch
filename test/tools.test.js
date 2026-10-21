@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../src/store.js";
-import { createToolHandlers, SESSION_TOOL_BUDGETS } from "../src/tools.js";
+import { createToolHandlers } from "../src/tools.js";
 
 let dir, store, handle;
 
@@ -135,51 +135,6 @@ test("backlog_resume resumes a gated task for the caller, and rejects a second r
   assert.equal(again.details.reason, "not_resumable");
 });
 
-// ───────────────────────────────────────────────────── S1.3 session budgets
-
-test("per-agent budgets match the plan's two-key termination table", () => {
-  assert.deepEqual(SESSION_TOOL_BUDGETS, { atlas: 120, scout: 40, forge: 60, builder: 120, lens: 60, herald: 40 });
-});
-
-test("budget exhausts new claims, latches, and never blocks completion", async () => {
-  SESSION_TOOL_BUDGETS["bud"] = 2;
-  try {
-    const identity = { harness: "test", agent: "bud", session: "sess-1" };
-    const { task } = seedReadyTask({ assigned: "bud", taskStatus: "in_progress" });
-    seedReadyTask(); // unassigned claimable candidate for dryRun
-
-    const first = await call("backlog_next", { dryRun: true }, identity);
-    assert.equal(first.details.status, "ok");
-    const second = await call("backlog_next", { dryRun: true }, identity);
-    assert.equal(second.details.status, "budget_exhausted");
-    assert.match(second.content[0].text, /Session budget exhausted/);
-
-    // event row on the session's in-progress task
-    const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'session budget%'").all(task.id);
-    assert.equal(ev.length, 1);
-    assert.match(ev[0].note, /2\/2/);
-
-    // latched — budget key is the resolved harness:agent:session triple
-    const row = store.sessionBudget.get("test:bud:sess-1");
-    assert.ok(row.exhausted_at > 0);
-
-    // completion still allowed after exhaustion (finish, don't strand)
-    const done = await call("backlog_done", { taskId: task.id, resultSummary: "closed despite budget" }, identity);
-    assert.equal(done.details.status, "ok");
-    assert.equal(done.details.budget.exhausted, true);
-    assert.equal(store.task.get(task.id).status, "done");
-  } finally {
-    delete SESSION_TOOL_BUDGETS["bud"];
-  }
-});
-
-test("unknown agents fall back to the default budget", async () => {
-  const identity = { harness: "test", agent: "random-agent", session: "sess-1" };
-  seedReadyTask();
-  const res = await call("backlog_next", { dryRun: true }, identity);
-  assert.equal(res.details.status, "ok");
-  assert.equal(res.details.agentId, "random-agent");
-});
 
 // ────────────────────────────────────────────── S1.5 handoff payload contract
 
@@ -237,39 +192,6 @@ test("receiverPrompt derives only from store rows — params and session cannot 
 });
 
 // ───────────────────────────────────────────────────── S3.1 empty-wake metric
-test("empty backlog_next wakes are counted per session (wasted-wake metric)", async () => {
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
-  // no ready task → this claim finds nothing even though tasks exist elsewhere
-  store.story.update(story.id, { status: "backlog" });
-
-  const identity = { harness: "test", agent: "scout", session: "wake-metric" };
-  const first = await call("backlog_next", {}, identity);
-  assert.equal(first.details.status, "empty");
-  let row = store.sessionBudget.get("test:scout:wake-metric");
-  assert.equal(row.empty_wakes, 1);
-
-  const second = await call("backlog_next", {}, identity);
-  assert.equal(second.details.status, "empty");
-  row = store.sessionBudget.get("test:scout:wake-metric");
-  assert.equal(row.empty_wakes, 2);
-  assert.equal(row.tool_calls, 2);
-
-  const ratio = store.sessionBudget.wastedWakeRatio();
-  assert.equal(ratio.empty, 2);
-  assert.equal(ratio.calls, 2);
-  assert.equal(ratio.ratio, 1);
-
-  // a productive wake moves the ratio down
-  store.story.update(story.id, { status: "ready" });
-  const claimed = await call("backlog_next", {}, identity);
-  assert.equal(claimed.details.status, "ok");
-  const after = store.sessionBudget.wastedWakeRatio();
-  assert.equal(after.empty, 2);
-  assert.equal(after.calls, 3);
-  assert.ok(after.ratio < 1);
-});
 
 // ──────────────────────────────────── poisoned identity fails the call
 test("handle refuses an unknown-flavoured identity instead of minting a key", async () => {

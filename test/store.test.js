@@ -179,6 +179,9 @@ test("0001 adds events.kind without rewriting history", (t) => {
         gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
         from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, at INTEGER NOT NULL);
+      CREATE TABLE session_budgets (session_key TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
+        tool_calls INTEGER NOT NULL DEFAULT 0, limit_calls INTEGER NOT NULL,
+        exhausted_at INTEGER, empty_wakes INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
       INSERT INTO meta(key,value) VALUES('schema_version','6');
       INSERT INTO tasks(id,story_id,title,status,execution_kind,gate_type,created_at,updated_at) VALUES
         ('TASK-G','STORY-1','g','blocked','manual','release',1,2);
@@ -194,6 +197,8 @@ test("0001 adds events.kind without rewriting history", (t) => {
   const store = createStore({ dbPath });
   t.after(() => store.close());
   assert.ok(store.db.prepare("PRAGMA table_info(events)").all().some((c) => c.name === "kind"));
+  assert.ok(!store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_budgets'").get(),
+    "0002 drops the retired table");
   // no backfill: pre-kind rows keep NULL and map by structure, as streamed
   const kinds = store.db.prepare("SELECT kind FROM events ORDER BY id").all().map((r) => r.kind);
   assert.deepEqual(kinds, [null, null]);

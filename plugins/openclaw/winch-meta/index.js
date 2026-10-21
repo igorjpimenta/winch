@@ -10,7 +10,7 @@ import { buildWinchMeta } from "./meta.js";
 export default definePluginEntry({
   id: "winch-meta",
   name: "Winch Meta",
-  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys budgets and claims to the real caller.",
+  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller.",
   configSchema: () => ({}),
   register: (api) => {
     if (typeof api.on !== "function") {

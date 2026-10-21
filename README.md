@@ -59,8 +59,9 @@ structure alone. Notes never classify anything: they are free text and can
 change, so pre-kind rows keep exactly the meanings they streamed with — an
 append-only log keeps its history.
 The closed catalog lives in `src/events-ws.js` and is named here by family
-only, so the two cannot drift. Budget kinds ride the follow-up that retires
-spend metering. History and live rows share one envelope shape.
+only, so the two cannot drift. Spend metering is retired: every call that
+reaches a handler runs, and there are no budget kinds. History and live
+rows share one envelope shape.
 
 Typed kinds and embedded task context land in follow-up work; this surface
 streams rows verbatim.
@@ -92,7 +93,7 @@ the CAS transaction boundary under WAL contention.
 
 ## Identity
 
-Every claim and budget is keyed `harness:agent:session`. The **harness is
+Every claim is keyed `harness:agent:session`. The **harness is
 declared at construction** — `winch mcp` will not start without `--harness`
 (or `WINCH_HARNESS`), because an unnamed server cannot attribute anything.
 The agent and session of each call are stamped per call by the calling

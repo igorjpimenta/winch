@@ -474,57 +474,10 @@ export function createStore({ dbPath, logger } = {}) {
     return row ? cls : null;
   }
 
-  // ──────────────────────────────────────── SESSION BUDGETS (S1.3)
-  const sessionBudgetApi = {
-    /**
-     * Charge one backlog tool call against the session's budget and return
-     * post-increment state. Exceeding limit_calls latches exhausted_at —
-     * latching is one-way: a session that ran out of claims never resumes
-     * mid-session, so a runaway loop cannot re-arm by burning calls.
-     */
-    charge({ sessionKey, agentId, limit }) {
-      const t = now();
-      db.prepare(`
-        INSERT INTO session_budgets(session_key, agent_id, tool_calls, limit_calls, updated_at)
-        VALUES (?, ?, 1, ?, ?)
-        ON CONFLICT(session_key) DO UPDATE SET
-          tool_calls = tool_calls + 1, updated_at = excluded.updated_at
-      `).run(sessionKey, agentId, limit, t);
-      const row = db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey);
-      const exhausted = row.tool_calls >= row.limit_calls;
-      if (exhausted && !row.exhausted_at) {
-        db.prepare("UPDATE session_budgets SET exhausted_at=? WHERE session_key=?").run(t, sessionKey);
-        return { ...row, tool_calls: row.tool_calls, exhausted: true, exhausted_at: t };
-      }
-      return { ...row, exhausted, exhausted_at: row.exhausted_at };
-    },
-    get(sessionKey) {
-      return db.prepare("SELECT * FROM session_budgets WHERE session_key=?").get(sessionKey) ?? null;
-    },
-    /**
-     * A wake that found nothing to claim. Charged rows exist first (backlog_next
-     * charges before it computes), so this is an UPDATE — the wasted-wake
-     * metric is per-session and feeds the burn-in gate (S3.5's <30% target).
-     */
-    recordEmptyWake(sessionKey) {
-      const r = db.prepare(
-        "UPDATE session_budgets SET empty_wakes = empty_wakes + 1 WHERE session_key=?"
-      ).run(sessionKey);
-      return r.changes > 0;
-    },
-    wastedWakeRatio() {
-      const row = db.prepare(
-        "SELECT COALESCE(SUM(empty_wakes),0) AS empty, COALESCE(SUM(tool_calls),0) AS calls FROM session_budgets"
-      ).get();
-      return { ...row, ratio: row.calls > 0 ? row.empty / row.calls : 0 };
-    },
-  };
-
   return {
     db,
     orm,
     path: finalPath,
-    sessionBudget: sessionBudgetApi,
     epic:  epicApi,
     story: storyApi,
     task:  taskApi,
