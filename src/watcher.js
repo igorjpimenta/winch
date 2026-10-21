@@ -10,8 +10,6 @@
 // Exit code is always 0, including on an empty tick — silence is the calling
 // cron message's decision, not the script's.
 
-import path from "node:path";
-import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { createStore } from "./store.js";
 import { readyTasks } from "./ready-queue.js";
@@ -79,8 +77,7 @@ export function tick(store) {
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
-  const dbPath = process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite");
-  const store = createStore({ dbPath });
+  const store = createStore();
   try {
     console.log(JSON.stringify(tick(store)));
   } finally {

@@ -1,6 +1,6 @@
 // store.test.js — schema v2 migration, CAS claim, sweeper, heartbeat.
 // node:test + node:assert, zero deps. Each test gets a throwaway DB in
-// os.tmpdir(); the live ~/.openclaw/backlog/store.sqlite is never touched.
+// os.tmpdir(); the live ~/.winch/store.sqlite is never touched.
 
 import test from "node:test";
 import assert from "node:assert/strict";

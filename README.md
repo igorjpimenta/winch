@@ -32,6 +32,7 @@ handle however they want.
 | `rollup [--json]`                                             | dispatch fraction + epic token rollup                   |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
+| `migrate-store [--from <path>] [--to <path>]`                 | copy the legacy store to `~/.winch/store.sqlite`        |
 | `check-slugs [--config <path>]`                               | live-verify registered model slugs                      |
 | `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
 
@@ -65,7 +66,11 @@ front. Plain HTTP hits get 404.
 ## Store
 
 DB path resolution: `WINCH_DB` → `BACKLOG_DB_PATH` →
-`~/.openclaw/backlog/store.sqlite`.
+`~/.winch/store.sqlite`. The store is winch's, not the launching
+harness's; a pre-existing `~/.openclaw/backlog/store.sqlite` is still read
+until moved, with a warning on every CLI start. Stop the server and watcher,
+then `winch migrate-store` copies a consistent snapshot to the new path with
+`VACUUM INTO`; the source is left in place for verification.
 
 Migration note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and

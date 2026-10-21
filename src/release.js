@@ -78,14 +78,12 @@ export function shipRelease(store, { epicId, taskId = null, version = null, base
 
 const invokedDirectly = process.argv[1]?.endsWith("release.js");
 if (invokedDirectly) {
-  const path = await import("node:path");
-  const os = await import("node:os");
   const { createStore } = await import("./store.js");
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
   const epicId = get("--epic");
   if (!epicId) { console.error("usage: release.js --epic EPIC-x [--task TASK-y] [--version vX.Y.Z] [--base main]"); process.exit(2); }
-  const store = createStore({ dbPath: process.env.WINCH_DB || process.env.BACKLOG_DB_PATH || path.join(os.homedir(), ".openclaw", "backlog", "store.sqlite") });
+  const store = createStore();
   try {
     const r = shipRelease(store, { epicId, taskId: get("--task"), version: get("--version"), base: get("--base") || "main" });
     console.log(r.prUrl);
