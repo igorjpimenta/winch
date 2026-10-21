@@ -7,6 +7,7 @@
 // (cron/heartbeat-isolated), so bleed is minimal, and sessions that touched
 // 2+ epics are reported in sharedSessions rather than silently split.
 
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import os from "node:os";
@@ -32,7 +33,11 @@ export function dispatchFraction(store, { now = Date.now(), windowMs = 30 * DAY 
   };
 }
 
-export function epicTokenRollup(store, { opsDbPath = path.join(os.homedir(), ".openclaw", "ops.sqlite"), now = Date.now(), windowMs = 30 * DAY } = {}) {
+export function epicTokenRollup(store, { opsDbPath, now = Date.now(), windowMs = 30 * DAY } = {}) {
+  const opsPath = opsDbPath ?? process.env.WINCH_OPS_DB ?? path.join(os.homedir(), ".winch", "ops.sqlite");
+  if (!existsSync(opsPath)) {
+    throw new Error(`ops DB not found: ${opsPath}; set WINCH_OPS_DB`);
+  }
   const since = now - windowMs;
   const pairs = store.db.prepare(`
     SELECT DISTINCT s.epic_id AS epicId, e.session_ref AS ref
@@ -54,7 +59,7 @@ export function epicTokenRollup(store, { opsDbPath = path.join(os.homedir(), ".o
   }
   const sharedSessions = [...refEpics.entries()].filter(([, s]) => s.size > 1).map(([ref]) => ref);
 
-  const ops = new DatabaseSync(opsDbPath, { readOnly: true });
+  const ops = new DatabaseSync(opsPath, { readOnly: true });
   try {
     const epics = [];
     const totals = { sessions: 0, calls: 0, tokens: 0, costUsd: 0 };

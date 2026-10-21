@@ -36,9 +36,9 @@ const USAGE = `usage: winch <command>
   rollup [--json]                        dispatch fraction + epic token rollup
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  migrate-store [--from <path>] [--to <path>]
-                                         copy the legacy store to ~/.winch
-  check-slugs [--config <path>]          live-verify registered model slugs
+  migrate-store --from <path> [--to <path>]
+                                         copy a store to ~/.winch
+  check-slugs --config <path>            live-verify registered model slugs
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
