@@ -66,7 +66,7 @@ test("merged PR with version: epic closes, tag converges across runs", () => {
   const second = applyMergeOutcomes(store, [pr(8, "MERGED", body)], { exec });
   assert.deepEqual(second.closedEpics, [], "epic idempotent");
   assert.deepEqual(second.tagged, [], "no re-tag");
-  assert.deepEqual(second.skipped, ["tag:v2.0.0"], "git's 'already exists' lands in skipped");
+  assert.deepEqual(second.skipped, ["release:v2.0.0 (no release task)", "tag:v2.0.0"], "git's 'already exists' lands in skipped, alongside the unanchored release");
   assert.equal(calls.length, 2, "second attempt occurred and was absorbed");
 });
 
@@ -123,4 +123,47 @@ test("closed-unmerged PR on a plain task keeps the generic note", () => {
   applyMergeOutcomes(store, [{ number: 11, state: "CLOSED", title: "x", body }]);
   const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.match(ev.note, /^closed unmerged: PR #11/);
+});
+
+test("epic close with version writes one kind-stamped release event on the release task", () => {
+  const epic2 = store.epic.create({ title: "E2", status: "in_progress" });
+  const story2 = store.story.create({ epicId: epic2.id, title: "S2", status: "ready" });
+  const rel = store.task.create({ storyId: story2.id, title: "R", executionKind: "manual" });
+  store.task.update(rel.id, { status: "done", actor: "herald", note: "done" });
+  const body = `Backlog: ${epic2.id}\nBacklog-Task: ${rel.id}\nRelease: v2.0.0`;
+  const tags = [];
+  const exec = (cmd, args) => { tags.push(args[args.indexOf("tag") + 1]); return ""; };
+  const first = applyMergeOutcomes(store, [{ number: 11, state: "MERGED", title: "ship", body }], { exec });
+  assert.deepEqual(first.closedEpics, [epic2.id]);
+  assert.deepEqual(first.tagged, ["v2.0.0"], "tag lands before the event");
+  const rows = store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'release shipped:%'").all(rel.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note, "release shipped: v2.0.0");
+  assert.equal(rows[0].kind, "release.shipped", "declared at write, not inferred");
+  assert.equal(rows[0].from_status, "done");
+  assert.equal(rows[0].to_status, "done");
+
+  const second = applyMergeOutcomes(store, [{ number: 11, state: "MERGED", title: "ship", body }], { exec });
+  assert.deepEqual(second.closedEpics, [], "epic idempotent");
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE note LIKE 'release shipped:%'").get().n,
+    1, "no duplicate release event on re-run"
+  );
+});
+
+test("failed tag writes no release event — the wire never claims an untagged ship", () => {
+  const epic3 = store.epic.create({ title: "E3", status: "in_progress" });
+  const story3 = store.story.create({ epicId: epic3.id, title: "S3", status: "ready" });
+  const rel = store.task.create({ storyId: story3.id, title: "R", executionKind: "manual" });
+  store.task.update(rel.id, { status: "done", actor: "herald", note: "done" });
+  const body = `Backlog: ${epic3.id}\nBacklog-Task: ${rel.id}\nRelease: v9.9.9`;
+  const exec = () => { throw new Error("fatal: cannot lock ref 'refs/tags/v9.9.9'"); };
+  const out = applyMergeOutcomes(store, [{ number: 21, state: "MERGED", title: "ship", body }], { exec });
+  assert.deepEqual(out.tagged, [], "nothing tagged");
+  assert.deepEqual(out.skipped, ["tag:v9.9.9"], "failure recorded, no event alongside");
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE note LIKE 'release shipped:%'").get().n,
+    0, "no shipped row without a tag"
+  );
+  assert.deepEqual(out.closedEpics, [epic3.id], "epic close reflects the merged PR, not the tag");
 });
