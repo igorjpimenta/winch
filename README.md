@@ -67,10 +67,7 @@ front. Plain HTTP hits get 404.
 
 DB path resolution: `WINCH_DB` → `~/.winch/store.sqlite`. The store is winch's, not the launching harness's.
 
-Breaking change: `~/.openclaw/backlog/store.sqlite` is no longer read
-implicitly. Stop the server and watcher, then run `winch migrate-store` to
-copy a consistent snapshot with `VACUUM INTO` (the source is left in place),
-or set `WINCH_DB` to the old path to keep using it.
+Breaking change: `~/.openclaw/backlog/store.sqlite` is no longer read.
 
 Migration note: concurrent access to the sqlite file — server, watcher and
 CLI processes at once — is safe under WAL mode, and
