@@ -1,5 +1,5 @@
-// paths.test.js — the store path belongs to winch, not to a harness. The
-// legacy openclaw path stays readable until it is migrated.
+// paths.test.js — the store path belongs to winch, not to a harness. The old
+// openclaw path is not read implicitly; moving it is an explicit command.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -24,7 +24,7 @@ test("WINCH_DB wins over both the default and the legacy path", (t) => {
   assert.equal(resolveDbPath({ home, env: { WINCH_DB: "/tmp/explicit.sqlite" } }), "/tmp/explicit.sqlite");
 });
 
-test("BACKLOG_DB_PATH remains the legacy explicit override", (t) => {
+test("BACKLOG_DB_PATH remains an explicit override", (t) => {
   const home = tempHome(t);
   assert.equal(
     resolveDbPath({ home, env: { BACKLOG_DB_PATH: "/tmp/legacy-env.sqlite" } }),
@@ -34,24 +34,16 @@ test("BACKLOG_DB_PATH remains the legacy explicit override", (t) => {
 
 test("a fresh home resolves to ~/.winch/store.sqlite", (t) => {
   const home = tempHome(t);
-  assert.equal(resolveDbPath({ home, env: {}, warn: () => {} }), defaultDbPath(home));
+  assert.equal(resolveDbPath({ home, env: {} }), defaultDbPath(home));
 });
 
-test("a legacy-only home keeps reading the old store and warns once", (t) => {
+test("an existing legacy store does not change the default", (t) => {
   const home = tempHome(t);
   touch(legacyDbPath(home));
-  const warnings = [];
-  const resolved = resolveDbPath({ home, env: {}, warn: (m) => warnings.push(m) });
-  assert.equal(resolved, legacyDbPath(home));
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /winch migrate-store/);
+  assert.equal(resolveDbPath({ home, env: {} }), defaultDbPath(home));
 });
 
-test("the new path wins once it exists, so migration is a one-time decision", (t) => {
+test("the legacy path is still available to the explicit migration command", (t) => {
   const home = tempHome(t);
-  touch(defaultDbPath(home));
-  touch(legacyDbPath(home));
-  const warnings = [];
-  assert.equal(resolveDbPath({ home, env: {}, warn: (m) => warnings.push(m) }), defaultDbPath(home));
-  assert.deepEqual(warnings, []);
+  assert.equal(legacyDbPath(home), path.join(home, ".openclaw", "backlog", "store.sqlite"));
 });
