@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { newEpicId, newStoryId, newTaskId, classifyId } from "./ids.js";
+import { resolveConfig } from "./config.js";
 
 const SCHEMA_VERSION = 6;
 
@@ -137,10 +138,14 @@ function rowTask(r) {
   return { ...r, capabilities: jsonIn(r.capabilities), execution_args: jsonIn(r.execution_args) ?? {} };
 }
 
-export function createStore({ dbPath, logger } = {}) {
+export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
   const finalPath = dbPath || path.join(process.env.HOME || ".", ".openclaw", "backlog", "store.sqlite");
   const dir = path.dirname(finalPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // Tuning config resolves once, here: explicit object > WINCH_* env >
+  // code defaults. Every consumer below reads this closure, so one resolved
+  // object governs lease, sweep, waits and caps for the store's lifetime.
+  const cfg = resolveConfig({ explicit: explicitConfig ?? {} });
 
   const db = new DatabaseSync(finalPath);
   db.exec("PRAGMA journal_mode = WAL;");
@@ -483,10 +488,11 @@ export function createStore({ dbPath, logger } = {}) {
      * Claim and its event row are one transaction — splitting them lets the
      * sweeper re-release a task whose claim event never landed.
      */
-    claim({ id, agentId, watchdogMs = 30 * 60 * 1000, sessionKey }) {
+    claim({ id, agentId, watchdogMs = null, sessionKey }) {
       const t = now();
-      const expires = t + watchdogMs;
-      const leaseSeconds = Math.floor(watchdogMs / 1000);
+      const leaseMs = watchdogMs ?? cfg.leaseSeconds * 1000;
+      const expires = t + leaseMs;
+      const leaseSeconds = Math.floor(leaseMs / 1000);
       db.exec("BEGIN IMMEDIATE");
       try {
         const r = db.prepare(`
@@ -517,8 +523,8 @@ export function createStore({ dbPath, logger } = {}) {
       // agent actively reporting progress must never read as a corpse. The
       // sweeper keeps sole authority to end a claim — but only for silence.
       const r = db.prepare(`
-        UPDATE tasks SET last_heartbeat=?, updated_at=?, claim_expires_at=?+COALESCE(lease_seconds, 1800)*1000 WHERE id=? AND status='in_progress' AND assigned=?
-      `).run(t, t, t, id, agentId);
+        UPDATE tasks SET last_heartbeat=?, updated_at=?, claim_expires_at=?+COALESCE(lease_seconds*1000, ?) WHERE id=? AND status='in_progress' AND assigned=?
+      `).run(t, t, t, cfg.leaseSeconds * 1000, id, agentId);
       if (r.changes === 0) return null;
       return taskApi.get(id);
     },
@@ -552,7 +558,7 @@ export function createStore({ dbPath, logger } = {}) {
     /**
      * Re-release every in_progress task whose claim expired before `now`
      * (same release path, note 'sweeper'). Once a task's attempt_count
-     * reaches MAX_ATTEMPTS it escalates to 'blocked' instead of cycling.
+     * reaches the configured max it escalates to 'blocked' instead of cycling.
      * Returns the affected tasks in their post-sweep state.
      */
     sweepExpired({ now: at = Date.now() } = {}) {
@@ -563,7 +569,7 @@ export function createStore({ dbPath, logger } = {}) {
       for (const { id } of expired) {
         const task = taskApi.release(id, "sweeper", at);
         if (!task) continue; // lost a race with a concurrent claim/release
-        if (task.attempt_count >= MAX_ATTEMPTS) {
+        if (task.attempt_count >= cfg.maxAttempts) {
           db.exec("BEGIN IMMEDIATE");
           try {
             const r = db.prepare(`
@@ -594,14 +600,15 @@ export function createStore({ dbPath, logger } = {}) {
      * a blocked_at stamp age-track; legacy rows without one stay silent.
      * Returns the rows written ({taskId, label, eventId}).
      */
-    recordGateWaits({ now: at = Date.now(), levels = [{ ms: 24 * 3600 * 1000, label: "24h" }, { ms: 72 * 3600 * 1000, label: "72h" }] } = {}) {
+    recordGateWaits({ now: at = Date.now(), levels = null } = {}) {
+      const lv = levels ?? cfg.gateWaitLevels;
       const gates = db.prepare(
         "SELECT id, blocked_at FROM tasks WHERE status='blocked' AND gate_type IS NOT NULL AND blocked_at IS NOT NULL"
       ).all();
       const written = [];
       for (const g of gates) {
         const age = at - g.blocked_at;
-        for (const { ms, label } of levels) {
+        for (const { ms, label } of lv) {
           if (age < ms) continue;
           const note = `gate waiting: ${label} unanswered`;
           const dup = db.prepare(
@@ -658,6 +665,7 @@ export function createStore({ dbPath, logger } = {}) {
   return {
     db,
     path: finalPath,
+    config: cfg,
     epic:  epicApi,
     story: storyApi,
     task:  taskApi,

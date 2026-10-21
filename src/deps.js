@@ -9,13 +9,14 @@
 const MAX_DFS_NODES = 500;
 
 function reachable(store, startId, targetId) {
+  const cap = store.config?.dfsNodes ?? MAX_DFS_NODES;
   if (startId === targetId) return [startId];
   const seen = new Set([startId]);
   const stack = [[startId, [startId]]];
   let visited = 0;
   while (stack.length) {
     const [cur, trail] = stack.pop();
-    if (++visited > MAX_DFS_NODES) return null;
+    if (++visited > cap) return null;
     const out = store.dep.listOutgoing(cur);
     for (const edge of out) {
       if (seen.has(edge.to_id)) continue;

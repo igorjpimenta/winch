@@ -12,6 +12,7 @@
 import { readyTasks } from "./ready-queue.js";
 import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
+import { resolveRequestConfig } from "./config.js";
 
 // No spend metering here: every call that reaches a handler runs. Claim
 // pacing is the store's lease plus the watcher's per-agent routing cap;
@@ -58,6 +59,11 @@ function renderReceiverPrompt({ task, story, epic, artifacts }) {
 }
 
 export function createToolHandlers(store, logger) {
+  // One config object governs handlers and store alike: the store resolved
+  // it at construction (explicit > env > defaults). Per-call
+  // `_meta.winch.config` merges over this base inside handle(), so one
+  // harness can tune a single call without touching the server.
+  const baseConfig = store.config;
   const TOOL_DEFS = [
     {
       name: "backlog_next",
@@ -162,11 +168,11 @@ export function createToolHandlers(store, logger) {
   ];
 
   const handlers = {
-    async backlog_next(args, identity) {
+    async backlog_next(args, identity, cfg) {
       const agentId = identity.agent;
       const sessionKey = identitySessionKey(identity);
       try {
-        const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities, limit: 5 });
+        const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities, limit: cfg.candidates });
         if (candidates.length === 0) {
           return ok(JSON.stringify({ empty: true }), { status: "empty", agentId });
         }
@@ -175,7 +181,7 @@ export function createToolHandlers(store, logger) {
           return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId });
         }
         for (const c of candidates) {
-          const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey });
+          const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
           if (!claimed) continue; // raced — next candidate
           logger?.info?.(`backlog: ${agentId} claimed ${claimed.id}`);
           const artifacts = collectStoryArtifacts(store, c.story.id);
@@ -202,7 +208,7 @@ export function createToolHandlers(store, logger) {
       }
     },
 
-    async backlog_update(args, identity) {
+    async backlog_update(args, identity, cfg) {
       const agentId = identity.agent;
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_update: not found: ${args?.taskId}`, "not_found");
@@ -212,9 +218,9 @@ export function createToolHandlers(store, logger) {
         const wantHeartbeat = args?.heartbeat !== false;
         if (wantHeartbeat) store.task.heartbeat(task.id, agentId);
         const noteParts = [];
-        if (args?.progressSummary) noteParts.push(`progress: ${clampNote(args.progressSummary)}`);
-        if (args?.comment) noteParts.push(`comment: ${clampNote(args.comment)}`);
-        if (args?.addArtifact) noteParts.push(`artifact: ${clampNote(args.addArtifact, 500)}`);
+        if (args?.progressSummary) noteParts.push(`progress: ${clampNote(args.progressSummary, cfg.noteProgressLimit)}`);
+        if (args?.comment) noteParts.push(`comment: ${clampNote(args.comment, cfg.noteProgressLimit)}`);
+        if (args?.addArtifact) noteParts.push(`artifact: ${clampNote(args.addArtifact, cfg.noteArtifactLimit)}`);
         if (noteParts.length) {
           // to_status is required by schema; progress events mirror the
           // current status so the event stream stays append-only without
@@ -230,15 +236,15 @@ export function createToolHandlers(store, logger) {
       }
     },
 
-    async backlog_done(args, identity) {
+    async backlog_done(args, identity, cfg) {
       const agentId = identity.agent;
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
       if (task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
       try {
-        const summary = clampNote(args.resultSummary, 4000);
-        const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, 50) : [];
+        const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
+        const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
         const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
         const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done" });
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
@@ -248,14 +254,14 @@ export function createToolHandlers(store, logger) {
       }
     },
 
-    async backlog_block(args, identity) {
+    async backlog_block(args, identity, cfg) {
       const agentId = identity.agent;
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
       if (task.assigned && task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
       if (task.status !== "in_progress" && task.status !== "todo") return err(`${task.id} is ${task.status}; blocking applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
       try {
-        const reason = clampNote(args.reason, 1000);
+        const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;
         if (args?.gateType) {
           // Human gates open through openGate, not the generic update path:
@@ -283,7 +289,7 @@ export function createToolHandlers(store, logger) {
       }
     },
 
-    async backlog_resume(args, identity) {
+    async backlog_resume(args, identity, cfg) {
       const actor = args?.actor ?? identity.agent;
       const task = store.task.resumeGate({ id: args?.taskId, actor });
       if (!task) {
@@ -306,11 +312,12 @@ export function createToolHandlers(store, logger) {
     },
   };
 
-  async function handle(name, args, identity) {
+  async function handle(name, args, identity, meta = null) {
     assertCleanTriple(identity, `caller identity for ${name}`);
+    const cfg = resolveRequestConfig(baseConfig, meta);
     const fn = handlers[name];
     if (!fn) return err(`unknown tool: ${name}`, "unknown_tool");
-    return fn(args, identity);
+    return fn(args, identity, cfg);
   }
 
   return { TOOL_DEFS, handle };

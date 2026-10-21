@@ -57,6 +57,9 @@ export async function startMcpServer({ store, base, logger }) {
   // The three-layer key is a construction requirement: an undeclared server
   // would mint "unknown"-flavoured claim keys that poison the trail.
   const declared = assertDeclaration(base);
+  // Tuning config lives on the store (resolved at construction: explicit >
+  // env > defaults); handlers read it and merge per-call `_meta.winch.config`
+  // over it. Nothing is required — an undeclared knob runs at its default.
   const { TOOL_DEFS, handle } = createToolHandlers(store, logger);
   const server = new McpServer({ name: "winch", version: "0.1.0" });
 
@@ -68,7 +71,9 @@ export async function startMcpServer({ store, base, logger }) {
         try {
           const identity = resolveIdentity({ meta: extra?._meta, base: declared });
           logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
-          const res = await handle(def.name, args, identity);
+          // Per-call config overlay rides the same trusted meta channel as
+          // agent/session; malformed knobs refuse the call, never the server.
+          const res = await handle(def.name, args, identity, extra?._meta);
           return { content: res.content };
         } catch (err) {
           return toolErrorResult(err);
