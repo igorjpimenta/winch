@@ -54,8 +54,10 @@ export function toolErrorResult(err) {
 }
 
 export async function startMcpServer({ store, base, logger }) {
-  // The three-layer key is a construction requirement: an undeclared server
-  // would mint "unknown"-flavoured claim keys that poison the trail.
+  // Identity is refused, never defaulted, at both layers: an undeclared
+  // server will not start, and an unstamped, unusable, or mismatched call
+  // will not run. No path mints a key the trail cannot attribute — failure
+  // happens at the boundary, never as poison downstream.
   const declared = assertDeclaration(base);
   const { TOOL_DEFS, handle } = createToolHandlers(store, logger);
   const server = new McpServer({ name: "winch", version: "0.1.0" });
