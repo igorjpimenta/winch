@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../src/store.js";
 import { createToolHandlers } from "../src/tools.js";
+import { resolveIdentity, identitySessionKey } from "../src/identity.js";
 
 let dir, store, handle;
 
@@ -243,4 +244,18 @@ test("backlog_resume on a dissolved gate answers gate_dissolved", async () => {
   const res = await call("backlog_resume", { taskId: task.id }, { harness: "test", agent: "operator", session: "op-1" });
   assert.equal(res.details.reason, "gate_dissolved");
   assert.equal(res.details.taskStatus, "todo");
+});
+
+test("stamped args attribute a claim end to end with no meta (opencode path)", async () => {
+  const { task } = seedReadyTask();
+  // mirrors mcp.js: resolve from args alone, then handle with the resolved key
+  const identity = resolveIdentity({
+    base: { harness: "opencode" },
+    args: { winch_agent: "opencode", winch_session: "ses-oc-1" },
+  });
+  assert.deepEqual(identitySessionKey(identity), "opencode:opencode:ses-oc-1");
+  const res = await handle("backlog_next", {}, identity);
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.taskId, task.id);
+  assert.equal(store.task.get(task.id).assigned, "opencode");
 });

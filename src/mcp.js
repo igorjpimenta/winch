@@ -33,6 +33,21 @@ function shapeFromJson(schema) {
     const field = fieldFromJson(sub);
     shape[key] = required.has(key) ? field : z.optional(field);
   }
+  // Identity is a transport concern, not a tool-domain one — like _meta, it
+  // rides every call without belonging to any tool's vocabulary. Declared
+  // here (optional, so schemas stay backward compatible) rather than in each
+  // TOOL_DEF: companions that can only mutate args (e.g. opencode's hook)
+  // stamp these, and resolveIdentity reads them — plus args._meta.winch for
+  // twins whose hook output lands inside arguments — when _meta is
+  // unreachable.
+  // Sound only over stdio, where the spawner is the sole peer; a companion
+  // overwrites them unconditionally, so model-supplied values never survive.
+  // The _meta passthrough below is load-bearing, not laxity: without a
+  // declared slot the SDK strips the twin's stamp before the handler runs,
+  // and the args._meta channel silently never fires.
+  shape.winch_agent = z.optional(z.string());
+  shape.winch_session = z.optional(z.string());
+  shape._meta = z.optional(z.unknown());
   return shape;
 }
 
@@ -68,7 +83,7 @@ export async function startMcpServer({ store, base, logger }) {
       { description: def.description, inputSchema: z.object(shapeFromJson(def.inputSchema)) },
       async (args, extra) => {
         try {
-          const identity = resolveIdentity({ meta: extra?._meta, base: declared });
+          const identity = resolveIdentity({ meta: extra?._meta, args, base: declared });
           logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
           // Per-call config overlay rides the same trusted meta channel as
           // agent/session; malformed knobs refuse the call, never the server.
