@@ -37,7 +37,9 @@ function shapeFromJson(schema) {
   // rides every call without belonging to any tool's vocabulary. Declared
   // here (optional, so schemas stay backward compatible) rather than in each
   // TOOL_DEF: companions that can only mutate args (e.g. opencode's hook)
-  // stamp these, and resolveIdentity reads them when _meta is unreachable.
+  // stamp these, and resolveIdentity reads them — plus args._meta.winch for
+  // twins whose hook output lands inside arguments — when _meta is
+  // unreachable.
   // Sound only over stdio, where the spawner is the sole peer; a companion
   // overwrites them unconditionally, so model-supplied values never survive.
   shape.winch_agent = z.optional(z.string());

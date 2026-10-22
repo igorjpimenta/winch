@@ -136,3 +136,43 @@ test("resolveIdentity: partial meta falls back to whole args pair, else refuses 
     "reserved tokens in args refuse like reserved tokens in meta"
   );
 });
+
+test("resolveIdentity: args._meta.winch pair attributes (hook output landed in arguments)", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    args: { taskId: "TASK-1", _meta: { winch: { agent: "scout", session: "ses-7" } } },
+  });
+  assert.equal(id.agent, "scout");
+  assert.equal(id.session, "ses-7");
+  assert.deepEqual(id.source, { harness: "declared", agent: "args-meta", session: "args-meta" });
+});
+
+test("resolveIdentity: precedence is params-meta, then args-meta, then flat args", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { winch: { agent: "atlas", session: "ses_42" } },
+    args: { _meta: { winch: { agent: "x", session: "y" } }, winch_agent: "z", winch_session: "w" },
+  });
+  assert.equal(id.agent, "atlas");
+  assert.deepEqual(id.source, { harness: "declared", agent: "meta", session: "meta" });
+  const id2 = resolveIdentity({
+    base: BASE,
+    args: { _meta: { winch: { agent: "scout", session: "s" } }, winch_agent: "z", winch_session: "w" },
+  });
+  assert.equal(id2.agent, "scout");
+  assert.deepEqual(id2.source, { harness: "declared", agent: "args-meta", session: "args-meta" });
+});
+
+test("resolveIdentity: partial args-meta never splices with flat halves", () => {
+  assert.throws(
+    () => resolveIdentity({
+      base: BASE,
+      args: { _meta: { winch: { agent: "scout" } }, winch_session: "s" },
+    }),
+    /pairs never splice/
+  );
+  assert.throws(
+    () => resolveIdentity({ base: BASE, args: { _meta: { winch: { agent: "unknown", session: "s" } } } }),
+    /unresolved agent/
+  );
+});
