@@ -62,31 +62,50 @@ export function declaredFromEnv(env = process.env) {
 
 /**
  * Per-request identity: the declared harness, plus the agent and session the
- * calling harness stamped on this call (`_meta.winch`). Unstamped,
- * unusable-agent/session calls refuse — the hook layer owns them, not config.
+ * calling harness stamped on this call. Two trusted channels, in order:
+ * `_meta.winch` (a companion with request-params access, e.g. openclaw),
+ * else stamped tool args `winch_agent`/`winch_session` (a companion limited
+ * to args mutation, e.g. opencode — sound only over stdio, where the spawner
+ * is the sole peer). Meta wins wholesale or not at all: halves are never
+ * spliced across channels. Anything else refuses — the hook layer owns
+ * stamping, not config, and unidentified callers are never given keys.
  */
-export function resolveIdentity({ meta, base }) {
+export function resolveIdentity({ meta, args, base }) {
   const declared = assertDeclaration(base);
   const m = meta?.winch ?? meta ?? null;
-  const agent = m?.agent;
-  const session = m?.session;
-  const bad = [];
-  if (!isUsableLayer(agent)) bad.push("agent");
-  if (!isUsableLayer(session)) bad.push("session");
-  if (bad.length > 0) {
+  const mAgent = isUsableLayer(m?.agent) ? m.agent.trim() : null;
+  const mSession = isUsableLayer(m?.session) ? m.session.trim() : null;
+  const aAgent = isUsableLayer(args?.winch_agent) ? String(args.winch_agent).trim() : null;
+  const aSession = isUsableLayer(args?.winch_session) ? String(args.winch_session).trim() : null;
+  // Whole pairs only: a meta half never splices with an args half, so no
+  // call can assemble an identity across trust channels.
+  const pair = (mAgent && mSession)
+    ? { agent: mAgent, session: mSession, source: "meta" }
+    : (aAgent && aSession)
+      ? { agent: aAgent, session: aSession, source: "args" }
+      : null;
+  if (!pair) {
+    if ((mAgent || aAgent) && (mSession || aSession)) {
+      throw new Error(
+        "winch: refused caller identity (halves in different channels — pairs never splice). " +
+          "Stamp a whole agent+session in one channel: _meta.winch or winch_agent/winch_session args."
+      );
+    }
+    const bad = [];
+    if (!mAgent && !aAgent) bad.push("agent");
+    if (!mSession && !aSession) bad.push("session");
     throw new Error(
       `winch: refused caller identity (unresolved ${bad.join(" and ")}). ` +
         "The calling harness must stamp agent and session on each call — " +
-        "the companion plugin does this in its before_tool_call hook, the " +
-        "way lineage attributes its per-call costs. Unidentified callers " +
-        "fail; they are never given default keys."
+        "via _meta.winch where reachable, else stamped winch_agent/winch_session args. " +
+        "Unidentified callers fail; they are never given default keys."
     );
   }
   return {
     harness: declared.harness,
-    agent: agent.trim(),
-    session: session.trim(),
-    source: { harness: "declared", agent: "meta", session: "meta" },
+    agent: pair.agent,
+    session: pair.session,
+    source: { harness: "declared", agent: pair.source, session: pair.source },
   };
 }
 

@@ -95,3 +95,44 @@ test("identitySessionKey refuses to mint a poisoned key", () => {
     /refused session key.*agent/
   );
 });
+
+test("resolveIdentity: stamped args complete identity when meta is absent (opencode path)", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    args: { taskId: "TASK-1", winch_agent: "opencode", winch_session: "ses-9" },
+  });
+  assert.equal(id.harness, "langgraph");
+  assert.equal(id.agent, "opencode");
+  assert.equal(id.session, "ses-9");
+  assert.deepEqual(id.source, { harness: "declared", agent: "args", session: "args" });
+});
+
+test("resolveIdentity: meta wins wholesale — halves never splice across channels", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { winch: { agent: "atlas", session: "ses_42" } },
+    args: { winch_agent: "mallory", winch_session: "ses_evil" },
+  });
+  assert.equal(id.agent, "atlas");
+  assert.equal(id.session, "ses_42");
+  assert.deepEqual(id.source, { harness: "declared", agent: "meta", session: "meta" });
+});
+
+test("resolveIdentity: partial meta falls back to whole args pair, else refuses precisely", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { winch: { agent: "atlas" } },
+    args: { winch_agent: "opencode", winch_session: "ses-9" },
+  });
+  assert.equal(id.agent, "opencode", "half-meta yields to a whole args pair, not a splice");
+  assert.throws(
+    () => resolveIdentity({ base: BASE, meta: { winch: { agent: "atlas" } }, args: { winch_session: "s" } }),
+    /pairs never splice/,
+    "halves across channels refuse loudly instead of splicing or crashing"
+  );
+  assert.throws(
+    () => resolveIdentity({ base: BASE, args: { winch_agent: "unknown", winch_session: "s" } }),
+    /unresolved agent/,
+    "reserved tokens in args refuse like reserved tokens in meta"
+  );
+});
