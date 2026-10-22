@@ -47,3 +47,14 @@ test("agent override via plugin options", async () => {
   await h["tool.execute.before"]({ tool: "winch__backlog_next", sessionID: "s", callID: "c" }, output);
   assert.equal(output.args.winch_agent, "opencode-herculano");
 });
+
+test("model-seeded args._meta.winch is neutralized, siblings preserved", async () => {
+  const h = await hooks();
+  const input = { tool: "winch__backlog_next", sessionID: "ses-real", callID: "c3" };
+  const output = { args: { _meta: { winch: { agent: "mallory", session: "ses-fake" }, progressToken: "p1" } } };
+  await h["tool.execute.before"](input, output);
+  assert.equal(output.args._meta.winch, undefined);
+  assert.equal(output.args._meta.progressToken, "p1");
+  assert.equal(output.args.winch_agent, "opencode");
+  assert.equal(output.args.winch_session, "ses-real");
+});

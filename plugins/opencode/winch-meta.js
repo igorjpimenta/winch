@@ -35,11 +35,16 @@ export default {
       if (typeof session !== "string" || !session) return;
       const agent =
         typeof options?.agent === "string" && options.agent ? options.agent : WINCH_AGENT;
-      output.args = {
-        ...(output.args ?? {}),
-        winch_agent: agent,
-        winch_session: session,
-      };
+      // Neutralize model-seeded identity metadata: the flat fields below
+      // are this hook's channel, so a nested winch claim would outrank them
+      // at the server and let a model speak for another key. Other _meta
+      // siblings (progress tokens and the like) pass through untouched.
+      const args = { ...(output.args ?? {}) };
+      if (args._meta && typeof args._meta === "object") {
+        const { winch: _dropped, ...rest } = args._meta;
+        args._meta = rest;
+      }
+      output.args = { ...args, winch_agent: agent, winch_session: session };
     },
   }),
 };
