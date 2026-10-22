@@ -42,8 +42,12 @@ function shapeFromJson(schema) {
   // unreachable.
   // Sound only over stdio, where the spawner is the sole peer; a companion
   // overwrites them unconditionally, so model-supplied values never survive.
+  // The _meta passthrough below is load-bearing, not laxity: without a
+  // declared slot the SDK strips the twin's stamp before the handler runs,
+  // and the args._meta channel silently never fires.
   shape.winch_agent = z.optional(z.string());
   shape.winch_session = z.optional(z.string());
+  shape._meta = z.optional(z.unknown());
   return shape;
 }
 
