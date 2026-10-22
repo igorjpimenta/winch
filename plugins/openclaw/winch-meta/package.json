@@ -1,0 +1,9 @@
+{
+  "name": "winch-meta",
+  "private": true,
+  "openclaw": {
+    "install": {
+      "minHostVersion": ">=2026.5.18"
+    }
+  }
+}

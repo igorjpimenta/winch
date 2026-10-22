@@ -9,11 +9,9 @@ export function isWinchTool(name) {
 
 // Session resolution mirrors the HookContext the host guarantees for bundled
 // MCP tool calls since v2026.5.16-beta.7 (oldest compatible stable:
-// v2026.5.18 — verified against the tag: attempt.ts builds
-// catalogToolHookContext with agentId/sessionKey/sessionId/runId, tool-split
-// forwards it, the adapter passes ctx to runBeforeToolCallHook). Order below
-// is most stable first: the live session key, then the session id, then the
-// single-run id, then the same fields off the event. A null dimension stays
+// v2026.5.18, declared in package.json as openclaw.install.minHostVersion).
+// Order below is most stable first: the live session key, then the session
+// id, then the single-run id, then the same fields off the event. A null dimension stays
 // null in the stamp: src/identity.js treats it as a miss and refuses the
 // call, so a half-stamped call fails loudly instead of minting a default
 // key. With no resolvable dimension at all the hook returns undefined and
