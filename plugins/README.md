@@ -56,18 +56,23 @@ unstamped and is refused (there is no env fallback).
 
 ## opencode
 
-Why env, not meta: opencode's `tool.execute.before` can mutate the outgoing
+Why args, not meta: opencode's `tool.execute.before` can mutate the outgoing
 call's `args` (the plugin types declare `output: { args: any }`, return
 `Promise<void>` — mutation is the only channel), but opencode's MCP path
 builds the request as `callTool({ name, arguments: args })`: params carry
 only name + arguments, there is **no `params._meta` slot**, and every MCP
-input schema is forced `additionalProperties: false`, so an `args._meta`
-injection is stripped or rejected before the wire. The winch server reads
-`extra._meta` (= request `params._meta`), unreachable from this hook on the
-checked opencode surface (1.18.32 plugin types and binary). So
-`plugins/opencode/winch-meta.js` is a registered no-op that documents the
-constraint in place and keeps a hook point for an opencode version that grows
-request-level meta mutation.
+input schema is forced `additionalProperties: false`. So
+`plugins/opencode/winch-meta.js` stamps `winch_agent`/`winch_session` args
+instead — fields the server declares on every tool and reads when `_meta`
+is unreachable (see `src/mcp.js`, `resolveIdentity`). Trust root: `type:
+local` servers spawn over stdio, so the spawning opencode process is the
+sole peer; the hook overwrites unconditionally, so model-supplied values
+never survive. One honest limitation: hook input is `{tool, sessionID,
+callID}` with no agent dimension, so every opencode caller shares the agent
+key `opencode` (overridable via plugin options) while sessions distinguish
+calls — concurrent opencode agents contend on claims like one agent's
+parallel sessions would. Agent/session on opencode: stamped per call from
+`input.sessionID` as above — never env, never defaults.
 
 `~/.config/opencode/opencode.jsonc` — MCP entry plus plugin line, mirroring
 the existing `file://` entries in that file's `plugin` array:
