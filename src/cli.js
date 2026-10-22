@@ -48,7 +48,8 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  serve --ws --port N [--host H]         stream store events over WebSocket`;
+  serve --ws --port N [--host H] [--config JSON|PATH]
+                                         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
   console.error(msg);
