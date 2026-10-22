@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
+import { MIN_HOST_VERSION, checkHostFloor } from "./host.js";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
 // a full replacement of event.params with _meta.winch set unconditionally on
@@ -11,12 +12,22 @@ import { buildWinchMeta } from "./meta.js";
 export default definePluginEntry({
   id: "winch-meta",
   name: "Winch Meta",
-  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller.",
+  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller. Requires host ≥ 2026.5.18 for hook session context.",
   configSchema: () => ({}),
   register: (api) => {
     if (typeof api.on !== "function") {
       api.logger.warn("winch-meta: api.on unavailable; not registering hook");
       return;
+    }
+    const floor = checkHostFloor(api);
+    if (!floor.ok) {
+      api.logger.warn(`winch-meta: ${floor.reason} — calls would go unstamped`);
+      return;
+    }
+    if (floor.warned) {
+      api.logger.warn(
+        `winch-meta: host version undeterminable; hook session context requires host ≥ ${MIN_HOST_VERSION}`,
+      );
     }
     api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx));
     api.logger.info("winch-meta: registered (stamps _meta.winch on winch MCP tool calls)");

@@ -1,6 +1,7 @@
 {
   "id": "winch-meta",
   "name": "Winch Meta",
+  "description": "Stamps _meta.winch onto winch MCP tool calls. Requires host ≥ 2026.5.18 for hook session context (see host.js).",
   "enabledByDefault": true,
   "configSchema": {}
 }
