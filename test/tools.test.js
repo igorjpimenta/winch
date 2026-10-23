@@ -259,3 +259,81 @@ test("stamped args attribute a claim end to end with no meta (opencode path)", a
   assert.equal(res.details.taskId, task.id);
   assert.equal(store.task.get(task.id).assigned, "opencode");
 });
+
+test("backlog_claim claims the named task with handoff and stamped session", async () => {
+  const { story, task } = seedReadyTask();
+  const res = await call("backlog_claim", { taskId: task.id });
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.taskId, task.id);
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.task.status, "in_progress");
+  assert.equal(body.task.assigned, "atlas");
+  assert.equal(body.handoff.reason, "by-id claim");
+  assert.equal(body.handoff.acceptance_criteria, "AC-1");
+  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=?").all(task.id);
+  assert.equal(ev.length, 2);
+  assert.equal(ev[1].kind, "task.claimed");
+  assert.equal(ev[1].session_ref, "test:atlas:sess-1");
+  assert.ok(story.id);
+});
+
+test("backlog_claim refuses unknown, non-todo, and not-ready ids distinctly", async () => {
+  const missing = await call("backlog_claim", { taskId: "TASK-nope" });
+  assert.equal(missing.details.reason, "not_found");
+  const busy = seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
+  const claimed = await call("backlog_claim", { taskId: busy.task.id });
+  assert.equal(claimed.details.reason, "not_claimed");
+  // t2 depends on t1 (still todo) so t2 is todo-but-not-ready.
+  const epic = store.epic.create({ title: "E2", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S2", status: "ready" });
+  const t1 = store.task.create({ storyId: story.id, title: "T1", status: "todo", executionKind: "manual" });
+  const t2 = store.task.create({ storyId: story.id, title: "T2", status: "todo", executionKind: "manual" });
+  const { addDep } = await import("../src/deps.js");
+  assert.ok(addDep(store, t2.id, t1.id).ok);
+  const gated = await call("backlog_claim", { taskId: t2.id });
+  assert.equal(gated.details.reason, "not_ready");
+  assert.equal(store.task.get(t2.id).status, "todo");
+});
+
+test("backlog_claim dryRun reports the named task without claiming", async () => {
+  const { task } = seedReadyTask();
+  const res = await call("backlog_claim", { taskId: task.id, dryRun: true });
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.dryRun, true);
+  assert.equal(res.details.taskId, task.id);
+  assert.equal(store.task.get(task.id).status, "todo");
+  assert.equal(store.task.get(task.id).assigned, null);
+});
+
+test("backlog_claim honors the capabilities filter", async () => {
+  const epic = store.epic.create({ title: "E3", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S3", status: "ready" });
+  const task = store.task.create({ storyId: story.id, title: "T3", status: "todo", executionKind: "manual", capabilities: ["gpu"] });
+  const noCaps = await call("backlog_claim", { taskId: task.id });
+  assert.equal(noCaps.details.reason, "not_ready");
+  const withCaps = await call("backlog_claim", { taskId: task.id, capabilities: ["gpu"] });
+  assert.equal(withCaps.details.status, "ok");
+  assert.equal(withCaps.details.taskId, task.id);
+});
+
+test("backlog_done stamps session_ref on the completion event", async () => {
+  const { task } = seedReadyTask();
+  const claimed = await call("backlog_next", {});
+  assert.equal(claimed.details.taskId, task.id);
+  const done = await call("backlog_done", { taskId: task.id, resultSummary: "shipped" });
+  assert.equal(done.details.status, "ok");
+  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? AND to_status='done'").all(task.id);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].kind, "task.completed");
+  assert.equal(ev[0].actor, "atlas");
+  assert.equal(ev[0].session_ref, "test:atlas:sess-1");
+});
+
+test("TOOL_DEFS exposes backlog_claim alongside the five existing tools", async () => {
+  const { createToolHandlers: make } = await import("../src/tools.js");
+  const { TOOL_DEFS } = make(store, null);
+  const names = TOOL_DEFS.map((d) => d.name);
+  for (const n of ["backlog_next", "backlog_claim", "backlog_update", "backlog_done", "backlog_block", "backlog_resume"]) {
+    assert.ok(names.includes(n), `missing tool: ${n}`);
+  }
+});
