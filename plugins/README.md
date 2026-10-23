@@ -49,10 +49,13 @@ carries no explicit extensions path; the browser-lease extension lives at
 ```
 
 Calls arrive as `mcp__winch__backlog_next` etc.; the hook filters on the
-`winch` substring and stamps meta from `ctx.sessionKey` → `ctx.runId` (the
-same field chain browser-lease's `ownerFor` resolves from). No resolvable
-session or agent → the hook returns `undefined`; the call reaches the server
-unstamped and is refused (there is no env fallback).
+`winch` substring and stamps meta from `ctx.sessionKey` → `ctx.sessionId` →
+`ctx.runId` (mirroring the HookContext the host guarantees for bundled MCP
+calls since v2026.5.16-beta.7; oldest compatible stable is v2026.5.18,
+declared in `package.json` as `openclaw.install.minHostVersion`, enforced by
+install and registry loading). No resolvable session or agent → the hook
+returns `undefined`; the call reaches the server unstamped and is refused
+(there is no env fallback).
 
 ## opencode
 

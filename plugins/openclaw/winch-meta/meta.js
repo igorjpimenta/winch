@@ -7,17 +7,20 @@ export function isWinchTool(name) {
   return typeof name === "string" && name.includes("winch");
 }
 
-// sessionKey is the live session; runId is the run that issued the call —
-// the same ctx fields browser-lease's ownerFor resolves from. A null
-// dimension stays null in the stamp: src/identity.js treats it as a miss and
-// refuses the call, so a half-stamped call fails loudly instead of minting a
-// default key. With no resolvable dimension at all the hook returns
-// undefined and the call proceeds unstamped, for the server to refuse.
+// Session resolution mirrors the HookContext the host guarantees for bundled
+// MCP tool calls since v2026.5.16-beta.7 (oldest compatible stable:
+// v2026.5.18, declared in package.json as openclaw.install.minHostVersion).
+// Order below is most stable first: the live session key, then the session
+// id, then the single-run id, then the same fields off the event. A null dimension stays
+// null in the stamp: src/identity.js treats it as a miss and refuses the
+// call, so a half-stamped call fails loudly instead of minting a default
+// key. With no resolvable dimension at all the hook returns undefined and
+// the call proceeds unstamped, for the server to refuse.
 export function buildWinchMeta(event, ctx) {
   const toolName = event?.toolName ?? ctx?.toolName;
   if (!isWinchTool(toolName)) return undefined;
   const agent = ctx?.agentId ?? event?.agentId ?? null;
-  const session = ctx?.sessionKey ?? ctx?.runId ?? event?.runId ?? null;
+  const session = ctx?.sessionKey ?? ctx?.sessionId ?? ctx?.runId ?? event?.sessionId ?? event?.runId ?? null;
   if (agent === null && session === null) return undefined;
   const params = event?.params ?? {};
   return {

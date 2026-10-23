@@ -8,6 +8,11 @@ import { buildWinchMeta } from "./meta.js";
 // impersonate an agent. No resolvable session/agent returns undefined; the
 // call reaches the server unstamped and is refused — identity has no env
 // fallback.
+//
+// Host floor (>= 2026.5.18, when bundled MCP calls started carrying hook
+// session context) is declared in package.json
+// (openclaw.install.minHostVersion), enforced by install and registry
+// loading — not checked here, by design.
 export default definePluginEntry({
   id: "winch-meta",
   name: "Winch Meta",

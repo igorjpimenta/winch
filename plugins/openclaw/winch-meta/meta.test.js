@@ -33,6 +33,28 @@ test("runId stands in for sessionKey — the browser-lease ownerFor fallback cha
   assert.equal(out.params._meta.winch.session, "run_7");
 });
 
+test("ctx.sessionId beats runId — the 5.18-guaranteed HookContext field", () => {
+  const out = buildWinchMeta(
+    { toolName: "mcp__winch__backlog_next" },
+    { agentId: "scout", sessionId: "ses_9", runId: "run_7" },
+  );
+  assert.equal(out.params._meta.winch.session, "ses_9");
+});
+
+test("sessionKey still wins over sessionId — most stable first", () => {
+  const out = buildWinchMeta(
+    { toolName: "mcp__winch__backlog_next" },
+    { agentId: "scout", sessionKey: "ses_live", sessionId: "ses_9", runId: "run_7" },
+  );
+  assert.equal(out.params._meta.winch.session, "ses_live");
+});
+
+test("event.sessionId is read when ctx carries no session fields", () => {
+  const out = buildWinchMeta({ toolName: "winch_x", sessionId: "ses_e" }, {});
+  assert.equal(out.params._meta.winch.session, "ses_e");
+  assert.equal(out.params._meta.winch.agent, null);
+});
+
 test("event.runId is read when ctx carries neither sessionKey nor runId", () => {
   const out = buildWinchMeta({ toolName: "winch_x", runId: "run_e" }, {});
   assert.equal(out.params._meta.winch.session, "run_e");
