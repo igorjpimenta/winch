@@ -44,10 +44,12 @@ const USAGE = `usage: winch <command>
   mcp --harness H serve the backlog tools over MCP stdio
                                      (identity: harness declared here, agent+session stamped per call)
   watch                                  one watcher tick (JSON manifest on stdout)
-  resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
-  next                                   list the current ready queue
-  release-epic --epic <id> [--task ID] [--version V] [--base B]
-  merge-detect [--dry-run]               apply merged/closed PR outcomes
+  resume <taskId> [--actor <name>] [--config JSON|PATH]
+                                     resolve a human gate: blocked → todo
+  next [--config JSON|PATH]          list the current ready queue
+  release-epic --epic <id> [--task ID] [--version V] [--base B] [--config JSON|PATH]
+  merge-detect [--dry-run] [--config JSON|PATH]
+                                     apply merged/closed PR outcomes
   serve --ws --port N [--host H]         stream store events over WebSocket`;
 
 function fail(msg, code = 2) {
@@ -117,12 +119,12 @@ export async function runCli(argv) {
     case "resume": {
       const { values, positionals } = parseArgs({
         args: rest,
-        options: { actor: { type: "string" } },
+        options: { actor: { type: "string" }, config: { type: "string" } },
         allowPositionals: true,
       });
       const taskId = positionals[0];
-      if (!taskId) fail("usage: winch resume <taskId> [--actor <name>]");
-      const store = openStore();
+      if (!taskId) fail("usage: winch resume <taskId> [--actor <name>] [--config JSON|PATH]");
+      const store = openStore(loadConfig(values));
       try {
         const r = store.task.resumeGate({ id: taskId, actor: values.actor ?? "operator" });
         if (!r) fail(`not resumable: ${taskId}`, 1);
@@ -134,7 +136,12 @@ export async function runCli(argv) {
     }
 
     case "next": {
-      const store = openStore();
+      const { values } = parseArgs({
+        args: rest,
+        options: { config: { type: "string" } },
+        allowPositionals: true,
+      });
+      const store = openStore(loadConfig(values));
       try {
         const rows = readyTasks(store, { limit: 20 });
         console.log(JSON.stringify(
@@ -155,10 +162,11 @@ export async function runCli(argv) {
           task: { type: "string" },
           version: { type: "string" },
           base: { type: "string" },
+          config: { type: "string" },
         },
       });
-      if (!values.epic) fail("usage: winch release-epic --epic <id> [--task ID] [--version V] [--base B]");
-      const store = openStore();
+      if (!values.epic) fail("usage: winch release-epic --epic <id> [--task ID] [--version V] [--base B] [--config JSON|PATH]");
+      const store = openStore(loadConfig(values));
       try {
         const r = shipRelease(store, {
           epicId: values.epic,
@@ -176,8 +184,11 @@ export async function runCli(argv) {
     }
 
     case "merge-detect": {
-      const { values } = parseArgs({ args: rest, options: { "dry-run": { type: "boolean" } } });
-      const store = openStore();
+      const { values } = parseArgs({
+        args: rest,
+        options: { "dry-run": { type: "boolean" }, config: { type: "string" } },
+      });
+      const store = openStore(loadConfig(values));
       try {
         const prs = collectPRs({ exec: execFileSync });
         const summary = applyMergeOutcomes(store, prs, { exec: execFileSync, dryRun: !!values["dry-run"] });

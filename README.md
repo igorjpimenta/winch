@@ -114,7 +114,8 @@ live in [plugins/README.md](plugins/README.md).
 
 Tuning knobs are declared the way the harness is — and none of them is
 required. Precedence per knob: per-call `_meta.winch.config` > constructor
-`{ config }` (`createStore`, `--config JSON|PATH` on `mcp`/`serve`/`watch`)
+`{ config }` (`createStore`, `--config JSON|PATH` on `mcp`/`watch`/`resume`/
+`next`/`release-epic`/`merge-detect`/`serve`)
 > `WINCH_*` env > code default. An undeclared server behaves exactly like
 the old hardcoded one. Malformed values refuse (bad key named) at startup
 for construction config, per call for meta overlay; unknown explicit keys
