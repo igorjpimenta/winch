@@ -1,26 +1,18 @@
-# Publish @igorjpimenta/winch to GitHub Packages on every GitHub Release.
-# Flow: bump version in package.json → push → Releases → "Create a new
-# release" with the tag matching package.json (e.g. v2026.10.22, or
-# v2026.10.22-beta.0 for a beta) → publish. Tick "pre-release" on the
-# release for a beta; leave it unticked for stable.
-# Consumers install with an .npmrc pointing the scope at npm.pkg.github.com
-# (see README "Install / run"): stable via `npm install -g
-# @igorjpimenta/winch`, beta via `npm install -g @igorjpimenta/winch@beta`.
-# GITHUB_TOKEN has packages:write via `packages` permission below — no
-# personal token needed.
-#
-# How the script knows stable vs beta: it does not guess from the version
-# string. It reads the release event — github.event.release.prerelease
-# (the "Set as a pre-release" checkbox) — and publishes stable to the
-# `latest` dist-tag, beta to the `beta` dist-tag. The tag-vs-package.json
-# check below fails the run if they disagree, so a mistagged release can
-# never ship the wrong version under either tag.
+# Publish @igorjpimenta/winch to GitHub Packages on version tags.
+# Flow: bump version in package.json → commit → `git tag v<version>` → push
+# tag. The tag IS the release pattern: v2026.10.22 ships stable (`latest`),
+# v2026.10.22-beta.0 ships beta. Anything else fails the run.
+# Consumers: stable via `npm install -g @igorjpimenta/winch`, beta via
+# `npm install -g @igorjpimenta/winch@beta` (.npmrc scope at
+# npm.pkg.github.com, see README "Install / run").
+# GITHUB_TOKEN has packages:write via `packages` permission below.
 
 name: publish
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -42,16 +34,19 @@ jobs:
         id: channel
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "::error::release tag v$TAG != package.json $PKG — bump package.json first"
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag v$TAG is not release pattern v<semver>[-prerelease]"
             exit 1
           fi
-          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
-            echo "tag=beta" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG != package.json $PKG — bump package.json first"
+            exit 1
           fi
+          case "$TAG" in
+            *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
+            * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
       - run: npm publish --tag ${{ steps.channel.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
