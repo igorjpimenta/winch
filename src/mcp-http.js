@@ -59,7 +59,7 @@ function readBody(req) {
 export async function startMcpHttpServer({ store, port = null, host = "127.0.0.1", logger } = {}) {
   const bearer = process.env.WINCH_BEARER;
   if (!bearer || bearer.trim() === "") {
-    throw new Error("winch: serve --mcp-http refuses without WINCH_BEARER (local, but with auth). Set a bearer token in the environment.");
+    throw new Error("winch: serve --mcp http refuses without WINCH_BEARER (local, but with auth). Set a bearer token in the environment.");
   }
   const cfg = store.config ?? {};
   const listenPort = port ?? cfg.mcpHttpPort ?? 38292;

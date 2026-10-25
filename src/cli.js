@@ -41,9 +41,9 @@ function loadConfig(values) {
 
 const USAGE = `usage: winch <command>
 
-  serve --mcp-stdio                      serve the backlog tools over MCP stdio
-                                      (harness from WINCH_HARNESS env only; agent+session stamped per call)
-  serve --mcp-http --port N [--host H]  serve the backlog tools over MCP Streamable HTTP (shared daemon)
+  serve --mcp stdio|http [--port N] [--host H]
+                                      serve the backlog tools over MCP stdio or Streamable HTTP
+                                      (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
   serve --ws --port N [--host H]         stream store events over WebSocket
   mcp --harness H                        deprecated alias for serve --mcp-stdio (kept for back-compat)
   watch                                  one watcher tick (JSON manifest on stdout)
@@ -68,7 +68,7 @@ export async function runCli(argv) {
       return;
 
     case "mcp": {
-      console.error("winch: `mcp` is a deprecated alias for `serve --mcp-stdio`; prefer WINCH_HARNESS env + `serve --mcp-stdio`.");
+      console.error("winch: `mcp` is a deprecated alias for `serve --mcp stdio`; prefer WINCH_HARNESS env + `serve --mcp stdio`.");
       const { values } = parseArgs({
         args: rest,
         options: {
@@ -200,8 +200,7 @@ export async function runCli(argv) {
           args: rest,
           options: {
             ws: { type: "boolean" },
-            "mcp-stdio": { type: "boolean" },
-            "mcp-http": { type: "boolean" },
+            mcp: { type: "string" },
             port: { type: "string" },
             host: { type: "string" },
             config: { type: "string" },
@@ -211,13 +210,16 @@ export async function runCli(argv) {
         // --harness (or any unknown flag) on serve means the caller is still
         // on the legacy `mcp --harness` surface: stdio harness is env-only.
         if (/Unknown option|ERR_PARSE_ARGS_UNKNOWN_OPTION/.test(String(err?.message ?? err))) {
-          fail("winch serve --mcp-stdio takes no --harness flag: set WINCH_HARNESS in the environment.");
+          fail("winch serve --mcp takes no --harness flag: set WINCH_HARNESS in the environment.");
         }
         throw err;
       }
-      const modes = ["ws", "mcp-stdio", "mcp-http"].filter((k) => values[k]);
+      if (values.mcp !== undefined && values.mcp !== "stdio" && values.mcp !== "http") {
+        fail(`winch: --mcp must be stdio or http, got ${JSON.stringify(values.mcp)}`);
+      }
+      const modes = ["ws", "mcp"].filter((k) => values[k]);
       if (modes.length !== 1) {
-        fail("usage: winch serve (--ws | --mcp-stdio | --mcp-http) [--port N] [--host H] [--config JSON|PATH]");
+        fail("usage: winch serve (--ws | --mcp stdio|http) [--port N] [--host H] [--config JSON|PATH]");
       }
       const store = openStore(loadConfig(values));
       const logger = {
@@ -232,7 +234,7 @@ export async function runCli(argv) {
       if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
         fail(`winch: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
       }
-      if (values["mcp-stdio"]) {
+      if (values.mcp === "stdio") {
         // Harness is env-only here by design: the spawner owns identity.
         let base;
         try {
@@ -247,7 +249,7 @@ export async function runCli(argv) {
         }
         return;
       }
-      if (values["mcp-http"]) {
+      if (values.mcp === "http") {
         try {
           const { startMcpHttpServer } = await import("./mcp-http.js");
           await startMcpHttpServer({ store, port, host, logger });
