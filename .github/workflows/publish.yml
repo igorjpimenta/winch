@@ -1,8 +1,8 @@
 # Publish @igorjpimenta/winch to GitHub Packages on version tags.
-# Flow: bump version in package.json → commit → `git tag <version>` (bare,
-# matching repo habit, or v-prefixed) → push tag. The tag IS the release
-# pattern: 2026.10.22 ships stable (`latest`), 2026.10.22-beta.0 ships
-# beta. Anything else fails the run.
+# Flow: bump version in package.json → commit → `git tag <version>` → push
+# tag. The tag IS the release pattern: 2026.10.22 ships stable (`latest`),
+# 2026.10.22-beta.0 ships beta (no v prefix — bare, matching repo habit).
+# Anything else fails the run.
 # Consumers: stable via `npm install -g @igorjpimenta/winch`, beta via
 # `npm install -g @igorjpimenta/winch@beta` (.npmrc scope at
 # npm.pkg.github.com, see README "Install / run").
@@ -13,7 +13,6 @@ name: publish
 on:
   push:
     tags:
-      - "v[0-9]*"
       - "[0-9]*"
 
 permissions:
@@ -35,7 +34,7 @@ jobs:
       - name: Resolve channel (stable vs beta)
         id: channel
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="$GITHUB_REF_NAME"
           if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::tag $GITHUB_REF_NAME is not release pattern <semver>[-prerelease]"
             exit 1
