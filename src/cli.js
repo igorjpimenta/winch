@@ -12,7 +12,7 @@ import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer } from "./events-ws.js";
-import { assertDeclaration, declaredFromEnv } from "./identity.js";
+import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 
 export { resolveDbPath };
@@ -45,7 +45,6 @@ const USAGE = `usage: winch <command>
                                       serve the backlog tools over MCP stdio or Streamable HTTP
                                       (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
   serve --ws --port N [--host H]         stream store events over WebSocket
-  mcp --harness H                        deprecated alias for serve --mcp-stdio (kept for back-compat)
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
@@ -66,41 +65,6 @@ export async function runCli(argv) {
     case "help":
       console.log(USAGE);
       return;
-
-    case "mcp": {
-      console.error("winch: `mcp` is a deprecated alias for `serve --mcp stdio`; prefer WINCH_HARNESS env + `serve --mcp stdio`.");
-      const { values } = parseArgs({
-        args: rest,
-        options: {
-          harness: { type: "string" },
-          config: { type: "string" },
-          agent: { type: "string" },
-          session: { type: "string" },
-        },
-      });
-      if (values.agent !== undefined || values.session !== undefined) {
-        fail(
-          "winch mcp: --agent/--session are per-call identity, not construction flags. " +
-            "Remove them from the MCP entry; the companion plugin stamps agent and session on every call."
-        );
-      }
-      const store = openStore(loadConfig(values));
-      const logger = {
-        info: (...a) => console.error(...a),
-        warn: (...a) => console.error(...a),
-        error: (...a) => console.error(...a),
-      };
-      try {
-        // harness from flag or env; agent/session arrive per call via the hook
-        const base = assertDeclaration({
-          harness: values.harness ?? process.env.WINCH_HARNESS,
-        });
-        await startMcpServer({ store, base, logger });
-      } catch (err) {
-        fail(String(err?.message ?? err));
-      }
-      return;
-    }
 
     case "watch": {
       const { values } = parseArgs({

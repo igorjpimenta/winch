@@ -1,0 +1,32 @@
+# Publish @igorjpimenta/winch to GitHub Packages on every GitHub Release.
+# Flow: bump version in package.json → push → Releases → "Create a new
+# release" with the tag matching package.json (e.g. v2026.10.22) → publish.
+# Consumers install with an .npmrc pointing the scope at npm.pkg.github.com
+# (see README "Install / run"). GITHUB_TOKEN has packages:write via `packages`
+# permission below — no personal token needed.
+
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@igorjpimenta"
+      - run: npm ci
+      - run: npm test
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

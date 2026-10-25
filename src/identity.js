@@ -41,7 +41,8 @@ export function assertDeclaration(base) {
   if (h === "") {
     throw new Error(
       "winch: identity declaration incomplete (missing: harness). " +
-        "Declare the consumer at construction — CLI: --harness / WINCH_HARNESS; " +
+        "Declare the consumer at construction — CLI: WINCH_HARNESS env " +
+        "(stdio) / X-Winch-Harness header (HTTP); " +
         "embedders: startMcpServer({ base: { harness } }). " +
         "Agent and session are never declared: they arrive per call."
     );

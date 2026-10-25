@@ -19,8 +19,15 @@ contract itself is the only integration surface.
 - Node 22+. Runtime deps are the MCP SDK, its `zod` peer, Drizzle ORM, and
   `better-sqlite3` (a native module; prebuilt binaries cover common platforms,
   otherwise a C++ toolchain is needed).
-- `npm install`, then `./bin/winch.js <command>` — or `npm link` for a global
-  `winch`.
+- Install the published package (GitHub Packages) — no git clone needed:
+  ```sh
+  # one line in ~/.npmrc (auth: a token with read:packages, e.g. GITHUB_TOKEN)
+  echo '@igorjpimenta:registry=https://npm.pkg.github.com' >> ~/.npmrc
+  npm install -g @igorjpimenta/winch
+  winch serve --mcp stdio   # binary is `winch`; harness via WINCH_HARNESS
+  ```
+- From source instead: `npm install`, then `./bin/winch.js <command>` — or
+  `npm link` for a global `winch`.
 - `winch serve --mcp stdio` serves the five backlog tools over MCP stdio
   (stdout is JSON-RPC; logs go to stderr; harness from `WINCH_HARNESS` env).
 - `WINCH_BEARER=… winch serve --mcp http --port N` serves the same tools
@@ -32,7 +39,6 @@ contract itself is the only integration surface.
 | --------------------------------------------------------------- | ------------------------------------------------------- |
 | `serve --mcp stdio`                                             | serve the backlog tools over MCP stdio (env-only harness) |
 | `serve --mcp http --port N [--host H]`                          | serve the same tools over Streamable HTTP (shared daemon) |
-| `mcp --harness H`                                               | deprecated alias for `serve --mcp stdio`                |
 | `watch`                                                         | one watcher tick (JSON manifest on stdout)              |
 | `resume <taskId> [--actor <name>]`                              | resolve a human gate: blocked → todo                    |
 | `next`                                                          | list the current ready queue                            |
@@ -132,8 +138,7 @@ the CAS transaction boundary under WAL contention.
 Every claim is keyed `harness:agent:session`. The **harness is
 declared at construction** — `winch serve --mcp stdio` will not start
 without `WINCH_HARNESS` in the environment, because an unnamed server
-cannot attribute anything. (`mcp --harness` keeps the old flag as a
-deprecated alias.)
+cannot attribute anything.
 The agent and session of each call are stamped per call by the calling
 harness's companion plugin (`_meta.winch`), which overwrites unconditionally,
 so model-supplied meta cannot impersonate an agent. A call whose agent or
