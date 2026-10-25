@@ -10,6 +10,7 @@
 // next candidate — there is no blocking wait inside a tool call.
 
 import { readyTasks } from "./ready-queue.js";
+import { snapshotReadyIds, runWakes } from "./wake.js";
 import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 import { resolveRequestConfig } from "./config.js";
@@ -383,12 +384,26 @@ export function createToolHandlers(store, logger) {
     },
   };
 
-  async function handle(name, args, identity, meta = null) {
+  async function handle(name, args, identity, meta = null, hooks = {}) {
     assertCleanTriple(identity, `caller identity for ${name}`);
     const cfg = resolveRequestConfig(baseConfig, meta);
     const fn = handlers[name];
     if (!fn) return err(`unknown tool: ${name}`, "unknown_tool");
-    return fn(args, identity, cfg);
+    const armed = typeof cfg.hookUrl === "string" && cfg.hookUrl !== "" && typeof cfg.hookToken === "string" && cfg.hookToken !== "";
+    const before = armed ? snapshotReadyIds(store) : null;
+    const res = await fn(args, identity, cfg);
+    // The wake hook observes the queue the MCP layer provides: a successful
+    // mutation that newly frees tasks POSTs each one to the gateway hooks
+    // endpoint. Rejected calls changed nothing, so there is nothing newly
+    // ready by construction. A failed post never fails the call.
+    if (armed && res?.details?.status !== "rejected") {
+      try {
+        await runWakes({ store, beforeIds: before, cfg, logger, fetchFn: hooks.fetchFn });
+      } catch (e) {
+        logger?.warn?.(`winch: wake hook failed (queue intact): ${e?.message}`);
+      }
+    }
+    return res;
   }
 
   return { TOOL_DEFS, handle };

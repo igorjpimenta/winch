@@ -9,7 +9,10 @@ claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
-handle however they want.
+handle however they want. An opt-in wake hook (`WINCH_HOOK_URL` +
+`WINCH_HOOK_TOKEN`) POSTs each newly-ready task to the gateway hooks endpoint
+(`POST /hooks/agent`) after every successful mutation, so OpenClaw wakes the
+routed agent instead of waiting for the next poll.
 
 Winch is harness-agnostic: the server contains no harness-specific code. The
 adapters under `plugins/` are optional and installed per harness; the MCP
