@@ -32,8 +32,8 @@ carries no explicit extensions path; the browser-lease extension lives at
 `~/.openclaw/extensions/browser-lease/` with its own `openclaw.plugin.json`.
 
 1. Install the plugin from the published package (no git clone):
-   `cp -r "$(npm root -g)/@igorjpimenta/winch/plugins/openclaw/winch-meta" \
-    ~/.openclaw/extensions/winch-meta/` (or symlink it).
+   `cp -r "$(npm root -g)/@igorjpimenta/winch/plugins/openclaw/winch" \
+    ~/.openclaw/extensions/winch/` (or symlink it).
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -49,7 +49,7 @@ carries no explicit extensions path; the browser-lease extension lives at
   }
 },
 "plugins": {
-  "allow": [ "...existing entries...", "winch-meta" ]
+  "allow": [ "...existing entries...", "winch" ]
 }
 ```
 

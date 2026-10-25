@@ -14,16 +14,16 @@ import { buildWinchMeta } from "./meta.js";
 // (openclaw.install.minHostVersion), enforced by install and registry
 // loading — not checked here, by design.
 export default definePluginEntry({
-  id: "winch-meta",
-  name: "Winch Meta",
+  id: "winch",
+  name: "Winch",
   description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller.",
   configSchema: () => ({}),
   register: (api) => {
     if (typeof api.on !== "function") {
-      api.logger.warn("winch-meta: api.on unavailable; not registering hook");
+      api.logger.warn("winch: api.on unavailable; not registering hook");
       return;
     }
     api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx));
-    api.logger.info("winch-meta: registered (stamps _meta.winch on winch MCP tool calls)");
+    api.logger.info("winch: registered (stamps _meta.winch on winch MCP tool calls)");
   },
 });
