@@ -39,6 +39,33 @@ function parseInt(raw) {
   return Number(s);
 }
 
+function parseWakeString(raw) {
+  return typeof raw === "string" ? raw : null;
+}
+
+function parseHookUrl(raw) {
+  if (raw === "" || raw == null) return "";
+  const s = String(raw).trim();
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+function parseWakeRoutes(raw) {
+  const obj = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v !== "string" || v === "") return null;
+    out[k] = v;
+  }
+  return out;
+}
+
 // key -> { env, parse, check }. parse normalizes (string|number|array) to the
 // stored shape; check rejects out-of-range values. Stored shapes are plain
 // JSON: a resolved config survives a round-trip through JSON by construction.
@@ -59,6 +86,12 @@ const SPEC = {
   noteReasonLimit:    { env: "WINCH_NOTE_REASON_LIMIT",   parse: parseInt, check: (v) => v > 0 },
   noteArtifactLimit:  { env: "WINCH_NOTE_ARTIFACT_LIMIT", parse: parseInt, check: (v) => v > 0 },
   maxArtifacts:       { env: "WINCH_MAX_ARTIFACTS",       parse: parseInt, check: (v) => v > 0 },
+  wakeAgent:          { env: "WINCH_WAKE_AGENT",        parse: parseWakeString, check: (v) => typeof v === "string" },
+  wakeRoutes:         { env: "WINCH_WAKE_ROUTES",       parse: parseWakeRoutes, check: (v) => v !== null },
+  wakeMax:            { env: "WINCH_WAKE_MAX",          parse: parseInt, check: (v) => v > 0 },
+  hookUrl:            { env: "WINCH_HOOK_URL",          parse: parseHookUrl, check: (v) => typeof v === "string" },
+  hookToken:          { env: "WINCH_HOOK_TOKEN",        parse: parseWakeString, check: (v) => typeof v === "string" },
+  hookTimeoutMs:      { env: "WINCH_HOOK_TIMEOUT_MS",   parse: parseInt, check: (v) => v > 0 && v <= 60000 },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -78,6 +111,12 @@ export const CONFIG_DEFAULTS = {
   noteReasonLimit: 1000,
   noteArtifactLimit: 500,
   maxArtifacts: 50,
+  wakeAgent: "",
+  wakeRoutes: {},
+  wakeMax: 10,
+  hookUrl: "",
+  hookToken: "",
+  hookTimeoutMs: 10000,
 };
 
 export const CONFIG_ENV = Object.fromEntries(
