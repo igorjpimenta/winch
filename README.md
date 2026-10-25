@@ -23,7 +23,8 @@ contract itself is the only integration surface.
   ```sh
   # one line in ~/.npmrc (auth: a token with read:packages, e.g. GITHUB_TOKEN)
   echo '@igorjpimenta:registry=https://npm.pkg.github.com' >> ~/.npmrc
-  npm install -g @igorjpimenta/winch
+  npm install -g @igorjpimenta/winch   # stable (`latest` tag)
+  # npm install -g @igorjpimenta/winch@beta   # pre-release channel
   winch serve --mcp stdio   # binary is `winch`; harness via WINCH_HARNESS
   ```
 - From source instead: `npm install`, then `./bin/winch.js <command>` — or

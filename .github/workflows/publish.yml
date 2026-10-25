@@ -1,9 +1,20 @@
 # Publish @igorjpimenta/winch to GitHub Packages on every GitHub Release.
 # Flow: bump version in package.json → push → Releases → "Create a new
-# release" with the tag matching package.json (e.g. v2026.10.22) → publish.
+# release" with the tag matching package.json (e.g. v2026.10.22, or
+# v2026.10.22-beta.0 for a beta) → publish. Tick "pre-release" on the
+# release for a beta; leave it unticked for stable.
 # Consumers install with an .npmrc pointing the scope at npm.pkg.github.com
-# (see README "Install / run"). GITHUB_TOKEN has packages:write via `packages`
-# permission below — no personal token needed.
+# (see README "Install / run"): stable via `npm install -g
+# @igorjpimenta/winch`, beta via `npm install -g @igorjpimenta/winch@beta`.
+# GITHUB_TOKEN has packages:write via `packages` permission below — no
+# personal token needed.
+#
+# How the script knows stable vs beta: it does not guess from the version
+# string. It reads the release event — github.event.release.prerelease
+# (the "Set as a pre-release" checkbox) — and publishes stable to the
+# `latest` dist-tag, beta to the `beta` dist-tag. The tag-vs-package.json
+# check below fails the run if they disagree, so a mistagged release can
+# never ship the wrong version under either tag.
 
 name: publish
 
@@ -27,6 +38,20 @@ jobs:
           scope: "@igorjpimenta"
       - run: npm ci
       - run: npm test
-      - run: npm publish
+      - name: Resolve channel (stable vs beta)
+        id: channel
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::release tag v$TAG != package.json $PKG — bump package.json first"
+            exit 1
+          fi
+          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
+            echo "tag=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+      - run: npm publish --tag ${{ steps.channel.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
