@@ -33,6 +33,74 @@ test("webhookConfig: empty url disables; bearer optional; timeout default", () =
   assert.equal(cfg.timeoutMs, 3000);
 });
 
+test("webhookConfig routes per harness, falls back to single, else disabled", () => {
+  const cfg = {
+    claimWebhookUrl: "http://fallback/hook",
+    claimWebhookBearer: "fb",
+    claimWebhookTimeoutMs: 3000,
+    claimWebhooks: {
+      openclaw: { url: "http://oc/hook", bearer: "oc-secret", timeoutMs: 1000 },
+      opencode: { url: "http://oe/hook" },
+    },
+  };
+  assert.deepEqual(webhookConfig(cfg, "openclaw"), { url: "http://oc/hook", bearer: "oc-secret", timeoutMs: 1000 });
+  assert.deepEqual(webhookConfig(cfg, "opencode"), { url: "http://oe/hook", bearer: null, timeoutMs: 3000 });
+  assert.deepEqual(webhookConfig(cfg, "langgraph"), { url: "http://fallback/hook", bearer: "fb", timeoutMs: 3000 });
+  assert.equal(webhookConfig({ claimWebhookUrl: "", claimWebhooks: {} }, "openclaw"), null);
+});
+
+test("claimWebhooks knob parses JSON env and refuses malformed maps", async () => {
+  const { resolveConfig } = await import("../src/config.js");
+  const cfg = resolveConfig({
+    explicit: {},
+    env: { WINCH_CLAIM_WEBHOOKS: '{"openclaw":{"url":"http://oc/h"}}' },
+  });
+  assert.deepEqual(cfg.claimWebhooks, { openclaw: { url: "http://oc/h" } });
+  assert.throws(
+    () => resolveConfig({ explicit: { claimWebhooks: { x: {} } }, env: {} }),
+    /bad claimWebhooks/
+  );
+  assert.throws(
+    () => resolveConfig({ explicit: {}, env: { WINCH_CLAIM_WEBHOOKS: "not-json{" } }),
+    /bad claimWebhooks/
+  );
+});
+
+test("notifyClaim POSTs to the claiming harness's own URL only", async () => {
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      hits.push({ url: req.url, auth: req.headers.authorization, agent: JSON.parse(body).session.agent });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+    });
+  });
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  const port = server.address().port;
+  const cfg = {
+    claimWebhookUrl: "",
+    claimWebhookBearer: "",
+    claimWebhookTimeoutMs: 3000,
+    claimWebhooks: {
+      openclaw: { url: `http://127.0.0.1:${port}/oc`, bearer: "oc1" },
+      opencode: { url: `http://127.0.0.1:${port}/oe`, bearer: "oe1" },
+    },
+  };
+  const oc = await notifyClaim(cfg, { event: "task.claimed", session: { harness: "openclaw", agent: "a" } }, null);
+  const oe = await notifyClaim(cfg, { event: "task.claimed", session: { harness: "opencode", agent: "b" } }, null);
+  const lg = await notifyClaim(cfg, { event: "task.claimed", session: { harness: "langgraph", agent: "c" } }, null);
+  server.close();
+  assert.equal(oc.ok, true);
+  assert.equal(oe.ok, true);
+  assert.deepEqual(lg, { ok: false, reason: "disabled" });
+  assert.deepEqual(hits.map((h) => [h.url, h.auth, h.agent]), [
+    ["/oc", "Bearer oc1", "a"],
+    ["/oe", "Bearer oe1", "b"],
+  ]);
+});
+
 test("claimPayload carries task, session triple and handoff", () => {
   const p = claimPayload({
     task: { id: "TASK-1", title: "T", description: "D", assigned: "a1" },

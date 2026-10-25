@@ -63,6 +63,27 @@ const SPEC = {
   claimWebhookUrl:     { env: "WINCH_CLAIM_WEBHOOK_URL",     parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookBearer:  { env: "WINCH_CLAIM_WEBHOOK_BEARER",  parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookTimeoutMs: { env: "WINCH_CLAIM_WEBHOOK_TIMEOUT_MS", parse: parseInt, check: (v) => v > 0 },
+  // Per-harness routing table: { <harness>: { url, bearer?, timeoutMs? } }.
+  // JSON in env (`WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…"}}'`), object
+  // in explicit config. A harness with no entry falls back to the single
+  // claimWebhookUrl/Bearer above; a harness with neither is not notified.
+  claimWebhooks: {
+    env: "WINCH_CLAIM_WEBHOOKS",
+    parse: (raw) => {
+      if (raw == null || raw === "") return {};
+      let obj;
+      try {
+        obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      } catch {
+        return null;
+      }
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+      return obj;
+    },
+    check: (v) => Object.values(v).every(
+      (e) => e && typeof e === "object" && typeof e.url === "string" && e.url.trim() !== ""
+    ),
+  },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -86,6 +107,7 @@ export const CONFIG_DEFAULTS = {
   claimWebhookUrl: "",
   claimWebhookBearer: "",
   claimWebhookTimeoutMs: 3000,
+  claimWebhooks: {},
 };
 
 export const CONFIG_ENV = Object.fromEntries(

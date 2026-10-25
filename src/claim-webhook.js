@@ -12,7 +12,29 @@
 
 const DEFAULT_TIMEOUT_MS = 3000;
 
-export function webhookConfig(cfg) {
+/**
+ * Resolve the webhook target for a claiming harness. Per-harness entry wins
+ * (`claimWebhooks[harness]`); otherwise the single claimWebhookUrl/Bearer
+ * acts as the fallback for all harnesses; neither means disabled. Each
+ * harness gets exactly its own claims — no fan-out, no cross-harness leak.
+ */
+export function webhookConfig(cfg, harness = null) {
+  const table = cfg?.claimWebhooks;
+  if (harness && table && typeof table === "object") {
+    const entry = table[harness];
+    if (entry && typeof entry.url === "string" && entry.url.trim() !== "") {
+      const timeoutMs = Number.isInteger(entry.timeoutMs) && entry.timeoutMs > 0
+        ? entry.timeoutMs
+        : (Number.isInteger(cfg?.claimWebhookTimeoutMs) && cfg.claimWebhookTimeoutMs > 0
+          ? cfg.claimWebhookTimeoutMs
+          : DEFAULT_TIMEOUT_MS);
+      return {
+        url: entry.url.trim(),
+        bearer: typeof entry.bearer === "string" && entry.bearer !== "" ? entry.bearer : null,
+        timeoutMs,
+      };
+    }
+  }
   const url = typeof cfg?.claimWebhookUrl === "string" ? cfg.claimWebhookUrl.trim() : "";
   if (!url) return null;
   const bearer = typeof cfg?.claimWebhookBearer === "string" && cfg.claimWebhookBearer !== ""
@@ -52,7 +74,7 @@ export function claimPayload({ task, story, epic, artifacts, handoff, identity, 
  * without risking the claim itself.
  */
 export async function notifyClaim(cfg, payload, logger = null) {
-  const hook = webhookConfig(cfg);
+  const hook = webhookConfig(cfg, payload?.session?.harness ?? null);
   if (!hook) return { ok: false, reason: "disabled" };
   try {
     const headers = { "content-type": "application/json" };
