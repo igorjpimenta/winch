@@ -9,7 +9,9 @@ claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
-handle however they want.
+handle however they want. An opt-in wake hook (`WINCH_WAKE_AGENT`) spawns one
+turn per newly-ready task after each successful mutation, so the queue drains
+itself instead of waiting for the next poll.
 
 Winch is harness-agnostic: the server contains no harness-specific code. The
 adapters under `plugins/` are optional and installed per harness; the MCP
