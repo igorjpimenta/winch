@@ -60,6 +60,9 @@ const SPEC = {
   noteReasonLimit:    { env: "WINCH_NOTE_REASON_LIMIT",   parse: parseInt, check: (v) => v > 0 },
   noteArtifactLimit:  { env: "WINCH_NOTE_ARTIFACT_LIMIT", parse: parseInt, check: (v) => v > 0 },
   maxArtifacts:       { env: "WINCH_MAX_ARTIFACTS",       parse: parseInt, check: (v) => v > 0 },
+  claimWebhookUrl:     { env: "WINCH_CLAIM_WEBHOOK_URL",     parse: (raw) => String(raw ?? ""), check: () => true },
+  claimWebhookBearer:  { env: "WINCH_CLAIM_WEBHOOK_BEARER",  parse: (raw) => String(raw ?? ""), check: () => true },
+  claimWebhookTimeoutMs: { env: "WINCH_CLAIM_WEBHOOK_TIMEOUT_MS", parse: parseInt, check: (v) => v > 0 },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -80,6 +83,9 @@ export const CONFIG_DEFAULTS = {
   noteReasonLimit: 1000,
   noteArtifactLimit: 500,
   maxArtifacts: 50,
+  claimWebhookUrl: "",
+  claimWebhookBearer: "",
+  claimWebhookTimeoutMs: 3000,
 };
 
 export const CONFIG_ENV = Object.fromEntries(

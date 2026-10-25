@@ -62,6 +62,28 @@ install and registry loading). No resolvable session or agent → the hook
 returns `undefined`; the call reaches the server unstamped and is refused
 (there is no env fallback).
 
+## Claim webhook (wake on attribution)
+
+Polling `backlog_next` leaves an idle agent waiting for its next heartbeat.
+Instead, winch can push the handoff the moment a claim lands and the plugin
+opens a **fresh session** for the task:
+
+1. On the plugin: set `webhookBearer` (any secret) in the extension config —
+   `~/.openclaw/openclaw.json` → the extension's config. The route
+   `POST /api/winch/claimed` stays disarmed (503) until set.
+2. On winch: point at the gateway and share the secret —
+   `WINCH_CLAIM_WEBHOOK_URL=http://<gateway-host>:<port>/api/winch/claimed`
+   `WINCH_CLAIM_WEBHOOK_BEARER=<same secret>` (or the `--config`
+   equivalents). No URL = no-op; claims work exactly as before.
+3. On claim, winch POSTs `{event:"task.claimed", task, session, handoff}`
+   (see `src/claim-webhook.js`); the plugin verifies the bearer, then
+   `scheduleSessionTurn`s a one-shot turn (`deleteAfterRun`, tag
+   `winch-claim`) in session `winch-claim-<TASK-ID>` carrying the receiver
+   prompt, and injects a pointer into the claiming session. If the fresh
+   session fails, the turn falls back to the claiming session; if scheduling
+   is unavailable, injection-only. Delivery never fails the claim (bounded
+   3s timeout, failures are warnings).
+
 ## opencode
 
 Why env, not meta: opencode's `tool.execute.before` can mutate the outgoing

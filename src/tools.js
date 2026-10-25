@@ -13,6 +13,7 @@ import { readyTasks } from "./ready-queue.js";
 import { addDep } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 import { resolveRequestConfig } from "./config.js";
+import { notifyClaim, claimPayload } from "./claim-webhook.js";
 
 // Every call that reaches a handler runs. Claim pacing is the store's
 // lease plus the watcher's per-agent routing cap; semantic stop stays
@@ -210,18 +211,26 @@ export function createToolHandlers(store, logger) {
           if (!claimed) continue; // raced — next candidate
           logger?.info?.(`backlog: ${agentId} claimed ${claimed.id}`);
           const artifacts = collectStoryArtifacts(store, c.story.id);
+          const handoff = {
+            reason: "ready-queue claim",
+            priority: c.story.priority,
+            acceptance_criteria: c.story.acceptance,
+            artifacts,
+            receiverPrompt: renderReceiverPrompt({ task: claimed, story: c.story, epic: c.epic, artifacts }),
+          };
+          // Push handoff, never gate the claim: notifyClaim resolves
+          // {ok:false} (never throws) when unconfigured or unreachable.
+          await notifyClaim(
+            cfg,
+            claimPayload({ task: claimed, story: c.story, epic: c.epic, artifacts, handoff, identity, sessionKey }),
+            logger
+          );
           return ok(
             JSON.stringify({
               task: claimed,
               story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance, priority: c.story.priority },
               epic: { id: c.epic.id, title: c.epic.title, priority: c.epic.priority },
-              handoff: {
-                reason: "ready-queue claim",
-                priority: c.story.priority,
-                acceptance_criteria: c.story.acceptance,
-                artifacts,
-                receiverPrompt: renderReceiverPrompt({ task: claimed, story: c.story, epic: c.epic, artifacts }),
-              },
+              handoff,
             }),
             { status: "ok", agentId, taskId: claimed.id }
           );
