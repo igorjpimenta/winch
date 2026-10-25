@@ -12,7 +12,7 @@ import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer } from "./events-ws.js";
-import { assertDeclaration } from "./identity.js";
+import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 
 export { resolveDbPath };
@@ -41,14 +41,15 @@ function loadConfig(values) {
 
 const USAGE = `usage: winch <command>
 
-  mcp --harness H serve the backlog tools over MCP stdio
-                                     (identity: harness declared here, agent+session stamped per call)
+  serve --mcp stdio|http [--port N] [--host H]
+                                      serve the backlog tools over MCP stdio or Streamable HTTP
+                                      (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
+  serve --ws --port N [--host H]         stream store events over WebSocket
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
-  merge-detect [--dry-run]               apply merged/closed PR outcomes
-  serve --ws --port N [--host H]         stream store events over WebSocket`;
+  merge-detect [--dry-run]               apply merged/closed PR outcomes`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -64,40 +65,6 @@ export async function runCli(argv) {
     case "help":
       console.log(USAGE);
       return;
-
-    case "mcp": {
-      const { values } = parseArgs({
-        args: rest,
-        options: {
-          harness: { type: "string" },
-          config: { type: "string" },
-          agent: { type: "string" },
-          session: { type: "string" },
-        },
-      });
-      if (values.agent !== undefined || values.session !== undefined) {
-        fail(
-          "winch mcp: --agent/--session are per-call identity, not construction flags. " +
-            "Remove them from the MCP entry; the companion plugin stamps agent and session on every call."
-        );
-      }
-      const store = openStore(loadConfig(values));
-      const logger = {
-        info: (...a) => console.error(...a),
-        warn: (...a) => console.error(...a),
-        error: (...a) => console.error(...a),
-      };
-      try {
-        // harness from flag or env; agent/session arrive per call via the hook
-        const base = assertDeclaration({
-          harness: values.harness ?? process.env.WINCH_HARNESS,
-        });
-        await startMcpServer({ store, base, logger });
-      } catch (err) {
-        fail(String(err?.message ?? err));
-      }
-      return;
-    }
 
     case "watch": {
       const { values } = parseArgs({
@@ -191,30 +158,69 @@ export async function runCli(argv) {
     }
 
     case "serve": {
-      const { values } = parseArgs({
-        args: rest,
-        options: {
-          ws: { type: "boolean" },
-          port: { type: "string" },
-          host: { type: "string" },
-          config: { type: "string" },
-        },
-      });
-      if (!values.ws) fail("usage: winch serve --ws [--port N] [--host H] [--config JSON|PATH]");
+      let values;
+      try {
+        ({ values } = parseArgs({
+          args: rest,
+          options: {
+            ws: { type: "boolean" },
+            mcp: { type: "string" },
+            port: { type: "string" },
+            host: { type: "string" },
+            config: { type: "string" },
+          },
+        }));
+      } catch (err) {
+        // --harness (or any unknown flag) on serve means the caller is still
+        // on the legacy `mcp --harness` surface: stdio harness is env-only.
+        if (/Unknown option|ERR_PARSE_ARGS_UNKNOWN_OPTION/.test(String(err?.message ?? err))) {
+          fail("winch serve --mcp takes no --harness flag: set WINCH_HARNESS in the environment.");
+        }
+        throw err;
+      }
+      if (values.mcp !== undefined && values.mcp !== "stdio" && values.mcp !== "http") {
+        fail(`winch: --mcp must be stdio or http, got ${JSON.stringify(values.mcp)}`);
+      }
+      const modes = ["ws", "mcp"].filter((k) => values[k]);
+      if (modes.length !== 1) {
+        fail("usage: winch serve (--ws | --mcp stdio|http) [--port N] [--host H] [--config JSON|PATH]");
+      }
       const store = openStore(loadConfig(values));
       const logger = {
         info: (...a) => console.error(...a),
         warn: (...a) => console.error(...a),
         error: (...a) => console.error(...a),
       };
-      // localhost-only unless asked: the stream carries raw store rows,
-      // so it stays behind the loopback interface or a bearer-checked proxy.
+      // localhost-only unless asked: streams and tool traffic carry raw
+      // store rows, so they stay behind loopback or a bearer-checked proxy.
       const host = values.host ?? "127.0.0.1";
-      // Explicit --port wins; otherwise the store's resolved config applies
-      // (explicit --config object > WINCH_WS_PORT env > 38291 default).
       const port = values.port ? Number(values.port) : undefined;
       if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
         fail(`winch: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
+      }
+      if (values.mcp === "stdio") {
+        // Harness is env-only here by design: the spawner owns identity.
+        let base;
+        try {
+          base = declaredFromEnv();
+        } catch (err) {
+          fail(String(err?.message ?? err));
+        }
+        try {
+          await startMcpServer({ store, base, logger });
+        } catch (err) {
+          fail(String(err?.message ?? err));
+        }
+        return;
+      }
+      if (values.mcp === "http") {
+        try {
+          const { startMcpHttpServer } = await import("./mcp-http.js");
+          await startMcpHttpServer({ store, port, host, logger });
+        } catch (err) {
+          fail(String(err?.message ?? err));
+        }
+        return;
       }
       await startEventServer({ store, port, host, logger });
       logger.info(`winch: events on ws://${host}:${port ?? store.config.wsPort} (append-only; subscribers track their own state)`);

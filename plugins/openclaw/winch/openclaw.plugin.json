@@ -1,6 +1,6 @@
 {
-  "id": "winch-meta",
-  "name": "Winch Meta",
+  "id": "winch",
+  "name": "Winch",
   "enabledByDefault": true,
   "configSchema": {}
 }

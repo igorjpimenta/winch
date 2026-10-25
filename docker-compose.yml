@@ -1,0 +1,27 @@
+# winch on any server: one container, one SQLite volume, one secret.
+# TLS terminates in front (Caddy / Traefik / ingress) — the daemon speaks
+# plain HTTP. Single replica only: SQLite has one writer.
+
+services:
+  winch:
+    build: .
+    image: winch:latest
+    ports:
+      - "${PORT:-38292}:38292"
+    environment:
+      PORT: "${PORT:-38292}"
+      # Required. Mint once, store in a password manager / secret store:
+      #   openssl rand -base64 32
+      WINCH_BEARER: "${WINCH_BEARER:?set WINCH_BEARER in the environment or a .env file}"
+      WINCH_DB: /data/store.sqlite
+      WINCH_MCP_HTTP_PORT: "${PORT:-38292}"
+      # Tuning knobs ride the same WINCH_* names as the bare-metal server.
+      # WINCH_LEASE_SECONDS: "1800"
+    volumes:
+      - winch-data:/data
+    restart: unless-stopped
+    # Optional: run the lease sweeper on a schedule instead of cron on the host
+    # by adding a second service with `command: ["watch"]` + an interval loop.
+
+volumes:
+  winch-data:

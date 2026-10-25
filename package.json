@@ -1,8 +1,22 @@
 {
-  "name": "winch",
+  "name": "@igorjpimenta/winch",
   "version": "2026.10.21",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorjpimenta/winch.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "plugins/",
+    ".migrations/",
+    "README.md"
+  ],
   "bin": {
     "winch": "bin/winch.js"
   },
