@@ -21,7 +21,7 @@
     "winch": "bin/winch.js"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\" \"plugins/**/*.test.js\"",
+    "test": "node --test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

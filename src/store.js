@@ -264,6 +264,10 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
             actor: patch.actor ?? "system",
             note: patch.note ?? null,
             at: merged.updated_at,
+            // Callers that carry a stamped identity pass it through so
+            // completion (and any future transition) lands attributed.
+            // Absent key keeps the legacy null — no silent defaulting.
+            sessionRef: patch.sessionKey ?? null,
           });
         }
         db.exec("COMMIT");

@@ -3,7 +3,8 @@
 Winch is a pull-based delivery backlog — epic → story → task with a
 dependency DAG — served as an MCP server. Agents claim work with atomic CAS
 claims under per-identity leases (`backlog_next` claims the highest-priority
-ready task for *this* agent, or silently loses the race to a concurrent
+ready task for *this* agent, `backlog_claim` claims one named task by id,
+or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →

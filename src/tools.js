@@ -1,5 +1,5 @@
-// tools.js — agent-facing backlog tools: backlog_next / _update / _done /
-// _block / _resume.
+// tools.js — agent-facing backlog tools: backlog_next / _claim / _update /
+// _done / _block / _resume.
 //
 // `createToolHandlers(store, logger)` returns static TOOL_DEFS (name,
 // description, JSON-schema inputSchema) plus a `handle(name, args, identity)`
@@ -83,6 +83,31 @@ export function createToolHandlers(store, logger) {
           dryRun: {
             type: "boolean",
             description: "Report the next claimable task without claiming it.",
+          },
+        },
+      },
+    },
+    {
+      name: "backlog_claim",
+      description:
+        "Atomically claim ONE specific task by id for THIS agent (identity resolved from request meta / environment). " +
+        "Same CAS semantics as backlog_next, but targeted: the task must be todo AND currently ready (deps done, " +
+        "caps intersect) — otherwise the call is refused as not_claimed / not_ready, never queued. " +
+        "Supports dryRun to report without claiming. A race loser gets `raced`, not a partial claim.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId"],
+        properties: {
+          taskId: { type: "string", description: "Task id (TASK-…)." },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Capability tags this agent offers; filters tasks whose required caps intersect.",
+          },
+          dryRun: {
+            type: "boolean",
+            description: "Report the task (with handoff payload) without claiming it.",
           },
         },
       },
@@ -208,6 +233,45 @@ export function createToolHandlers(store, logger) {
       }
     },
 
+    async backlog_claim(args, identity, cfg) {
+      const agentId = identity.agent;
+      const sessionKey = identitySessionKey(identity);
+      const task = store.task.get(args?.taskId);
+      if (!task) return err(`backlog_claim: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
+      if (task.status !== "todo") return err(`${task.id} is ${task.status}, not todo — claim applies to todo tasks only.`, "not_claimed", { taskId: task.id });
+      try {
+        // No limit: an id lookup must not false-negative behind a paging cap.
+        const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities });
+        const c = candidates.find((cand) => cand.task.id === task.id);
+        if (!c) return err(`${task.id} is todo but not currently ready (deps unmet or caps mismatch) — nothing claimed.`, "not_ready", { taskId: task.id });
+        if (args?.dryRun) {
+          return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: task.id });
+        }
+        const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
+        if (!claimed) return ok(JSON.stringify({ empty: true, raced: true }), { status: "empty", reason: "claim_raced", agentId, taskId: task.id });
+        logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} by id`);
+        const artifacts = collectStoryArtifacts(store, c.story.id);
+        return ok(
+          JSON.stringify({
+            task: claimed,
+            story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance, priority: c.story.priority },
+            epic: { id: c.epic.id, title: c.epic.title, priority: c.epic.priority },
+            handoff: {
+              reason: "by-id claim",
+              priority: c.story.priority,
+              acceptance_criteria: c.story.acceptance,
+              artifacts,
+              receiverPrompt: renderReceiverPrompt({ task: claimed, story: c.story, epic: c.epic, artifacts }),
+            },
+          }),
+          { status: "ok", agentId, taskId: claimed.id }
+        );
+      } catch (e) {
+        logger?.warn?.(`backlog_claim failed: ${e?.message}`);
+        return err(`backlog_claim failed: ${e?.message}`, "error");
+      }
+    },
+
     async backlog_update(args, identity, cfg) {
       const agentId = identity.agent;
       const task = store.task.get(args?.taskId);
@@ -238,6 +302,7 @@ export function createToolHandlers(store, logger) {
 
     async backlog_done(args, identity, cfg) {
       const agentId = identity.agent;
+      const sessionKey = identitySessionKey(identity);
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
@@ -246,7 +311,7 @@ export function createToolHandlers(store, logger) {
         const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
         const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
-        const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done" });
+        const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done", sessionKey });
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
         return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, result_summary: updated.result_summary } }), { status: "ok", taskId: task.id, agentId });
       } catch (e) {
