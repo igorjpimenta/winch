@@ -35,13 +35,13 @@ contract itself is the only integration surface.
 | `next`                                                        | list the current ready queue                            |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
 | `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
-| `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
+| `serve --ws --port N [--host H] [--config JSON\|PATH]`       | stream store events over WebSocket                      |
 
 ## Events stream
 
-`winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
-unless `--host` says otherwise) tails the events table and broadcasts every
-new row to all connected clients as JSON text frames:
+`winch serve --ws [--port N] [--host H] [--config JSON|PATH]` (default port
+38291, localhost-only unless `--host` says otherwise) tails the events table
+and broadcasts every new row to all connected clients as JSON text frames:
 
 - `{"type":"welcome","lastEventId":N}` on connect, then
   `{"type":"history","events":[...]}` (newest 200), then
