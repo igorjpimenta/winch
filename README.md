@@ -21,20 +21,50 @@ contract itself is the only integration surface.
   otherwise a C++ toolchain is needed).
 - `npm install`, then `./bin/winch.js <command>` — or `npm link` for a global
   `winch`.
-- `winch mcp` serves the five backlog tools over MCP stdio (stdout is
-  JSON-RPC; logs go to stderr).
+- `winch serve --mcp stdio` serves the five backlog tools over MCP stdio
+  (stdout is JSON-RPC; logs go to stderr; harness from `WINCH_HARNESS` env).
+- `WINCH_BEARER=… winch serve --mcp http --port N` serves the same tools
+  over Streamable HTTP for local harnesses sharing one daemon.
 
 ## CLI
 
-| command                                                       | what it does                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------- |
-| `mcp`                                                         | serve the backlog tools over MCP stdio                  |
-| `watch`                                                       | one watcher tick (JSON manifest on stdout)              |
-| `resume <taskId> [--actor <name>]`                            | resolve a human gate: blocked → todo                    |
-| `next`                                                        | list the current ready queue                            |
-| `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers        |
-| `merge-detect [--dry-run]`                                    | apply merged/closed PR outcomes                         |
-| `serve --ws --port N [--host H]`                             | stream store events over WebSocket                      |
+| command                                                         | what it does                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------- |
+| `serve --mcp stdio`                                             | serve the backlog tools over MCP stdio (env-only harness) |
+| `serve --mcp http --port N [--host H]`                          | serve the same tools over Streamable HTTP (shared daemon) |
+| `mcp --harness H`                                               | deprecated alias for `serve --mcp stdio`                |
+| `watch`                                                         | one watcher tick (JSON manifest on stdout)              |
+| `resume <taskId> [--actor <name>]`                              | resolve a human gate: blocked → todo                    |
+| `next`                                                          | list the current ready queue                            |
+| `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers          |
+| `merge-detect [--dry-run]`                                      | apply merged/closed PR outcomes                         |
+| `serve --ws --port N [--host H]`                               | stream store events over WebSocket                      |
+
+## Deploy (any server)
+
+Winch is cloud-agnostic: the portable build is the container below — plain
+Node + a SQLite file on a volume, no cloud SDKs or provider APIs. Run it on
+any VPS, compose host or cluster with one replica (SQLite has one writer).
+
+```sh
+docker build -t winch .
+docker run -d --name winch --restart unless-stopped \
+  -e WINCH_BEARER="$(openssl rand -base64 32)" \
+  -v winch-data:/data -p 38292:38292 winch
+# or: WINCH_BEARER=... docker compose up -d --build
+```
+
+- `GET /health` is unauthenticated (load-balancer / `HEALTHCHECK` probe);
+  everything else needs `Authorization: Bearer <WINCH_BEARER>`.
+- Terminate TLS in front (Caddy / Traefik / ingress); point harnesses at
+  `https://<host>/mcp` with the bearer + `X-Winch-Harness` headers — the
+  same contract as `serve --mcp http` locally. LangGraph needs no local
+  spawn: `streamablehttp_client` straight to the URL.
+- The volume holds `WINCH_DB` (`/data/store.sqlite` in the image); back it
+  up like any stateful file. Never bake `WINCH_BEARER` into the image.
+- The lease sweeper is a tick, not a daemon: run `watch` on a host cron (or
+  a second one-shot service) against the same DB file when co-located; skip
+  it when the DB lives elsewhere — claims still self-heal on next tick.
 
 ## Events stream
 
@@ -100,8 +130,10 @@ the CAS transaction boundary under WAL contention.
 ## Identity
 
 Every claim is keyed `harness:agent:session`. The **harness is
-declared at construction** — `winch mcp` will not start without `--harness`
-(or `WINCH_HARNESS`), because an unnamed server cannot attribute anything.
+declared at construction** — `winch serve --mcp stdio` will not start
+without `WINCH_HARNESS` in the environment, because an unnamed server
+cannot attribute anything. (`mcp --harness` keeps the old flag as a
+deprecated alias.)
 The agent and session of each call are stamped per call by the calling
 harness's companion plugin (`_meta.winch`), which overwrites unconditionally,
 so model-supplied meta cannot impersonate an agent. A call whose agent or
@@ -125,6 +157,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` (`"24h,72h"`, `ms\|s\|m\|h\|d` suffixes) | 24h / 72h |
 | WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
+| MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |

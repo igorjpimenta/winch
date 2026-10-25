@@ -1,12 +1,16 @@
-// mcp-http.js — shared Streamable HTTP MCP server (local daemon).
+// mcp-http.js — shared Streamable HTTP MCP server.
 // Same tools + same identity contract as stdio (src/mcp.js), different door:
 // one TCP socket, many harnesses as HTTP clients instead of one pipe per spawn.
+// Ships as a portable container image; runs anywhere (VPS, compose, k8s) —
+// no cloud-specific APIs.
 //
-// Auth: loopback bind + `Authorization: Bearer <WINCH_BEARER>` checked before
-// any tool runs (WINCH_BEARER required; missing/empty refuses to start).
+// Auth: `Authorization: Bearer <WINCH_BEARER>` checked before any tool runs
+// (WINCH_BEARER required; missing/empty refuses to start). Terminate TLS in
+// front (reverse proxy / ingress) — the server itself speaks plain HTTP.
 // Identity: `X-Winch-Harness: <name>` declares the harness per session and
 // must be a usable layer; agent+session still arrive per call via _meta.winch
 // (openclaw) or stamped args (opencode) — identical to stdio resolution.
+// GET /health is unauthenticated for load-balancer / HEALTHCHECK probes.
 
 import http from "node:http";
 import { randomUUID } from "node:crypto";
@@ -102,6 +106,11 @@ export async function startMcpHttpServer({ store, port = null, host = "127.0.0.1
   const httpServer = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://x");
+      if (url.pathname === "/health") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
       if (url.pathname !== "/mcp") {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("winch mcp-http: POST /mcp only\n");
