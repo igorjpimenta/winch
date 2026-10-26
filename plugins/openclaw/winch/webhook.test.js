@@ -2,7 +2,7 @@
 // wake chain (fresh session → claiming session → injection-only).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerClaimWebhook, claimError, claimMessage, claimSessionKey } from "./webhook.js";
+import { registerClaimWebhook, registerClaimHeartbeat, claimError, claimMessage, claimSessionKey, notePendingClaim, heartbeatContext, clearPendingClaims, PENDING_TTL_MS } from "./webhook.js";
 
 function makeReq({ method = "POST", headers = {}, body = "" } = {}) {
   return {
@@ -77,6 +77,39 @@ test("shape guards reject junk before any wake", () => {
   assert.equal(claimSessionKey("TASK-abc"), "winch-claim-TASK-abc");
   assert.equal(claimMessage(BODY), "# Task: T\nDo it.");
   assert.match(claimMessage({ task: { id: "T1", title: "X" }, session: {} }), /Claimed winch task T1/);
+});
+
+test("no-scheduler wake parks the claim for the heartbeat hook", async () => {
+  clearPendingClaims();
+  const box = makeApi();
+  delete box.api.session.workflow.scheduleSessionTurn;
+  registerClaimWebhook({ api: box.api, logger: box.api.logger });
+  const out = await post(box);
+  assert.equal(out.json.scheduled, false);
+  assert.equal(out.json.injected, true);
+  const ctx = heartbeatContext({ agentId: "a1", sessionKey: "openclaw:a1:s1" });
+  assert.match(ctx.appendContext, /TASK-abc/);
+  assert.equal(heartbeatContext({ agentId: "nobody" }), undefined);
+});
+
+test("heartbeat context prefers session match, expires, registers hook", () => {
+  clearPendingClaims();
+  notePendingClaim({ agent: "a1", sessionKey: "s1" }, { task: { id: "T1" }, handoff: {} }, 1000);
+  notePendingClaim({ agent: "a2", sessionKey: "s2" }, { task: { id: "T2" }, handoff: { receiverPrompt: "Do T2" } }, 1000);
+  assert.equal(heartbeatContext({ agentId: "a2", sessionKey: "s2" }, 2000).appendContext.includes("Do T2"), true);
+  // session match beats agent match
+  assert.match(heartbeatContext({ agentId: "a1", sessionKey: "s1" }, 2000).appendContext, /T1/);
+  // expired entries are dropped
+  assert.equal(heartbeatContext({ agentId: "a1" }, 1000 + PENDING_TTL_MS + 1), undefined);
+  let hook = null;
+  const api = { on: (name, fn) => { hook = { name, fn }; } };
+  assert.equal(registerClaimHeartbeat(api), true);
+  assert.equal(hook.name, "heartbeat_prompt_contribution");
+  clearPendingClaims();
+  notePendingClaim({ agent: "a9", sessionKey: "s9" }, { task: { id: "T9" }, handoff: {} });
+  assert.match(hook.fn({ agentId: "a9" }).appendContext, /T9/);
+  assert.equal(registerClaimHeartbeat({}), false);
+  clearPendingClaims();
 });
 
 test("webhook.test pings without waking anyone", async () => {

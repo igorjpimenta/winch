@@ -1,6 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
-import { registerClaimWebhook } from "./webhook.js";
+import { registerClaimWebhook, registerClaimHeartbeat } from "./webhook.js";
+import { autoregister } from "./autoregister.js";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
 // a full replacement of event.params with _meta.winch set unconditionally on
@@ -27,15 +28,41 @@ export default definePluginEntry({
         description:
           "Shared secret winch must send as Authorization: Bearer on POST /api/winch/claimed. Must match WINCH_CLAIM_WEBHOOK_BEARER. Route stays disarmed (503) until set.",
       },
+      webhookPublicBaseUrl: {
+        type: "string",
+        description:
+          "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used by self-registration to build the route URL.",
+      },
+      webhookHarness: {
+        type: "string",
+        description: "Harness name registered in winch (must match WINCH_HARNESS). Default: openclaw.",
+      },
+      webhookAutoregister: {
+        type: "boolean",
+        description: "Register the route URL in winch on boot via `winch webhook set` + verify with `test`. Default true when webhookBearer is set.",
+      },
+      webhookWinchBin: {
+        type: "string",
+        description: "Winch binary for self-registration (default: WINCH_BIN env or `winch` on PATH). Must share the store the harness claims from.",
+      },
     },
   }),
   register: (api) => {
     if (typeof api.on === "function") {
       api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx));
+      registerClaimHeartbeat(api);
     } else {
       api.logger.warn("winch: api.on unavailable; identity hook not registered");
     }
     registerClaimWebhook({ api, logger: api.logger });
-    api.logger.info("winch: registered (identity stamp + claim webhook)");
+    if (typeof api.registerService === "function") {
+      api.registerService({
+        id: "winch-claim-webhook",
+        start: async () => {
+          await autoregister({ api });
+        },
+      });
+    }
+    api.logger.info("winch: registered (identity stamp + claim webhook + autoregister)");
   },
 });

@@ -34,6 +34,14 @@ carries no explicit extensions path; the browser-lease extension lives at
 1. Install the plugin from the published package (no git clone):
    `cp -r "$(npm root -g)/@igorjpimenta/winch/plugins/openclaw/winch" \
     ~/.openclaw/extensions/winch/` (or symlink it).
+   Then set `webhookBearer` (any secret) in the extension config —
+   `webhookPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
+   port isn't detectable. On boot the plugin registers its own route in
+   winch (`winch webhook set` + `test`) and logs the result — no manual
+   step unless it warns you with the exact command. Opt out with
+   `webhookAutoregister: false`. Multi-gateway setups: set
+   `webhookHarness` per gateway to match its winch MCP entry's
+   `WINCH_HARNESS`.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -86,8 +94,9 @@ opens a **fresh session** for the task:
    `winch-claim`) in session `winch-claim-<TASK-ID>` carrying the receiver
    prompt, and injects a pointer into the claiming session. If the fresh
    session fails, the turn falls back to the claiming session; if scheduling
-   is unavailable, injection-only. Delivery never fails the claim (bounded
-   3s timeout, failures are warnings).
+   is unavailable, the claim parks in a pending queue (4h TTL) drained by
+   the heartbeat hook — the agent's next natural wake carries the handoff.
+   Delivery never fails the claim (bounded 3s timeout, failures are warnings).
 
 ## opencode
 

@@ -73,6 +73,65 @@ export function claimSessionKey(taskId) {
   return `winch-claim-${taskId}`;
 }
 
+// ── No-Cron fallback: pending-claim queue drained by the heartbeat hook ──
+// When the scheduler is unavailable the webhook cannot open a turn, so the
+// claim waits here instead: the next heartbeat for that agent/session carries
+// the handoff as prompt context. Entries expire (stale nags are worse than
+// silence) and the map is capped; a fresh claim replaces an older one for
+// the same agent. In-memory only: claims live in winch, so a restart loses
+// nothing durable — the next backlog_next re-establishes the trail.
+export const PENDING_TTL_MS = 4 * 3600 * 1000;
+const MAX_PENDING = 50;
+const pendingClaims = new Map();
+
+export function notePendingClaim(session, body, at = Date.now()) {
+  const key = `${session.agent}\n${session.sessionKey}`;
+  pendingClaims.set(key, { at, body });
+  while (pendingClaims.size > MAX_PENDING) {
+    pendingClaims.delete(pendingClaims.keys().next().value);
+  }
+}
+
+export function pendingCount() {
+  return pendingClaims.size;
+}
+
+export function clearPendingClaims() {
+  pendingClaims.clear();
+}
+
+function findPending({ agentId, sessionKey }, now = Date.now()) {
+  let fallback = null;
+  for (const [key, entry] of pendingClaims) {
+    if (now - entry.at > PENDING_TTL_MS) {
+      pendingClaims.delete(key);
+      continue;
+    }
+    const [agent, session] = key.split("\n");
+    if (sessionKey && session === sessionKey) return entry;
+    if (!fallback && agentId && agent === agentId) fallback = entry;
+  }
+  return fallback;
+}
+
+/** Heartbeat prompt contribution: the pending handoff, if any. Pure. */
+export function heartbeatContext(event, now = Date.now()) {
+  const entry = findPending(event ?? {}, now);
+  if (!entry) return undefined;
+  const taskId = entry.body?.task?.id ?? "(unknown task)";
+  const prompt = entry.body?.handoff?.receiverPrompt;
+  const text = typeof prompt === "string" && prompt.trim() !== ""
+    ? `Winch attributed ${taskId} to you while you were away. Start it now:\n${prompt}`
+    : `Winch attributed ${taskId} to you while you were away. Run backlog_next to review it.`;
+  return { appendContext: text };
+}
+
+export function registerClaimHeartbeat(api) {
+  if (typeof api?.on !== "function") return false;
+  api.on("heartbeat_prompt_contribution", (event) => heartbeatContext(event ?? {}));
+  return true;
+}
+
 /** Handoff text for the fresh session: receiver prompt verbatim when the
  * server sent one (full context), else a composed pointer. */
 export function claimMessage(body) {
@@ -174,6 +233,9 @@ export function registerClaimWebhook({ api, logger }) {
           log?.warn?.(`winch: fallback turn failed: ${err?.message ?? err}`);
         }
       }
+      // No scheduled turn: park the claim for the heartbeat hook so the
+      // next natural wake carries it (the no-Cron path).
+      if (!scheduled) notePendingClaim({ agent, sessionKey: claimingSession }, body);
       // 3) Always: context injection so the claiming session sees the handoff
       // even when no turn could be scheduled (non-fatal by design).
       let injected = false;
