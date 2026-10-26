@@ -86,12 +86,6 @@ on connect (`{"type":"history"}`), so a restarted dispatcher catches up
 without a timer. Keep one dispatcher per harness and let it track in-flight
 task ids; the claim lease remains the real guard against double work.
 
-Questions are not work. A worker that needs a fact the record does not carry
-asks a peer over harness messaging (`sessions_send`), and the peer answers from
-the record; nothing about a task, its assignee or its scope moves over that
-channel. Hosts that want that boundary enforced rather than instructed can
-deny `sessions_spawn` to workers while leaving `sessions_send` allowed.
-
 ## Claim webhook (wake on attribution)
 
 Polling `backlog_next` leaves an idle agent waiting for its next heartbeat.
