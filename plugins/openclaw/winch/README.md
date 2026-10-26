@@ -15,8 +15,13 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
 ## Install
 
 ```sh
-openclaw plugins install @igorjpimenta/winch-openclaw
+openclaw plugins install @igorjpimenta/winch-openclaw --accept-capabilities
 ```
+
+The manifest declares `activation.onStartup`, so the plugin loads at gateway
+boot (without it the host never calls `register()` and the route never
+binds). The `--accept-capabilities` flag is required: the plugin registers
+an HTTP route and a service.
 
 The plugin depends on `@igorjpimenta/winch`, so npm resolves and pins the
 server version alongside it. Self-registration invokes the same `winch` the
