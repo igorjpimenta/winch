@@ -102,6 +102,15 @@ export const events = sqliteTable("events", {
   index("idx_events_task").on(table.taskId),
 ]);
 
+export const agents = sqliteTable("agents", {
+  // Declared capabilities for an agent id, so assignment can be matched on
+  // what an agent can do rather than what its name suggests. Purely advisory
+  // to claims (agents still self-select) but enforced by backlog_assign.
+  agent: text("agent").primaryKey(),
+  capabilities: text("capabilities"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const webhookTargets = sqliteTable("webhook_targets", {
   // One callback URL per harness, registered via `winch webhook set`.
   // Checked first at claim time, before the env-mapped and single-URL

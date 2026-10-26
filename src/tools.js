@@ -114,11 +114,23 @@ export function createToolHandlers(store, logger) {
       },
     },
     {
+      name: "backlog_agents",
+      description:
+        "List agents with their declared capabilities, so assignment can be matched on capability rather than name. " +
+        "Only agents registered with `winch agent set` appear; an unregistered agent has no declared capabilities.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      },
+    },
+    {
       name: "backlog_assign",
       description:
         "Set (or clear) the assignee of a task so the right agent claims it. " +
         "Refuses to reassign a task that is in_progress by someone else. Passing `agent: null` or \"\" clears it. " +
-        "Optional `capabilities` replaces the task's capability tags.",
+        "Optional `capabilities` replaces the task's capability tags. When the task requires capabilities and the " +
+        "target has declared any (backlog_agents), the two must intersect — otherwise the assignment is refused as cap_mismatch.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -304,16 +316,32 @@ export function createToolHandlers(store, logger) {
       }
     },
 
+    async backlog_agents(args, identity, cfg) {
+      return ok(JSON.stringify({ agents: store.agent.list() }), { status: "ok", count: store.agent.list().length });
+    },
+
     async backlog_assign(args, identity, cfg) {
       // Like every other tool: availability is the host's tool policy, and
       // the caller is attributed by identity. No server-side allowlist.
       const qualified = `${identity.harness}:${identity.agent}`;
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_assign: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
+      const target = args?.agent ?? null;
+      const required = Array.isArray(args?.capabilities) ? args.capabilities : (task.capabilities ?? []);
+      const declared = target ? store.agent.get(target)?.capabilities ?? [] : [];
+      // Only enforce when both sides actually said something: a task with no
+      // requirements or an agent with no declaration is assignment as before.
+      if (target && required.length > 0 && declared.length > 0 && !required.some((c) => declared.includes(c))) {
+        return err(
+          `backlog_assign: ${target} declares [${declared.join(", ")}] which does not cover [${required.join(", ")}].`,
+          "cap_mismatch",
+          { taskId: task.id, agent: target, required, declared }
+        );
+      }
       try {
         const updated = store.task.assign({
           id: task.id,
-          agentId: args?.agent ?? null,
+          agentId: target,
           actor: qualified,
           capabilities: args?.capabilities,
         });

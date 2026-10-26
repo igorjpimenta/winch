@@ -70,6 +70,44 @@ test("null clears the assignee; capabilities survive when omitted", async () => 
   );
 });
 
+test("capability mismatch refuses the assignment; a declared match passes", async () => {
+  store.agent.set({ agent: "tester", capabilities: ["verify", "test"] });
+  const task = seed();
+  const bad = await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["docs"] }, PLANNER);
+  assert.equal(bad.details.reason, "cap_mismatch");
+  assert.equal(store.task.get(task.id).assigned, null);
+  const good = await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["test"] }, PLANNER);
+  assert.equal(good.details.status, "ok");
+  assert.equal(store.task.get(task.id).assigned, "tester");
+});
+
+test("undeclared agents are assignable as before (no declaration, no gate)", async () => {
+  const task = seed();
+  const r = await handle("backlog_assign", { taskId: task.id, agent: "nobody-declared", capabilities: ["anything"] }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(store.task.get(task.id).assigned, "nobody-declared");
+});
+
+test("task caps carry over: assignment matches the task's own requirements", async () => {
+  store.agent.set({ agent: "tester", capabilities: ["test"] });
+  store.agent.set({ agent: "content-writer", capabilities: ["docs"] });
+  const task = seed();
+  store.task.update(task.id, { capabilities: ["docs"] });
+  const bad = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
+  assert.equal(bad.details.reason, "cap_mismatch");
+  const good = await handle("backlog_assign", { taskId: task.id, agent: "content-writer" }, PLANNER);
+  assert.equal(good.details.status, "ok");
+});
+
+test("backlog_agents lists declarations", async () => {
+  store.agent.set({ agent: "tester", capabilities: ["test"] });
+  store.agent.set({ agent: "content-writer", capabilities: ["docs"] });
+  const r = await handle("backlog_agents", {}, PLANNER);
+  const body = JSON.parse(r.content[0].text);
+  assert.deepEqual(body.agents.map((a) => a.agent), ["content-writer", "tester"]);
+  assert.deepEqual(body.agents[1].capabilities, ["test"]);
+});
+
 test("unknown task is refused without writing anything", async () => {
   const r = await handle("backlog_assign", { taskId: "TASK-nope", agent: "tester" }, PLANNER);
   assert.equal(r.details.reason, "not_found");

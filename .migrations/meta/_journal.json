@@ -29,6 +29,13 @@
       "when": 1792976641974,
       "tag": "0003_pink_siren",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793038532247,
+      "tag": "0004_eager_power_man",
+      "breakpoints": true
     }
   ]
 }

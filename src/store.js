@@ -545,6 +545,34 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     },
   };
 
+  // ──────────────────────────────────────────────────── AGENT REGISTRY
+  // Declared capabilities per agent id. Assignment matches on these instead
+  // of guessing from a name; claims are unaffected (agents still self-select).
+  const agentApi = {
+    set({ agent, capabilities }) {
+      const id = typeof agent === "string" ? agent.trim() : "";
+      if (!id) throw new Error("agent registry requires an agent id");
+      const caps = jsonOut(Array.isArray(capabilities) ? capabilities.filter(Boolean) : []);
+      db.prepare(`
+        INSERT INTO agents(agent, capabilities, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(agent) DO UPDATE SET capabilities=excluded.capabilities, updated_at=excluded.updated_at
+      `).run(id, caps, now());
+      return agentApi.get(id);
+    },
+    get(agent) {
+      const r = db.prepare("SELECT * FROM agents WHERE agent=?").get(agent);
+      if (!r) return null;
+      return { agent: r.agent, capabilities: jsonIn(r.capabilities) ?? [], updated_at: r.updated_at };
+    },
+    list() {
+      return db.prepare("SELECT * FROM agents ORDER BY agent ASC").all()
+        .map((r) => ({ agent: r.agent, capabilities: jsonIn(r.capabilities) ?? [], updated_at: r.updated_at }));
+    },
+    remove({ agent }) {
+      return db.prepare("DELETE FROM agents WHERE agent=?").run(agent).changes > 0;
+    },
+  };
+
   // ──────────────────────────────────────────────────── WEBHOOK TARGETS
   // One callback URL per harness, registered via `winch webhook set`.
   // Checked first at claim time (see claim-webhook.js), before the env-mapped
@@ -607,6 +635,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     task:  taskApi,
     dep:   depApi,
     webhook: webhookApi,
+    agent: agentApi,
     itemKindOf,
     close() { db.close(); },
   };

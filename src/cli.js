@@ -54,7 +54,10 @@ const USAGE = `usage: winch <command>
                                            register a harness callback URL (checked first at claim)
   webhook list                             list registered callback URLs
   webhook remove --harness H              drop a registered callback URL
-  webhook test --harness H                POST a test ping to the harness target`;
+  webhook test --harness H                POST a test ping to the harness target
+  agent set --agent A --capabilities a,b  declare what an agent can do (assignment matches on this)
+  agent list                              list declared agents and capabilities
+  agent remove --agent A                  drop a declaration`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -230,6 +233,32 @@ export async function runCli(argv) {
       await startEventServer({ store, port, host, logger });
       logger.info(`winch: events on ws://${host}:${port ?? store.config.wsPort} (append-only; subscribers track their own state)`);
       return;
+    }
+
+    case "agent": {
+      const [sub, ...subRest] = rest;
+      if (!["set", "list", "remove"].includes(sub)) fail("usage: winch agent (set|list|remove) …");
+      const store = openStore();
+      try {
+        if (sub === "list") {
+          console.log(JSON.stringify(store.agent.list(), null, 2));
+          return;
+        }
+        const { values } = parseArgs({ args: subRest, options: { agent: { type: "string" }, capabilities: { type: "string" } } });
+        const agent = values.agent?.trim();
+        if (!agent) fail(`winch agent ${sub} requires --agent <id>`);
+        if (sub === "remove") {
+          if (!store.agent.remove({ agent })) fail(`no declaration for agent: ${agent}`, 1);
+          console.log(JSON.stringify({ removed: agent }));
+          return;
+        }
+        const capabilities = String(values.capabilities ?? "")
+          .split(",").map((c) => c.trim()).filter(Boolean);
+        console.log(JSON.stringify(store.agent.set({ agent, capabilities }), null, 2));
+        return;
+      } finally {
+        store.close();
+      }
     }
 
     case "webhook": {

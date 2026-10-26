@@ -7,7 +7,8 @@ ready task for *this* agent, `backlog_claim` claims one named task by id,
 or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a planner may
-direct work with `backlog_assign`; a release/merge
+direct work with `backlog_assign` after reading `backlog_agents` (declared
+capabilities, so assignment matches capability rather than name); a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
 handle however they want.
@@ -50,6 +51,8 @@ contract itself is the only integration surface.
 | `webhook set --harness H --url U [--bearer B]`                  | register a harness callback URL (checked first at claim) |
 | `webhook list` / `webhook remove --harness H`                    | inspect / drop registered callback URLs                 |
 | `webhook test --harness H`                                      | POST a test ping to the harness target                  |
+| `agent set --agent A --capabilities a,b`                        | declare what an agent can do (assignment matches on this) |
+| `agent list` / `agent remove --agent A`                          | inspect / drop declarations                             |
 | `serve --ws --port N [--host H]`                               | stream store events over WebSocket                      |
 
 ## Deploy (any server)
