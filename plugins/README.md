@@ -31,9 +31,10 @@ extensions are discovered from `~/.openclaw/extensions/<id>/` — openclaw.json
 carries no explicit extensions path; the browser-lease extension lives at
 `~/.openclaw/extensions/browser-lease/` with its own `openclaw.plugin.json`.
 
-1. Install the plugin from the published package (no git clone):
-   `cp -r "$(npm root -g)/@igorjpimenta/winch/plugins/openclaw/winch" \
-    ~/.openclaw/extensions/winch/` (or symlink it).
+1. Install the plugin package (its own release line, and it pulls
+   `@igorjpimenta/winch` as a dependency): `openclaw plugins install
+   @igorjpimenta/winch-openclaw`. From a checkout instead: copy or symlink
+   `plugins/openclaw/winch/` into `~/.openclaw/extensions/winch/`.
    Then set `webhookBearer` (any secret) in the extension config —
    `webhookPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
    port isn't detectable. On boot the plugin registers its own route in

@@ -26,6 +26,9 @@
       "minHostVersion": ">=2026.5.18"
     }
   },
+  "dependencies": {
+    "@igorjpimenta/winch": "^2026.10.26-beta.1"
+  },
   "peerDependencies": {
     "openclaw": ">=2026.5.18"
   }

@@ -18,9 +18,20 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
 openclaw plugins install @igorjpimenta/winch-openclaw
 ```
 
+The plugin depends on `@igorjpimenta/winch`, so installing it also installs
+the server binary it registers with — self-registration always talks to the
+version that shipped alongside it, not whatever `winch` is on `PATH`.
+
 Then set the shared secret in the plugin config (`webhookBearer`), and
 `webhookPublicBaseUrl` if the gateway port isn't detectable. The route stays
 disarmed (503) until `webhookBearer` is set.
+
+## Releases
+
+Ships on its own line, independent of the core server:
+`winch-openclaw-<semver>` tags publish `@igorjpimenta/winch-openclaw`
+(stable → `latest`, prerelease → `beta`). Bump this package's `version` and
+its `@igorjpimenta/winch` dependency floor together.
 
 ## Config
 
