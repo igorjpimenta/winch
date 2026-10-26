@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/winch",
-  "version": "2026.10.26-beta.1",
+  "version": "2026.10.26-beta.2",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,8 @@
     "src/",
     "plugins/",
     ".migrations/",
-    "README.md"
+    "README.md",
+    "openclaw.plugin.json"
   ],
   "bin": {
     "winch": "bin/winch.js"
@@ -33,5 +34,10 @@
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"
+  },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/winch/index.js"
+    ]
   }
 }
