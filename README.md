@@ -1,16 +1,18 @@
 # winch
 
 Winch is a pull-based delivery backlog — epic → story → task with a
-dependency DAG — served as an MCP server. Agents claim work with atomic CAS
-claims under per-identity leases (`backlog_next` claims the highest-priority
-ready task for *this* agent, `backlog_claim` claims one named task by id,
-or silently loses the race to a concurrent
-claim), report through `backlog_update` / `backlog_done`, open human gates
-with `backlog_block` and resolve them with `backlog_resume`; a planner may
-direct work with `backlog_assign`; a release/merge
-loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
+dependency DAG — served as an MCP server. A planner protocols a demand with
+`backlog_plan`, which writes the spec into the records (task description,
+story acceptance, capability tags) rather than into a message, and directs
+work with `backlog_assign`. A worker is woken with a task id, reads the
+record with `backlog_task_get`, then claims it with `backlog_claim` (one
+named task) or `backlog_next` (highest-priority ready task for *this* agent)
+— both atomic CAS under a per-identity lease, so a race loser simply loses.
+Work reports through `backlog_update` / `backlog_done`; human gates open
+with `backlog_block` and resolve with `backlog_resume`. A release/merge loop
+(`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
-handle however they want.
+handle however they want — including waking the assignee when a task lands.
 
 Winch is harness-agnostic: the server contains no harness-specific code. The
 adapters under `plugins/` are optional and installed per harness; the MCP
