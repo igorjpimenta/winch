@@ -22,6 +22,13 @@
       "when": 1792612691655,
       "tag": "0002_drop-session-budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792976641974,
+      "tag": "0003_pink_siren",
+      "breakpoints": true
     }
   ]
 }

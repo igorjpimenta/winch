@@ -102,6 +102,18 @@ export const events = sqliteTable("events", {
   index("idx_events_task").on(table.taskId),
 ]);
 
+export const webhookTargets = sqliteTable("webhook_targets", {
+  // One callback URL per harness, registered via `winch webhook set`.
+  // Checked first at claim time, before the env-mapped and single-URL
+  // config: a CLI registration is a deliberate admin act on the live system.
+  harness: text("harness").primaryKey(),
+  url: text("url").notNull(),
+  bearer: text("bearer"),
+  timeoutMs: integer("timeout_ms"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const deps = sqliteTable("deps", {
   fromId: text("from_id").notNull(),
   fromKind: text("from_kind").notNull(),

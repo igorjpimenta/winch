@@ -53,9 +53,12 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-/** Shape-guard the winch claim payload. Returns a string error or null. */
+/** Shape-guard winch webhook payloads. Returns a string error or null.
+ * `webhook.test` (from `winch webhook test`) only proves URL + bearer;
+ * it never wakes anyone. */
 export function claimError(body) {
   if (!body || typeof body !== "object") return "body must be an object";
+  if (body.event === "webhook.test") return null;
   if (body.event !== "task.claimed") return `unsupported event ${JSON.stringify(body.event)}`;
   const t = body.task;
   if (!t || typeof t.id !== "string" || !t.id) return "task.id required";
@@ -115,6 +118,10 @@ export function registerClaimWebhook({ api, logger }) {
       const shapeErr = claimError(body);
       if (shapeErr) {
         json(res, 400, { error: shapeErr });
+        return;
+      }
+      if (body.event === "webhook.test") {
+        json(res, 200, { ok: true, test: true });
         return;
       }
 

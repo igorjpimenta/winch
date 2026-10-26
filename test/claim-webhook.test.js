@@ -101,6 +101,56 @@ test("notifyClaim POSTs to the claiming harness's own URL only", async () => {
   ]);
 });
 
+test("webhook registry CRUD: upsert/get/list/remove, validation", () => {
+  const { dir, store } = freshStore();
+  try {
+    assert.equal(store.webhook.get("openclaw"), null);
+    assert.deepEqual(store.webhook.list(), []);
+    const row = store.webhook.upsert({ harness: "openclaw", url: "http://gw/hook", bearer: "s", timeoutMs: 1500 });
+    assert.equal(row.harness, "openclaw");
+    assert.equal(row.url, "http://gw/hook");
+    assert.equal(row.timeoutMs, 1500);
+    // upsert overwrites
+    store.webhook.upsert({ harness: "openclaw", url: "http://gw2/hook" });
+    const row2 = store.webhook.get("openclaw");
+    assert.equal(row2.url, "http://gw2/hook");
+    assert.equal(row2.bearer, null);
+    assert.equal(store.webhook.list().length, 1);
+    assert.equal(store.webhook.remove({ harness: "openclaw" }), true);
+    assert.equal(store.webhook.remove({ harness: "openclaw" }), false);
+    assert.throws(() => store.webhook.upsert({ harness: " ", url: "http://x/" }), /requires a harness/);
+    assert.throws(() => store.webhook.upsert({ harness: "a", url: "not-a-url" }), /invalid webhook url/);
+    assert.throws(() => store.webhook.upsert({ harness: "a", url: "ftp://x/y" }), /http\(s\)/);
+    assert.throws(() => store.webhook.upsert({ harness: "a", url: "http://x/", timeoutMs: 0 }), /positive integer/);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("DB-registered target wins over env config", async () => {
+  const { dir, store } = freshStore({
+    claimWebhookUrl: "http://fallback/hook",
+    claimWebhookBearer: "fb",
+    claimWebhookTimeoutMs: 3000,
+    claimWebhooks: {},
+  });
+  try {
+    store.webhook.upsert({ harness: "openclaw", url: "http://db/hook", bearer: "db1" });
+    assert.equal(
+      webhookConfig(store.config, "openclaw", store.webhook.get("openclaw")).url,
+      "http://db/hook"
+    );
+    assert.equal(
+      webhookConfig(store.config, "langgraph", store.webhook.get("langgraph")).url,
+      "http://fallback/hook"
+    );
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("claimPayload carries task, session triple and handoff", () => {
   const p = claimPayload({
     task: { id: "TASK-1", title: "T", description: "D", assigned: "a1" },

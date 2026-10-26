@@ -30,8 +30,9 @@ test("fresh store creates the schema and records the Drizzle migration", (t) => 
   assert.ok(tables(store.db).includes("tasks"));
   assert.ok(tables(store.db).includes("events"));
   assert.ok(tables(store.db).includes("deps"));
+  assert.ok(tables(store.db).includes("webhook_targets"));
   assert.ok(!tables(store.db).includes("session_budgets"), "session_budgets table absent");
-  assert.equal(ledger(store.db).length, 3);
+  assert.equal(ledger(store.db).length, 4);
 });
 
 test("reopen is idempotent and keeps the data", (t) => {
@@ -42,6 +43,6 @@ test("reopen is idempotent and keeps the data", (t) => {
 
   const reopened = createStore({ dbPath });
   t.after(() => reopened.close());
-  assert.equal(ledger(reopened.db).length, 3);
+  assert.equal(ledger(reopened.db).length, 4);
   assert.equal(reopened.epic.get(epic.id).title, "E");
 });

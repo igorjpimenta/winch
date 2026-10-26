@@ -220,10 +220,12 @@ export function createToolHandlers(store, logger) {
           };
           // Push handoff, never gate the claim: notifyClaim resolves
           // {ok:false} (never throws) when unconfigured or unreachable.
+          // DB-registered target first, then env-mapped/single-URL config.
           await notifyClaim(
             cfg,
             claimPayload({ task: claimed, story: c.story, epic: c.epic, artifacts, handoff, identity, sessionKey }),
-            logger
+            logger,
+            store.webhook.get(identity.harness)
           );
           return ok(
             JSON.stringify({

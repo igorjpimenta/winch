@@ -79,6 +79,16 @@ test("shape guards reject junk before any wake", () => {
   assert.match(claimMessage({ task: { id: "T1", title: "X" }, session: {} }), /Claimed winch task T1/);
 });
 
+test("webhook.test pings without waking anyone", async () => {
+  const box = makeApi();
+  registerClaimWebhook({ api: box.api, logger: box.api.logger });
+  const out = await post(box, { body: { event: "webhook.test", at: 1 } });
+  assert.equal(out.statusCode, 200);
+  assert.deepEqual(JSON.parse(out.body), { ok: true, test: true });
+  assert.equal(box.calls.scheduled.length, 0);
+  assert.equal(box.calls.injected.length, 0);
+});
+
 test("405 on GET, 503 when disarmed, 401 on bad bearer", async () => {
   const box = makeApi();
   registerClaimWebhook({ api: box.api, logger: box.api.logger });

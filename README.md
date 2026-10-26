@@ -46,6 +46,9 @@ contract itself is the only integration surface.
 | `next`                                                          | list the current ready queue                            |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers          |
 | `merge-detect [--dry-run]`                                      | apply merged/closed PR outcomes                         |
+| `webhook set --harness H --url U [--bearer B]`                  | register a harness callback URL (checked first at claim) |
+| `webhook list` / `webhook remove --harness H`                    | inspect / drop registered callback URLs                 |
+| `webhook test --harness H`                                      | POST a test ping to the harness target                  |
 | `serve --ws --port N [--host H]`                               | stream store events over WebSocket                      |
 
 ## Deploy (any server)

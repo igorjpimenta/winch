@@ -71,13 +71,15 @@ opens a **fresh session** for the task:
 1. On the plugin: set `webhookBearer` (any secret) in the extension config —
    `~/.openclaw/openclaw.json` → the extension's config. The route
    `POST /api/winch/claimed` stays disarmed (503) until set.
-2. On winch: point at the gateway and share the secret. One harness —
-   `WINCH_CLAIM_WEBHOOK_URL=http://<gateway-host>:<port>/api/winch/claimed`
-   `WINCH_CLAIM_WEBHOOK_BEARER=<same secret>` — or per harness when several
-   harnesses share one server (each gets exactly its own claims, no fan-out):
-   `WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"http://gw1/api/winch/claimed","bearer":"s1"},"opencode":{"url":"http://gw2/hook"}}'`
-   (or the `--config` equivalents). No URL anywhere = no-op; claims work
-   exactly as before.
+2. On winch: register the callback URL. Persistent (survives restarts,
+   checked first at claim time) — `winch webhook set --harness openclaw
+   --url http://<gateway-host>:<port>/api/winch/claimed --bearer <same
+   secret>` — then verify with `winch webhook test --harness openclaw`
+   (the plugin answers `{ok:true,test:true}` without waking anyone).
+   Ephemeral alternative: `WINCH_CLAIM_WEBHOOK_URL` (+ `_BEARER`) for one
+   harness, or `WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…","bearer":"…"}}'`
+   per harness (or the `--config` equivalents). Nothing registered anywhere
+   = no-op; claims behave exactly as before.
 3. On claim, winch POSTs `{event:"task.claimed", task, session, handoff}`
    (see `src/claim-webhook.js`); the plugin verifies the bearer, then
    `scheduleSessionTurn`s a one-shot turn (`deleteAfterRun`, tag

@@ -13,12 +13,25 @@
 const DEFAULT_TIMEOUT_MS = 3000;
 
 /**
- * Resolve the webhook target for a claiming harness. Per-harness entry wins
- * (`claimWebhooks[harness]`); otherwise the single claimWebhookUrl/Bearer
- * acts as the fallback for all harnesses; neither means disabled. Each
- * harness gets exactly its own claims — no fan-out, no cross-harness leak.
+ * Resolve the webhook target for a claiming harness. Precedence: DB-registered
+ * target (`winch webhook set`, a deliberate admin act on the live system) →
+ * per-harness env-mapped entry (`claimWebhooks[harness]`) → the single
+ * claimWebhookUrl/Bearer fallback for all harnesses → disabled. Each harness
+ * gets exactly its own claims — no fan-out, no cross-harness leak.
  */
-export function webhookConfig(cfg, harness = null) {
+export function webhookConfig(cfg, harness = null, dbEntry = null) {
+  if (dbEntry && typeof dbEntry.url === "string" && dbEntry.url.trim() !== "") {
+    const timeoutMs = Number.isInteger(dbEntry.timeoutMs) && dbEntry.timeoutMs > 0
+      ? dbEntry.timeoutMs
+      : (Number.isInteger(cfg?.claimWebhookTimeoutMs) && cfg.claimWebhookTimeoutMs > 0
+        ? cfg.claimWebhookTimeoutMs
+        : DEFAULT_TIMEOUT_MS);
+    return {
+      url: dbEntry.url.trim(),
+      bearer: typeof dbEntry.bearer === "string" && dbEntry.bearer !== "" ? dbEntry.bearer : null,
+      timeoutMs,
+    };
+  }
   const table = cfg?.claimWebhooks;
   if (harness && table && typeof table === "object") {
     const entry = table[harness];
@@ -73,8 +86,8 @@ export function claimPayload({ task, story, epic, artifacts, handoff, identity, 
  * otherwise — never throws, so callers can await it inline in the claim path
  * without risking the claim itself.
  */
-export async function notifyClaim(cfg, payload, logger = null) {
-  const hook = webhookConfig(cfg, payload?.session?.harness ?? null);
+export async function notifyClaim(cfg, payload, logger = null, dbEntry = null) {
+  const hook = webhookConfig(cfg, payload?.session?.harness ?? null, dbEntry);
   if (!hook) return { ok: false, reason: "disabled" };
   try {
     const headers = { "content-type": "application/json" };
