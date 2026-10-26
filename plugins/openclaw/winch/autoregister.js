@@ -12,25 +12,10 @@
 // Never throws: boot must not fail because a webhook couldn't register.
 
 import { execFile as execFileCb } from "node:child_process";
-import { createRequire } from "node:module";
-import path from "node:path";
 
-/**
- * The plugin depends on @igorjpimenta/winch, so the version it registers with
- * is the one that shipped with it — not whatever `winch` happens to be on
- * PATH (which could be a different store). Resolution order in the config
- * below: explicit config → WINCH_BIN → bundled dependency → PATH.
- */
-export function bundledWinchBin() {
-  try {
-    const req = createRequire(import.meta.url);
-    const pkgPath = req.resolve("@igorjpimenta/winch/package.json");
-    return path.join(path.dirname(pkgPath), "bin", "winch.js");
-  } catch {
-    return null;
-  }
-}
-
+// The `winch` used here is the same one the harness's MCP entry spawns, so
+// both talk to the same store: explicit config → WINCH_BIN → PATH. The
+// package dependency only pins the server version that ships alongside.
 export function autoregisterConfig(pluginConfig = {}, apiConfig = {}) {
   const bearer = pluginConfig.webhookBearer ?? pluginConfig.webhook?.bearer ?? "";
   const baseUrl =
@@ -42,7 +27,6 @@ export function autoregisterConfig(pluginConfig = {}, apiConfig = {}) {
     pluginConfig.webhookWinchBin ??
     pluginConfig.webhook?.winchBin ??
     process.env.WINCH_BIN ??
-    bundledWinchBin() ??
     "winch";
   const enabled = pluginConfig.webhookAutoregister ?? pluginConfig.webhook?.autoregister ?? true;
   return { bearer, baseUrl, harness, winchBin, enabled };

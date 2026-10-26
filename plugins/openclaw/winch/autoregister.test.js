@@ -65,7 +65,7 @@ test("set failure never throws; returns manual command", async () => {
   assert.match(r.manual, /winch webhook set/);
 });
 
-test("bundled .js bin runs under the current node, not a PATH shim", async () => {
+test("a .js bin path runs under the current node", async () => {
   const calls = [];
   const { api } = apiWith({ webhookBearer: "s", webhookPublicBaseUrl: "http://h:1", webhookWinchBin: "/opt/pkg/bin/winch.js" });
   const r = await autoregister({ api, runner: okRunner(calls) });
@@ -73,13 +73,6 @@ test("bundled .js bin runs under the current node, not a PATH shim", async () =>
   assert.equal(calls[0][0], process.execPath);
   assert.equal(calls[0][1], "/opt/pkg/bin/winch.js");
   assert.deepEqual(calls[0].slice(2), ["webhook", "set", "--harness", "openclaw", "--url", "http://h:1/api/winch/claimed", "--bearer", "s"]);
-});
-
-test("bundled dependency resolves when no explicit bin is configured", () => {
-  const c = autoregisterConfig({ webhookBearer: "s" }, { gateway: { port: 1 } });
-  // The plugin declares @igorjpimenta/winch as a dependency; in the test
-  // tree it resolves to this repo's bin, otherwise the PATH fallback stands.
-  assert.match(c.winchBin, /winch\.js$|^winch$/);
 });
 
 test("config: gateway port fallback, harness and bin overrides", () => {

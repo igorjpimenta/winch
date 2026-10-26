@@ -18,9 +18,10 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
 openclaw plugins install @igorjpimenta/winch-openclaw
 ```
 
-The plugin depends on `@igorjpimenta/winch`, so installing it also installs
-the server binary it registers with — self-registration always talks to the
-version that shipped alongside it, not whatever `winch` is on `PATH`.
+The plugin depends on `@igorjpimenta/winch`, so npm resolves and pins the
+server version alongside it. Self-registration invokes the same `winch` the
+harness MCP entry spawns (`webhookWinchBin` → `WINCH_BIN` → `PATH`), so both
+always operate on one store.
 
 Then set the shared secret in the plugin config (`webhookBearer`), and
 `webhookPublicBaseUrl` if the gateway port isn't detectable. The route stays
