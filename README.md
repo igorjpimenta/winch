@@ -46,6 +46,9 @@ contract itself is the only integration surface.
 | `next`                                                          | list the current ready queue                            |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers          |
 | `merge-detect [--dry-run]`                                      | apply merged/closed PR outcomes                         |
+| `webhook set --harness H --url U [--bearer B]`                  | register a harness callback URL (checked first at claim) |
+| `webhook list` / `webhook remove --harness H`                    | inspect / drop registered callback URLs                 |
+| `webhook test --harness H`                                      | POST a test ping to the harness target                  |
 | `serve --ws --port N [--host H]`                               | stream store events over WebSocket                      |
 
 ## Deploy (any server)
@@ -165,6 +168,8 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` (`"24h,72h"`, `ms\|s\|m\|h\|d` suffixes) | 24h / 72h |
 | WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
+| Claim webhook URL / bearer / timeout | `WINCH_CLAIM_WEBHOOK_URL` / `WINCH_CLAIM_WEBHOOK_BEARER` / `WINCH_CLAIM_WEBHOOK_TIMEOUT_MS` | unset / unset / 3000 ms |
+| Claim webhooks per harness (map) | `WINCH_CLAIM_WEBHOOKS` (`{"openclaw":{"url":"…","bearer":"…"}}`) | `{}` (falls back to single URL) |
 | Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |

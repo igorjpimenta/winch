@@ -49,7 +49,12 @@ const USAGE = `usage: winch <command>
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
-  merge-detect [--dry-run]               apply merged/closed PR outcomes`;
+  merge-detect [--dry-run]               apply merged/closed PR outcomes
+  webhook set --harness H --url U [--bearer B] [--timeout-ms N]
+                                           register a harness callback URL (checked first at claim)
+  webhook list                             list registered callback URLs
+  webhook remove --harness H              drop a registered callback URL
+  webhook test --harness H                POST a test ping to the harness target`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -225,6 +230,79 @@ export async function runCli(argv) {
       await startEventServer({ store, port, host, logger });
       logger.info(`winch: events on ws://${host}:${port ?? store.config.wsPort} (append-only; subscribers track their own state)`);
       return;
+    }
+
+    case "webhook": {
+      const [sub, ...subRest] = rest;
+      if (!["set", "list", "remove", "test"].includes(sub)) {
+        fail("usage: winch webhook (set|list|remove|test) …");
+      }
+      if (sub === "list") {
+        const store = openStore();
+        try {
+          console.log(JSON.stringify(store.webhook.list(), null, 2));
+        } finally {
+          store.close();
+        }
+        return;
+      }
+      const { values } = parseArgs({
+        args: subRest,
+        options: {
+          harness: { type: "string" },
+          url: { type: "string" },
+          bearer: { type: "string" },
+          "timeout-ms": { type: "string" },
+        },
+      });
+      const harness = values.harness;
+      if (!harness || !harness.trim()) fail(`winch webhook ${sub} requires --harness <name>`);
+      const store = openStore();
+      try {
+        if (sub === "remove") {
+          const removed = store.webhook.remove({ harness });
+          if (!removed) fail(`no webhook registered for harness: ${harness}`, 1);
+          console.log(JSON.stringify({ removed: harness }));
+          return;
+        }
+        if (sub === "set") {
+          if (!values.url) fail("winch webhook set requires --url <http(s)://…>");
+          const timeoutMs = values["timeout-ms"] !== undefined ? Number(values["timeout-ms"]) : null;
+          if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+            fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
+          }
+          try {
+            const row = store.webhook.upsert({ harness, url: values.url, bearer: values.bearer ?? null, timeoutMs });
+            console.log(JSON.stringify({ ...row, bearer: row.bearer ? "<set>" : null }, null, 2));
+          } catch (err) {
+            fail(String(err?.message ?? err), 1);
+          }
+          return;
+        }
+        // test: resolve exactly like a claim would (registry → env map → single)
+        // and POST a test ping. The plugin answers {ok:true,test:true}.
+        const { webhookConfig } = await import("./claim-webhook.js");
+        const hook = webhookConfig(store.config, harness, store.webhook.get(harness));
+        if (!hook) fail(`no webhook target for harness: ${harness} (register one or set WINCH_CLAIM_WEBHOOK_URL)`, 1);
+        const headers = { "content-type": "application/json" };
+        if (hook.bearer) headers.authorization = `Bearer ${hook.bearer}`;
+        try {
+          const res = await fetch(hook.url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ event: "webhook.test", at: Date.now(), harness }),
+            signal: AbortSignal.timeout(hook.timeoutMs),
+          });
+          const text = await res.text();
+          console.log(JSON.stringify({ ok: res.ok, status: res.status, body: text.slice(0, 500) }, null, 2));
+          if (!res.ok) process.exitCode = 1;
+        } catch (err) {
+          fail(`webhook test failed: ${err?.message ?? err}`, 1);
+        }
+        return;
+      } finally {
+        store.close();
+      }
     }
 
     default:

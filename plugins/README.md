@@ -34,6 +34,14 @@ carries no explicit extensions path; the browser-lease extension lives at
 1. Install the plugin from the published package (no git clone):
    `cp -r "$(npm root -g)/@igorjpimenta/winch/plugins/openclaw/winch" \
     ~/.openclaw/extensions/winch/` (or symlink it).
+   Then set `webhookBearer` (any secret) in the extension config —
+   `webhookPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
+   port isn't detectable. On boot the plugin registers its own route in
+   winch (`winch webhook set` + `test`) and logs the result — no manual
+   step unless it warns you with the exact command. Opt out with
+   `webhookAutoregister: false`. Multi-gateway setups: set
+   `webhookHarness` per gateway to match its winch MCP entry's
+   `WINCH_HARNESS`.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -61,6 +69,34 @@ declared in `package.json` as `openclaw.install.minHostVersion`, enforced by
 install and registry loading). No resolvable session or agent → the hook
 returns `undefined`; the call reaches the server unstamped and is refused
 (there is no env fallback).
+
+## Claim webhook (wake on attribution)
+
+Polling `backlog_next` leaves an idle agent waiting for its next heartbeat.
+Instead, winch can push the handoff the moment a claim lands and the plugin
+opens a **fresh session** for the task:
+
+1. On the plugin: set `webhookBearer` (any secret) in the extension config —
+   `~/.openclaw/openclaw.json` → the extension's config. The route
+   `POST /api/winch/claimed` stays disarmed (503) until set.
+2. On winch: register the callback URL. Persistent (survives restarts,
+   checked first at claim time) — `winch webhook set --harness openclaw
+   --url http://<gateway-host>:<port>/api/winch/claimed --bearer <same
+   secret>` — then verify with `winch webhook test --harness openclaw`
+   (the plugin answers `{ok:true,test:true}` without waking anyone).
+   Ephemeral alternative: `WINCH_CLAIM_WEBHOOK_URL` (+ `_BEARER`) for one
+   harness, or `WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…","bearer":"…"}}'`
+   per harness (or the `--config` equivalents). Nothing registered anywhere
+   = no-op; claims behave exactly as before.
+3. On claim, winch POSTs `{event:"task.claimed", task, session, handoff}`
+   (see `src/claim-webhook.js`); the plugin verifies the bearer, then
+   `scheduleSessionTurn`s a one-shot turn (`deleteAfterRun`, tag
+   `winch-claim`) in session `winch-claim-<TASK-ID>` carrying the receiver
+   prompt, and injects a pointer into the claiming session. If the fresh
+   session fails, the turn falls back to the claiming session; if scheduling
+   is unavailable, the claim parks in a pending queue (4h TTL) drained by
+   the heartbeat hook — the agent's next natural wake carries the handoff.
+   Delivery never fails the claim (bounded 3s timeout, failures are warnings).
 
 ## opencode
 
