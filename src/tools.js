@@ -114,6 +114,27 @@ export function createToolHandlers(store, logger) {
       },
     },
     {
+      name: "backlog_assign",
+      description:
+        "Set (or clear) the assignee of a task so the right agent claims it. " +
+        "Refuses to reassign a task that is in_progress by someone else. Passing `agent: null` or \"\" clears it. " +
+        "Optional `capabilities` replaces the task's capability tags.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId"],
+        properties: {
+          taskId: { type: "string", description: "Task id (TASK-…)." },
+          agent: { type: ["string", "null"], description: "Target agent id, or null/\"\" to unassign." },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Capability tags the task requires; replaces existing tags.",
+          },
+        },
+      },
+    },
+    {
       name: "backlog_update",
       description:
         "Report liveness and progress on a task you have claimed. `heartbeat: true` refreshes last_heartbeat " +
@@ -280,6 +301,29 @@ export function createToolHandlers(store, logger) {
       } catch (e) {
         logger?.warn?.(`backlog_claim failed: ${e?.message}`);
         return err(`backlog_claim failed: ${e?.message}`, "error");
+      }
+    },
+
+    async backlog_assign(args, identity, cfg) {
+      // Like every other tool: availability is the host's tool policy, and
+      // the caller is attributed by identity. No server-side allowlist.
+      const qualified = `${identity.harness}:${identity.agent}`;
+      const task = store.task.get(args?.taskId);
+      if (!task) return err(`backlog_assign: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
+      try {
+        const updated = store.task.assign({
+          id: task.id,
+          agentId: args?.agent ?? null,
+          actor: qualified,
+          capabilities: args?.capabilities,
+        });
+        logger?.info?.(`backlog: ${qualified} assigned ${task.id} -> ${updated.assigned ?? "nobody"}`);
+        return ok(
+          JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, assigned: updated.assigned, capabilities: updated.capabilities } }),
+          { status: "ok", taskId: updated.id, assigned: updated.assigned, agent: identity.agent }
+        );
+      } catch (e) {
+        return err(`backlog_assign failed: ${e?.message}`, "rejected", { taskId: task.id });
       }
     },
 

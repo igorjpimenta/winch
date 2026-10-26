@@ -6,7 +6,8 @@ claims under per-identity leases (`backlog_next` claims the highest-priority
 ready task for *this* agent, `backlog_claim` claims one named task by id,
 or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
-with `backlog_block` and resolve them with `backlog_resume`; a release/merge
+with `backlog_block` and resolve them with `backlog_resume`; a planner may
+direct work with `backlog_assign`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
 handle however they want.
@@ -30,7 +31,7 @@ contract itself is the only integration surface.
   ```
 - From source instead: `npm install`, then `./bin/winch.js <command>` — or
   `npm link` for a global `winch`.
-- `winch serve --mcp stdio` serves the five backlog tools over MCP stdio
+- `winch serve --mcp stdio` serves the backlog tools over MCP stdio
   (stdout is JSON-RPC; logs go to stderr; harness from `WINCH_HARNESS` env).
 - `WINCH_BEARER=… winch serve --mcp http --port N` serves the same tools
   over Streamable HTTP for local harnesses sharing one daemon.
