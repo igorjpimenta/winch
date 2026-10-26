@@ -162,6 +162,34 @@ declared harness/agent/session says *whose work* this is.
 | langgraph | stdio entry in `mcpServers` | SSE/HTTP transport entry per its adapter | the adapter's header/auth config |
 | claude | `claude mcp add winch --env WINCH_HARNESS=generic -- winch serve --mcp stdio` | `claude mcp add --transport http <name> <url> -H "Authorization: Bearer …"` | the `-H` flags, stored in its config |
 
+## Planner role (assigning rather than claiming)
+
+A planner agent reads the fleet roster and points tasks at the right
+specialist; it should not claim or execute. Two independent controls:
+
+- **Discovery**: the host exposes `agents_list` only to agents whose tool
+  policy includes `group:agents` — the `coding`, `messaging` and `minimal`
+  profiles do not. Add it with `tools.alsoAllow: ["agents_list"]`. Its output
+  is scoped by `subagents.allowAgents`, so that list doubles as the roster the
+  planner may assign to (and, if it can spawn at all, the only spawn targets).
+- **Assignment**: `backlog_assign` is gated server-side by `WINCH_ASSIGNERS`
+  (agent ids or `harness:agent`). Empty means nobody may assign. The tool
+  refuses to steal a live claim, and writes a `task.assigned` event whose
+  from/to status are equal — assignment never fabricates a transition.
+
+```json5
+// planner agent: read the roster, no shell, no spawn
+{ tools: { profile: "messaging", alsoAllow: ["agents_list", "read"],
+           deny: ["group:sessions", "exec", "write", "edit", "apply_patch",
+                  "process", "browser", "gateway", "cron", "message"] },
+  subagents: { allowAgents: ["tester", "content-writer", "scorer"] } }
+```
+
+```
+# winch server side
+WINCH_ASSIGNERS=atlas winch serve --mcp http --port 38292
+```
+
 ## generic MCP clients
 
 

@@ -370,6 +370,38 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       }
     },
     /**
+     * Planner assignment: set (or clear, with agentId null) the task's
+     * assignee and optionally its capability tags, with an audit event.
+     * Refuses to reassign a live claim — an in_progress task belongs to the
+     * agent working it until it releases or is swept; only a no-op
+     * re-assignment to the same agent is allowed.
+     */
+    assign({ id, agentId = null, actor = "system", capabilities }) {
+      const existing = taskApi.get(id);
+      if (!existing) throw new Error(`task not found: ${id}`);
+      const next = agentId === "" ? null : (agentId ?? null);
+      if (existing.status === "in_progress" && (existing.assigned ?? null) !== next) {
+        throw new Error(
+          `${existing.id} is in_progress by ${existing.assigned ?? "nobody"}; wait for release before reassigning`
+        );
+      }
+      const t = now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("UPDATE tasks SET assigned=?, capabilities=?, updated_at=? WHERE id=?")
+          .run(next, jsonOut(capabilities !== undefined ? capabilities : existing.capabilities), t, id);
+        insertEvent({
+          taskId: id, fromStatus: existing.status, toStatus: existing.status, kind: "task.assigned",
+          actor, note: `assign ${next ?? "nobody"}`, at: t,
+        });
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return taskApi.get(id);
+    },
+    /**
      * Prove liveness mid-task: push last_heartbeat forward. No event row —
      * heartbeats fire too often to pollute the audit trail.
      */
