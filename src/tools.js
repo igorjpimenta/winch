@@ -135,6 +135,67 @@ export function createToolHandlers(store, logger) {
       },
     },
     {
+      name: "backlog_plan",
+      description:
+        "Create a whole plan in one call: an epic, its stories, and their tasks, wired with dependencies. This is how a planner " +
+        "protocols a demand — the spec goes INTO the records (task description, story acceptance, capability tags), because a " +
+        "worker receives only a task id and reads the record itself. Tasks are created `todo` and unassigned; assign them with " +
+        "`backlog_assign`. `dependsOn` references other tasks in the same plan by key (default `s<story>t<task>`, zero-based) " +
+        "and may only point backward, so the plan is acyclic by construction. All-or-nothing: an invalid key rolls back the plan.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["epic", "stories"],
+        properties: {
+          epic: {
+            type: "object",
+            additionalProperties: false,
+            required: ["title"],
+            properties: {
+              title: { type: "string" },
+              description: { type: "string", description: "Why this epic exists and any shared constraint." },
+              acceptance: { type: "string", description: "What done means for the epic." },
+              priority: { type: "integer", description: "0-100, default 50." },
+            },
+          },
+          stories: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["title", "tasks"],
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                acceptance: { type: "string", description: "Verifiable acceptance criteria; every worker on this story sees it." },
+                priority: { type: "integer" },
+                capabilities: { type: "array", items: { type: "string" }, description: "Default capability tags for the story's tasks." },
+                tasks: {
+                  type: "array",
+                  minItems: 1,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["title"],
+                    properties: {
+                      title: { type: "string" },
+                      description: { type: "string", description: "Everything the worker needs: what to build, where, and the constraints. There is no other brief." },
+                      key: { type: "string", description: "Referenced by dependsOn; defaults to s<story>t<task> (zero-based)." },
+                      executionKind: { type: "string", enum: ["pipeclaw", "subagent", "cli", "gate", "manual"] },
+                      executionArgs: { type: "object", description: "Structured args the worker's harness understands." },
+                      capabilities: { type: "array", items: { type: "string" }, description: "Capability tags the work truly needs." },
+                      dependsOn: { type: "array", items: { type: "string" }, description: "Keys of earlier tasks in this plan that must finish first." },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
       name: "backlog_task_get",
       description:
         "Read ONE task with everything needed to do it, without claiming: task payload (title, description, execution args), " +
@@ -344,6 +405,92 @@ export function createToolHandlers(store, logger) {
         );
       } catch (e) {
         return err(`backlog_assign failed: ${e?.message}`, "rejected", { taskId: task.id });
+      }
+    },
+
+    async backlog_plan(args, identity, cfg) {
+      const epicIn = args?.epic;
+      const storiesIn = args?.stories;
+      if (!epicIn?.title || !Array.isArray(storiesIn) || storiesIn.length === 0) {
+        return err("backlog_plan: epic.title and at least one story are required", "rejected");
+      }
+      // Validate keys and dependency direction before writing anything:
+      // backward-only edges make the plan acyclic without a graph search,
+      // and a bad key must not leave half a plan behind.
+      const flat = [];
+      storiesIn.forEach((s, si) => {
+        (s?.tasks ?? []).forEach((t, ti) => {
+          flat.push({ storyIndex: si, taskIndex: ti, key: t?.key ?? `s${si}t${ti}`, dependsOn: t?.dependsOn ?? [], title: t?.title });
+        });
+      });
+      const keyIndex = new Map();
+      for (let i = 0; i < flat.length; i++) {
+        if (keyIndex.has(flat[i].key)) return err(`backlog_plan: duplicate task key: ${flat[i].key}`, "rejected");
+        keyIndex.set(flat[i].key, i);
+      }
+      for (const item of flat) {
+        for (const dep of item.dependsOn) {
+          if (!keyIndex.has(dep)) return err(`backlog_plan: unknown dependsOn key: ${dep} (in ${item.key})`, "rejected");
+          if (keyIndex.get(dep) >= keyIndex.get(item.key)) {
+            return err(`backlog_plan: dependsOn must point backward: ${item.key} -> ${dep}`, "rejected");
+          }
+        }
+      }
+      let epic = null;
+      try {
+        epic = store.epic.create({
+          title: epicIn.title,
+          description: epicIn.description,
+          acceptance: epicIn.acceptance,
+          status: "planned",
+          priority: epicIn.priority ?? 50,
+        });
+        const idByKey = new Map();
+        const stories = storiesIn.map((s, si) => {
+          const story = store.story.create({
+            epicId: epic.id,
+            title: s.title,
+            description: s.description,
+            acceptance: s.acceptance,
+            status: "ready",
+            priority: s.priority ?? epic.priority,
+            capabilities: s.capabilities,
+          });
+          const tasks = (s.tasks ?? []).map((t, ti) => {
+            const key = t.key ?? `s${si}t${ti}`;
+            const task = store.task.create({
+              storyId: story.id,
+              title: t.title,
+              description: t.description,
+              status: "todo",
+              executionKind: t.executionKind ?? "manual",
+              executionArgs: t.executionArgs,
+              capabilities: t.capabilities ?? s.capabilities,
+            });
+            idByKey.set(key, task.id);
+            return { id: task.id, key, title: task.title };
+          });
+          return { id: story.id, title: story.title, acceptance: story.acceptance ?? null, tasks };
+        });
+        let dependencies = 0;
+        for (const item of flat) {
+          for (const dep of item.dependsOn) {
+            const res = addDep(store, idByKey.get(item.key), idByKey.get(dep));
+            if (!res.ok) throw new Error(`dependency ${item.key} -> ${dep} rejected: ${res.code}`);
+            dependencies++;
+          }
+        }
+        logger?.info?.(`backlog: ${identity.harness}:${identity.agent} planned ${epic.id} (${flat.length} tasks)`);
+        return ok(
+          JSON.stringify({ epic: { id: epic.id, title: epic.title }, stories, dependencies }),
+          { status: "ok", agentId: identity.agent, epicId: epic.id, tasks: flat.length }
+        );
+      } catch (e) {
+        // Creating the epic is the first write; cascade removes anything
+        // written under it, so a failure leaves the store as it was.
+        if (epic?.id) store.db.prepare("DELETE FROM epics WHERE id=?").run(epic.id);
+        logger?.warn?.(`backlog_plan failed: ${e?.message}`);
+        return err(`backlog_plan failed: ${e?.message}`, "error");
       }
     },
 

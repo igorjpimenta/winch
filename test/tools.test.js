@@ -340,6 +340,56 @@ test("backlog_task_get explains why a task is not ready for this agent", async (
   assert.equal(missing.details.reason, "not_found");
 });
 
+test("backlog_plan writes a whole demand into records and wires dependencies", async () => {
+  const res = await call("backlog_plan", {
+    epic: { title: "Ship a slugifier", description: "one demand", acceptance: "CLI works", priority: 90 },
+    stories: [
+      {
+        title: "Slugify",
+        acceptance: "accent + punctuation handled",
+        tasks: [
+          { title: "Build", description: "stdlib only, CLI", capabilities: ["build"] },
+          { title: "Test", description: "edge cases", capabilities: ["verify"], dependsOn: ["s0t0"] },
+        ],
+      },
+    ],
+  });
+  assert.equal(res.details.status, "ok");
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.stories.length, 1);
+  assert.equal(body.stories[0].tasks.length, 2);
+  assert.equal(body.dependencies, 1);
+  const [build, testTask] = body.stories[0].tasks;
+  assert.equal(store.task.get(build.id).description, "stdlib only, CLI");
+  assert.deepEqual(store.task.get(build.id).capabilities, ["build"]);
+  assert.equal(store.task.get(testTask.id).status, "todo");
+  const got = JSON.parse((await call("backlog_task_get", { taskId: testTask.id })).content[0].text);
+  assert.equal(got.story.acceptance, "accent + punctuation handled");
+  assert.equal(got.dependencies[0].id, build.id);
+  assert.equal(got.readiness.ready, false);
+  assert.ok(got.readiness.blockers.includes("task dependencies unresolved"));
+});
+
+test("backlog_plan rejects a bad plan without leaving partial records", async () => {
+  const before = store.db.prepare("SELECT COUNT(*) AS n FROM epics").get().n;
+  const dup = await call("backlog_plan", {
+    epic: { title: "E" },
+    stories: [{ title: "S", tasks: [{ title: "a", key: "k" }, { title: "b", key: "k" }] }],
+  });
+  assert.equal(dup.details.status, "rejected");
+  const forward = await call("backlog_plan", {
+    epic: { title: "E" },
+    stories: [{ title: "S", tasks: [{ title: "a", dependsOn: ["s0t1"] }, { title: "b" }] }],
+  });
+  assert.equal(forward.details.status, "rejected");
+  const unknown = await call("backlog_plan", {
+    epic: { title: "E" },
+    stories: [{ title: "S", tasks: [{ title: "a", dependsOn: ["nope"] }] }],
+  });
+  assert.equal(unknown.details.status, "rejected");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM epics").get().n, before);
+});
+
 test("backlog_claim honors the capabilities filter", async () => {
   const epic = store.epic.create({ title: "E3", status: "planned" });
   const story = store.story.create({ epicId: epic.id, title: "S3", status: "ready" });

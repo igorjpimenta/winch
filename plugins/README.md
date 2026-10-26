@@ -71,6 +71,21 @@ install and registry loading). No resolvable session or agent → the hook
 returns `undefined`; the call reaches the server unstamped and is refused
 (there is no env fallback).
 
+## Assignment dispatch (wake on routing)
+
+An assigned task is inert until someone starts the assignee's session, and a
+worker must never receive a hand-written brief: the record is the spec. The
+harness subscribes to `winch serve --ws` and, on a `task.assigned` row whose
+task is still `todo`, starts the assignee with nothing but the id
+(`winch-claim-<TASK-ID>` style one-shot session, prompt = `TASK-…`). The
+worker's own instructions tell it to call `backlog_task_get` first, then
+claim; no prose is authored per task.
+
+Dispatch is event-driven, never polled: `serve --ws` replays backlog history
+on connect (`{"type":"history"}`), so a restarted dispatcher catches up
+without a timer. Keep one dispatcher per harness and let it track in-flight
+task ids; the claim lease remains the real guard against double work.
+
 ## Claim webhook (wake on attribution)
 
 Polling `backlog_next` leaves an idle agent waiting for its next heartbeat.
