@@ -2,6 +2,7 @@
   "name": "winch",
   "private": true,
   "openclaw": {
+    "extensions": ["./index.js"],
     "install": {
       "minHostVersion": ">=2026.5.18"
     }
