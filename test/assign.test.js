@@ -1,5 +1,6 @@
-// assign.test.js — planner assignment: allowlist gate, audit event, and the
-// live-claim guard that keeps a working agent's task from being stolen.
+// assign.test.js — backlog_assign behaves like any other tool: the caller is
+// attributed by identity, and the only refusals are task-level (missing task,
+// or a live claim that belongs to someone else).
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -21,7 +22,7 @@ function seed({ status = "todo", assigned = null } = {}) {
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "winch-assign-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite"), config: { assigners: ["atlas"] } });
+  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
   ({ handle } = createToolHandlers(store, null));
 });
 
@@ -30,15 +31,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("non-assigner is refused, task untouched", async () => {
-  const task = seed();
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, WORKER);
-  assert.equal(r.details.reason, "not_assigner");
-  assert.equal(store.task.get(task.id).assigned, null);
-  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE kind='task.assigned'").get().n, 0);
-});
-
-test("assigner sets the assignee and writes the audit event", async () => {
+test("assigns and writes the audit event", async () => {
   const task = seed();
   const r = await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
   assert.equal(r.details.status, "ok");
@@ -53,6 +46,17 @@ test("assigner sets the assignee and writes the audit event", async () => {
   assert.equal(ev[0].note, "assign tester");
 });
 
+test("any caller may assign — identity is attribution, not a gate", async () => {
+  const task = seed();
+  const r = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, WORKER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(store.task.get(task.id).assigned, "scorer");
+  assert.equal(
+    store.db.prepare("SELECT actor FROM events WHERE kind='task.assigned'").get().actor,
+    "openclaw:tester"
+  );
+});
+
 test("null clears the assignee; capabilities survive when omitted", async () => {
   const task = seed();
   await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
@@ -60,20 +64,16 @@ test("null clears the assignee; capabilities survive when omitted", async () => 
   const fresh = store.task.get(task.id);
   assert.equal(fresh.assigned, null);
   assert.deepEqual(fresh.capabilities, ["qa"]);
-  assert.equal(store.db.prepare("SELECT note FROM events WHERE kind='task.assigned' ORDER BY id DESC LIMIT 1").get().note, "assign nobody");
+  assert.equal(
+    store.db.prepare("SELECT note FROM events WHERE kind='task.assigned' ORDER BY id DESC LIMIT 1").get().note,
+    "assign nobody"
+  );
 });
 
-test("harness-qualified entries also grant", async () => {
-  store.close();
-  rmSync(dir, { recursive: true, force: true });
-  dir = mkdtempSync(path.join(tmpdir(), "winch-assign-"));
-  store = createStore({ dbPath: path.join(dir, "store.sqlite"), config: { assigners: ["openclaw:atlas"] } });
-  ({ handle } = createToolHandlers(store, null));
-  const task = seed();
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
-  assert.equal(r.details.status, "ok");
-  const other = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, { ...PLANNER, harness: "opencode" });
-  assert.equal(other.details.reason, "not_assigner");
+test("unknown task is refused without writing anything", async () => {
+  const r = await handle("backlog_assign", { taskId: "TASK-nope", agent: "tester" }, PLANNER);
+  assert.equal(r.details.reason, "not_found");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE kind='task.assigned'").get().n, 0);
 });
 
 test("a live claim cannot be reassigned out from under its worker", async () => {
@@ -92,19 +92,4 @@ test("re-assigning a live task to its own worker is a no-op, not an error", asyn
   const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
   assert.equal(r.details.status, "ok");
   assert.equal(store.task.get(task.id).assigned, "tester");
-});
-
-test("disabled by default: an empty allowlist refuses everyone", async () => {
-  const bare = createStore({ dbPath: path.join(dir, "bare.sqlite") });
-  try {
-    const { handle: h } = createToolHandlers(bare, null);
-    const epic = bare.epic.create({ title: "E", status: "planned" });
-    const story = bare.story.create({ epicId: epic.id, title: "S", status: "ready" });
-    const task = bare.task.create({ storyId: story.id, title: "T" });
-    const r = await h("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
-    assert.equal(r.details.reason, "not_assigner");
-    assert.match(r.content[0].text, /server allows: none/);
-  } finally {
-    bare.close();
-  }
 });

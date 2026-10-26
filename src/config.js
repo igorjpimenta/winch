@@ -63,18 +63,6 @@ const SPEC = {
   claimWebhookUrl:     { env: "WINCH_CLAIM_WEBHOOK_URL",     parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookBearer:  { env: "WINCH_CLAIM_WEBHOOK_BEARER",  parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookTimeoutMs: { env: "WINCH_CLAIM_WEBHOOK_TIMEOUT_MS", parse: parseInt, check: (v) => v > 0 },
-  // Agent ids (or "harness:agent") allowed to call backlog_assign. Empty
-  // disables the tool for everyone — assignment is a planner privilege, not
-  // something any claimant may do.
-  assigners: {
-    env: "WINCH_ASSIGNERS",
-    parse: (raw) => {
-      if (raw == null || raw === "") return [];
-      const list = Array.isArray(raw) ? raw : String(raw).split(",");
-      return list.map((v) => String(v).trim()).filter(Boolean);
-    },
-    check: (v) => Array.isArray(v),
-  },
   // Per-harness routing table: { <harness>: { url, bearer?, timeoutMs? } }.
   // JSON in env (`WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…"}}'`), object
   // in explicit config. A harness with no entry falls back to the single
@@ -120,7 +108,6 @@ export const CONFIG_DEFAULTS = {
   claimWebhookBearer: "",
   claimWebhookTimeoutMs: 3000,
   claimWebhooks: {},
-  assigners: [],
 };
 
 export const CONFIG_ENV = Object.fromEntries(

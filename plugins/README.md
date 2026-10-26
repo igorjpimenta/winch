@@ -164,30 +164,27 @@ declared harness/agent/session says *whose work* this is.
 
 ## Planner role (assigning rather than claiming)
 
-A planner agent reads the fleet roster and points tasks at the right
-specialist; it should not claim or execute. Two independent controls:
+`backlog_assign` is one more backlog tool: any caller the host permits may use
+it, attributed by identity like the rest. Which agents get it is decided on the
+host side (tool policy), not by winch config.
 
-- **Discovery**: the host exposes `agents_list` only to agents whose tool
-  policy includes `group:agents` — the `coding`, `messaging` and `minimal`
-  profiles do not. Add it with `tools.alsoAllow: ["agents_list"]`. Its output
-  is scoped by `subagents.allowAgents`, so that list doubles as the roster the
-  planner may assign to (and, if it can spawn at all, the only spawn targets).
-- **Assignment**: `backlog_assign` is gated server-side by `WINCH_ASSIGNERS`
-  (agent ids or `harness:agent`). Empty means nobody may assign. The tool
-  refuses to steal a live claim, and writes a `task.assigned` event whose
-  from/to status are equal — assignment never fabricates a transition.
+A planner uses two things together:
+
+- **Roster**: `agents_list` is exposed only to agents whose tool policy
+  includes `group:agents` — `coding`, `messaging` and `minimal` do not. Add it
+  with `tools.alsoAllow: ["agents_list"]`. Its output is scoped by
+  `subagents.allowAgents`, which therefore doubles as the assignable fleet.
+- **Assignment**: `backlog_assign(taskId, agent?, capabilities?)` sets or
+  clears the assignee. It refuses to steal a live claim and writes a
+  `task.assigned` event whose from/to status are equal — assignment never
+  fabricates a transition.
 
 ```json5
-// planner agent: read the roster, no shell, no spawn
+// planner agent: read the roster, assign by id, no shell, no spawn
 { tools: { profile: "messaging", alsoAllow: ["agents_list", "read"],
            deny: ["group:sessions", "exec", "write", "edit", "apply_patch",
                   "process", "browser", "gateway", "cron", "message"] },
   subagents: { allowAgents: ["tester", "content-writer", "scorer"] } }
-```
-
-```
-# winch server side
-WINCH_ASSIGNERS=atlas winch serve --mcp http --port 38292
 ```
 
 ## generic MCP clients

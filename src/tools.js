@@ -116,8 +116,7 @@ export function createToolHandlers(store, logger) {
     {
       name: "backlog_assign",
       description:
-        "Planner-only: set (or clear) the assignee of a task so the right specialist claims it. " +
-        "Gated by the server's assigner allowlist — a caller not on it is refused as not_assigner. " +
+        "Set (or clear) the assignee of a task so the right agent claims it. " +
         "Refuses to reassign a task that is in_progress by someone else. Passing `agent: null` or \"\" clears it. " +
         "Optional `capabilities` replaces the task's capability tags.",
       inputSchema: {
@@ -306,19 +305,9 @@ export function createToolHandlers(store, logger) {
     },
 
     async backlog_assign(args, identity, cfg) {
-      // Planner privilege, not a claimant right: the server names who may
-      // assign (WINCH_ASSIGNERS). Both bare agent ids and "harness:agent"
-      // entries match, so one harness's planner can be named without opening
-      // the tool to another harness's agent of the same name.
-      const allowed = Array.isArray(cfg.assigners) ? cfg.assigners : [];
+      // Like every other tool: availability is the host's tool policy, and
+      // the caller is attributed by identity. No server-side allowlist.
       const qualified = `${identity.harness}:${identity.agent}`;
-      if (!allowed.includes(identity.agent) && !allowed.includes(qualified)) {
-        return err(
-          `backlog_assign: ${qualified} is not an assigner (server allows: ${allowed.length ? allowed.join(", ") : "none"}).`,
-          "not_assigner",
-          { agent: identity.agent }
-        );
-      }
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_assign: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
       try {

@@ -7,8 +7,7 @@ ready task for *this* agent, `backlog_claim` claims one named task by id,
 or silently loses the race to a concurrent
 claim), report through `backlog_update` / `backlog_done`, open human gates
 with `backlog_block` and resolve them with `backlog_resume`; a planner may
-direct work with `backlog_assign` (allowlisted per server, never a claimant
-right); a release/merge
+direct work with `backlog_assign`; a release/merge
 loop (`release-epic`, `merge-detect`) carries backlog markers through branch →
 PR → merge, and `serve --ws` streams every store event for subscribers to
 handle however they want.
@@ -172,7 +171,6 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | Claim webhook URL / bearer / timeout | `WINCH_CLAIM_WEBHOOK_URL` / `WINCH_CLAIM_WEBHOOK_BEARER` / `WINCH_CLAIM_WEBHOOK_TIMEOUT_MS` | unset / unset / 3000 ms |
 | Claim webhooks per harness (map) | `WINCH_CLAIM_WEBHOOKS` (`{"openclaw":{"url":"…","bearer":"…"}}`) | `{}` (falls back to single URL) |
-| Assigners (agent ids or `harness:agent`) | `WINCH_ASSIGNERS` (`"atlas,openclaw:planner"`) | `[]` — `backlog_assign` refused for everyone |
 | Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
