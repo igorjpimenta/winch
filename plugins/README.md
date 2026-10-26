@@ -162,31 +162,6 @@ declared harness/agent/session says *whose work* this is.
 | langgraph | stdio entry in `mcpServers` | SSE/HTTP transport entry per its adapter | the adapter's header/auth config |
 | claude | `claude mcp add winch --env WINCH_HARNESS=generic -- winch serve --mcp stdio` | `claude mcp add --transport http <name> <url> -H "Authorization: Bearer …"` | the `-H` flags, stored in its config |
 
-## Planner role (assigning rather than claiming)
-
-`backlog_assign` is one more backlog tool: any caller the host permits may use
-it, attributed by identity like the rest. Which agents get it is decided on the
-host side (tool policy), not by winch config.
-
-A planner uses two things together:
-
-- **Roster**: `agents_list` is exposed only to agents whose tool policy
-  includes `group:agents` — `coding`, `messaging` and `minimal` do not. Add it
-  with `tools.alsoAllow: ["agents_list"]`. Its output is scoped by
-  `subagents.allowAgents`, which therefore doubles as the assignable fleet.
-- **Assignment**: `backlog_assign(taskId, agent?, capabilities?)` sets or
-  clears the assignee. It refuses to steal a live claim and writes a
-  `task.assigned` event whose from/to status are equal — assignment never
-  fabricates a transition.
-
-```json5
-// planner agent: read the roster, assign by id, no shell, no spawn
-{ tools: { profile: "messaging", alsoAllow: ["agents_list", "read"],
-           deny: ["group:sessions", "exec", "write", "edit", "apply_patch",
-                  "process", "browser", "gateway", "cron", "message"] },
-  subagents: { allowAgents: ["tester", "content-writer", "scorer"] } }
-```
-
 ## generic MCP clients
 
 
