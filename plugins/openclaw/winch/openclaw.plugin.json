@@ -3,6 +3,9 @@
   "name": "Winch",
   "description": "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls, receives claim webhooks, and opens a fresh session per attributed task.",
   "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": true,

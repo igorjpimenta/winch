@@ -33,3 +33,12 @@ test("the adapter is publishable as its own openclaw plugin package", () => {
   assert.ok(existsSync(path.join(dir, "openclaw.plugin.json")));
   assert.equal(pkg.private, undefined, "publishable, not a private workspace package");
 });
+
+// Omitting onStartup no longer startup-loads a plugin: without it the host
+// skips register(), so the claim route and services never bind.
+test("the adapter opts into startup activation", () => {
+  const manifest = JSON.parse(
+    readFileSync(path.join(root, "plugins/openclaw/winch/openclaw.plugin.json"), "utf8")
+  );
+  assert.equal(manifest.activation?.onStartup, true);
+});
