@@ -65,6 +65,16 @@ test("set failure never throws; returns manual command", async () => {
   assert.match(r.manual, /winch webhook set/);
 });
 
+test("a .js bin path runs under the current node", async () => {
+  const calls = [];
+  const { api } = apiWith({ webhookBearer: "s", webhookPublicBaseUrl: "http://h:1", webhookWinchBin: "/opt/pkg/bin/winch.js" });
+  const r = await autoregister({ api, runner: okRunner(calls) });
+  assert.deepEqual(r, { ok: true });
+  assert.equal(calls[0][0], process.execPath);
+  assert.equal(calls[0][1], "/opt/pkg/bin/winch.js");
+  assert.deepEqual(calls[0].slice(2), ["webhook", "set", "--harness", "openclaw", "--url", "http://h:1/api/winch/claimed", "--bearer", "s"]);
+});
+
 test("config: gateway port fallback, harness and bin overrides", () => {
   const c = autoregisterConfig({ webhookBearer: "s" }, { gateway: { port: 9999 } });
   assert.equal(c.baseUrl, "http://127.0.0.1:9999");

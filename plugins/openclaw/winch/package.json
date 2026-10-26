@@ -1,10 +1,35 @@
 {
-  "name": "winch",
-  "private": true,
+  "name": "@igorjpimenta/winch-openclaw",
+  "version": "2026.10.26-beta.1",
+  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives claim webhooks, and opens a fresh session per attributed task.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorjpimenta/winch.git",
+    "directory": "plugins/openclaw/winch"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "files": [
+    "index.js",
+    "meta.js",
+    "webhook.js",
+    "autoregister.js",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
   "openclaw": {
     "extensions": ["./index.js"],
     "install": {
       "minHostVersion": ">=2026.5.18"
     }
+  },
+  "dependencies": {
+    "@igorjpimenta/winch": "^2026.10.26-beta.1"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.18"
   }
 }

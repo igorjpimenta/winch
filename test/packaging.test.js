@@ -20,3 +20,16 @@ test("the openclaw adapter keeps its own manifest and id", () => {
   );
   assert.equal(manifest.id, "winch");
 });
+
+// The adapter ships as its own npm package (@igorjpimenta/winch-openclaw), so
+// the plugin manifest lives at THAT package's root — the core package stays
+// harness-free. `openclaw plugins install` reads these two fields.
+test("the adapter is publishable as its own openclaw plugin package", () => {
+  const dir = path.join(root, "plugins/openclaw/winch");
+  const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  assert.equal(pkg.name, "@igorjpimenta/winch-openclaw");
+  assert.deepEqual(pkg.openclaw?.extensions, ["./index.js"]);
+  assert.ok(pkg.files.includes("openclaw.plugin.json"), "plugin manifest ships in the tarball");
+  assert.ok(existsSync(path.join(dir, "openclaw.plugin.json")));
+  assert.equal(pkg.private, undefined, "publishable, not a private workspace package");
+});

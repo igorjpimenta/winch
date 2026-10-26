@@ -1,6 +1,32 @@
 {
   "id": "winch",
   "name": "Winch",
+  "description": "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls, receives claim webhooks, and opens a fresh session per attributed task.",
   "enabledByDefault": true,
-  "configSchema": {}
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "webhookBearer": {
+        "type": "string",
+        "description": "Shared secret winch must send as Authorization: Bearer on POST /api/winch/claimed. Route stays disarmed (503) until set."
+      },
+      "webhookPublicBaseUrl": {
+        "type": "string",
+        "description": "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used by self-registration to build the route URL."
+      },
+      "webhookHarness": {
+        "type": "string",
+        "description": "Harness name registered in winch (must match WINCH_HARNESS). Default: openclaw."
+      },
+      "webhookAutoregister": {
+        "type": "boolean",
+        "description": "Register the route URL in winch on boot. Default true when webhookBearer is set."
+      },
+      "webhookWinchBin": {
+        "type": "string",
+        "description": "Winch binary for self-registration (default: WINCH_BIN env or `winch` on PATH)."
+      }
+    }
+  }
 }

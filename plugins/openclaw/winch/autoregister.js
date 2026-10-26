@@ -13,6 +13,9 @@
 
 import { execFile as execFileCb } from "node:child_process";
 
+// The `winch` used here is the same one the harness's MCP entry spawns, so
+// both talk to the same store: explicit config → WINCH_BIN → PATH. The
+// package dependency only pins the server version that ships alongside.
 export function autoregisterConfig(pluginConfig = {}, apiConfig = {}) {
   const bearer = pluginConfig.webhookBearer ?? pluginConfig.webhook?.bearer ?? "";
   const baseUrl =
@@ -20,7 +23,11 @@ export function autoregisterConfig(pluginConfig = {}, apiConfig = {}) {
     pluginConfig.webhook?.publicBaseUrl ??
     (apiConfig?.gateway?.port ? `http://127.0.0.1:${apiConfig.gateway.port}` : null);
   const harness = pluginConfig.webhookHarness ?? pluginConfig.webhook?.harness ?? "openclaw";
-  const winchBin = pluginConfig.webhookWinchBin ?? pluginConfig.webhook?.winchBin ?? process.env.WINCH_BIN ?? "winch";
+  const winchBin =
+    pluginConfig.webhookWinchBin ??
+    pluginConfig.webhook?.winchBin ??
+    process.env.WINCH_BIN ??
+    "winch";
   const enabled = pluginConfig.webhookAutoregister ?? pluginConfig.webhook?.autoregister ?? true;
   return { bearer, baseUrl, harness, winchBin, enabled };
 }
@@ -30,10 +37,19 @@ export function manualCommand({ baseUrl, harness, bearer }) {
   return `winch webhook set --harness ${harness} --url ${url} --bearer ${bearer ? "<secret>" : "<same-as-webhookBearer>"}`;
 }
 
+// A .js target is the bundled bin (no PATH shim needed): run it with the
+// current Node. A bare name stays a PATH lookup.
+function invocation(winchBin, args) {
+  return winchBin.endsWith(".js")
+    ? { bin: process.execPath, argv: [winchBin, ...args] }
+    : { bin: winchBin, argv: args };
+}
+
 function runBin(winchBin, args, runner) {
+  const { bin, argv } = invocation(winchBin, args);
   return new Promise((resolve) => {
-    const run = runner ?? ((bin, argv, cb) => execFileCb(bin, argv, { timeout: 15000 }, cb));
-    run(winchBin, args, (err, stdout, stderr) => {
+    const run = runner ?? ((b, a, cb) => execFileCb(b, a, { timeout: 15000 }, cb));
+    run(bin, argv, (err, stdout, stderr) => {
       if (err) resolve({ ok: false, error: (stderr || err.message || String(err)).trim().slice(0, 300) });
       else resolve({ ok: true, output: String(stdout || "").trim().slice(0, 500) });
     });
