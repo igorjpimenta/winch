@@ -305,6 +305,41 @@ test("backlog_claim dryRun reports the named task without claiming", async () =>
   assert.equal(store.task.get(task.id).assigned, null);
 });
 
+test("backlog_task_get returns the full record a worker needs, without claiming", async () => {
+  const epic = store.epic.create({ title: "E-get", description: "epic body", acceptance: "EP-AC", status: "planned", priority: 80 });
+  const story = store.story.create({ epicId: epic.id, title: "S-get", description: "story body", acceptance: "AC-get", status: "ready", priority: 70 });
+  const task = store.task.create({ storyId: story.id, title: "T-get", description: "task body", status: "todo", executionKind: "cli" });
+  const res = await call("backlog_task_get", { taskId: task.id });
+  assert.equal(res.details.status, "ok");
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.task.description, "task body");
+  assert.equal(body.story.acceptance, "AC-get");
+  assert.equal(body.story.description, "story body");
+  assert.equal(body.epic.id, epic.id);
+  assert.equal(body.readiness.ready, true);
+  assert.deepEqual(body.readiness.blockers, []);
+  assert.match(body.brief, /AC-get/);
+  assert.equal(store.task.get(task.id).status, "todo");
+  assert.equal(store.task.get(task.id).assigned, null);
+});
+
+test("backlog_task_get explains why a task is not ready for this agent", async () => {
+  const epic = store.epic.create({ title: "E-get2", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S-get2", status: "ready", acceptance: "AC-2" });
+  const dep = store.task.create({ storyId: story.id, title: "T-dep", status: "todo", executionKind: "manual" });
+  const task = store.task.create({ storyId: story.id, title: "T-blocked", status: "todo", executionKind: "manual", capabilities: ["gpu"] });
+  const { addDep } = await import("../src/deps.js");
+  assert.ok(addDep(store, task.id, dep.id).ok);
+  const res = await call("backlog_task_get", { taskId: task.id, capabilities: ["gpu"] }, { harness: "test", agent: "someone-else", session: "s" });
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.readiness.ready, false);
+  assert.ok(body.readiness.blockers.includes("task dependencies unresolved"));
+  assert.equal(body.dependencies[0].id, dep.id);
+  assert.equal(body.dependencies[0].status, "todo");
+  const missing = await call("backlog_task_get", { taskId: "TASK-nope" });
+  assert.equal(missing.details.reason, "not_found");
+});
+
 test("backlog_claim honors the capabilities filter", async () => {
   const epic = store.epic.create({ title: "E3", status: "planned" });
   const story = store.story.create({ epicId: epic.id, title: "S3", status: "ready" });

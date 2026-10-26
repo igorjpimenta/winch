@@ -10,7 +10,7 @@
 // next candidate — there is no blocking wait inside a tool call.
 
 import { readyTasks } from "./ready-queue.js";
-import { addDep } from "./deps.js";
+import { addDep, depsResolved } from "./deps.js";
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 import { resolveRequestConfig } from "./config.js";
 import { notifyClaim, claimPayload } from "./claim-webhook.js";
@@ -130,6 +130,26 @@ export function createToolHandlers(store, logger) {
             type: "array",
             items: { type: "string" },
             description: "Capability tags the task requires; replaces existing tags.",
+          },
+        },
+      },
+    },
+    {
+      name: "backlog_task_get",
+      description:
+        "Read ONE task with everything needed to do it, without claiming: task payload (title, description, execution args), " +
+        "parent story (description, acceptance criteria), epic, upstream artifacts, dependency state and readiness. " +
+        "A worker woken with a task id calls this first; the record is the spec, no brief is sent.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId"],
+        properties: {
+          taskId: { type: "string", description: "Task id (TASK-…)." },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Capability tags this agent offers; used to report readiness, never to filter the read.",
           },
         },
       },
@@ -324,6 +344,60 @@ export function createToolHandlers(store, logger) {
         );
       } catch (e) {
         return err(`backlog_assign failed: ${e?.message}`, "rejected", { taskId: task.id });
+      }
+    },
+
+    async backlog_task_get(args, identity, cfg) {
+      const task = store.task.get(args?.taskId);
+      if (!task) return err(`backlog_task_get: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
+      try {
+        const story = store.story.get(task.story_id);
+        const epic = story ? store.epic.get(story.epic_id) : null;
+        const artifacts = story ? collectStoryArtifacts(store, story.id) : [];
+        const requiredCaps = Array.isArray(task.capabilities) && task.capabilities.length > 0
+          ? task.capabilities
+          : Array.isArray(story?.capabilities) && story.capabilities.length > 0 ? story.capabilities : [];
+        const offered = Array.isArray(args?.capabilities) ? args.capabilities : [];
+        const deps = store.dep.listOutgoing(task.id).map((e) => {
+          const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[e.to_kind](e.to_id);
+          return { kind: e.to_kind, id: e.to_id, status: item?.status ?? null };
+        });
+        // Readiness mirrors ready-queue.js so a worker can tell "not mine" from
+        // "not yet" without guessing; the read itself is never filtered.
+        const blockers = [];
+        if (task.status !== "todo") blockers.push(`task is ${task.status}`);
+        if (!story) blockers.push("story missing");
+        else if (story.status !== "ready" && story.status !== "in_progress") blockers.push(`story is ${story.status}`);
+        if (!epic) blockers.push("epic missing");
+        else if (epic.status !== "planned" && epic.status !== "in_progress") blockers.push(`epic is ${epic.status}`);
+        if (!depsResolved(store, task.id)) blockers.push("task dependencies unresolved");
+        if (task.assigned && task.assigned !== identity.agent) blockers.push(`assigned to ${task.assigned}`);
+        if (offered.length > 0 && requiredCaps.length > 0 && !offered.some((c) => requiredCaps.includes(c))) {
+          blockers.push(`requires [${requiredCaps.join(", ")}]`);
+        }
+        const recentEvents = store.db
+          .prepare("SELECT id, kind, actor, note, at FROM events WHERE task_id=? ORDER BY id DESC LIMIT 10")
+          .all(task.id);
+        return ok(
+          JSON.stringify({
+            task,
+            story: story
+              ? { id: story.id, title: story.title, description: story.description, acceptance: story.acceptance, status: story.status, priority: story.priority }
+              : null,
+            epic: epic
+              ? { id: epic.id, title: epic.title, description: epic.description, acceptance: epic.acceptance, status: epic.status, priority: epic.priority }
+              : null,
+            artifacts,
+            dependencies: deps,
+            readiness: { ready: blockers.length === 0, blockers, requiresCapabilities: requiredCaps, assignedTo: task.assigned ?? null },
+            recentEvents,
+            brief: story ? renderReceiverPrompt({ task, story, epic, artifacts }) : null,
+          }),
+          { status: "ok", agentId: identity.agent, taskId: task.id }
+        );
+      } catch (e) {
+        logger?.warn?.(`backlog_task_get failed: ${e?.message}`);
+        return err(`backlog_task_get failed: ${e?.message}`, "error");
       }
     },
 
