@@ -1,12 +1,14 @@
-# Publish @igorjpimenta/winch to GitHub Packages on version tags.
-# Flow: bump version in package.json → commit → `git tag <version>` → push
-# tag. The tag IS the release pattern: 2026.10.22 ships stable (`latest`),
-# 2026.10.22-beta.0 ships beta (no v prefix — bare, matching repo habit).
-# Anything else fails the run.
-# Consumers: stable via `npm install -g @igorjpimenta/winch`, beta via
-# `npm install -g @igorjpimenta/winch@beta` (.npmrc scope at
-# npm.pkg.github.com, see README "Install / run").
-# GITHUB_TOKEN has packages:write via `packages` permission below.
+# Publish both packages to GitHub Packages.
+#
+# Two independent release lines, each a bare tag (no v prefix):
+#   - `<semver>`            → @igorjpimenta/winch            (core MCP server)
+#   - `winch-openclaw-<semver>` → @igorjpimenta/winch-openclaw (OpenClaw plugin)
+# Each job validates that the tag matches the version in its own package.json
+# and publishes stable to `latest`, prerelease to `beta`. Anything else fails.
+#
+# Consumers need an .npmrc scope line at npm.pkg.github.com, e.g.
+#   @igorjpimenta:registry=https://npm.pkg.github.com
+# GITHUB_TOKEN has packages:write via the `packages` permission below.
 
 name: publish
 
@@ -14,13 +16,15 @@ on:
   push:
     tags:
       - "[0-9]*"
+      - "winch-openclaw-[0-9]*"
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  publish:
+  core:
+    if: startsWith(github.ref_name, 'winch-openclaw-') == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +46,40 @@ jobs:
           PKG="$(node -p "require('./package.json').version")"
           if [ "$TAG" != "$PKG" ]; then
             echo "::error::tag $GITHUB_REF_NAME != package.json $PKG — bump package.json first"
+            exit 1
+          fi
+          case "$TAG" in
+            *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
+            * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - run: npm publish --tag ${{ steps.channel.outputs.tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  openclaw:
+    if: startsWith(github.ref_name, 'winch-openclaw-')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/openclaw/winch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@igorjpimenta"
+      - name: Resolve channel (stable vs beta)
+        id: channel
+        run: |
+          TAG="${GITHUB_REF_NAME#winch-openclaw-}"
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag $GITHUB_REF_NAME is not release pattern winch-openclaw-<semver>[-prerelease]"
+            exit 1
+          fi
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME != plugin package.json $PKG — bump it first"
             exit 1
           fi
           case "$TAG" in
