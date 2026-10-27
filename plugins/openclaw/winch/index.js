@@ -3,6 +3,8 @@ import { buildWinchMeta } from "./meta.js";
 import { registerClaimWebhook, registerClaimHeartbeat } from "./webhook.js";
 import { autoregister } from "./autoregister.js";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { createRouter, defaultStatePath, startDispatchClient, DEFAULT_WS_URL } from "./dispatch.js";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
@@ -63,6 +65,10 @@ export default definePluginEntry({
         type: "string",
         description: "File remembering reviewed epics across restarts (default: ~/.openclaw/state/winch-plugin-dispatch.json).",
       },
+      dispatchOpenclawBin: {
+        type: "string",
+        description: "OpenClaw CLI entry used to start a wake session (default: the shim beside the gateway entry).",
+      },
     },
   }),
   register: (api) => {
@@ -93,9 +99,15 @@ export default definePluginEntry({
           }
           // scheduleSessionTurn only commits for bundled plugins (the host
           // returns undefined otherwise), so an npm-installed adapter wakes by
-          // starting a one-shot agent session through the CLI — same entry the
-          // gateway itself was launched from, detached from this process.
-          const entry = process.argv[1];
+          // starting a one-shot agent session through the CLI. The gateway's
+          // own argv[1] is the internal dist entry, which has no `agent`
+          // subcommand: resolve the package's CLI shim beside it.
+          const candidates = [
+            cfg.dispatchOpenclawBin,
+            path.resolve(path.dirname(process.argv[1] ?? ""), "..", "openclaw.mjs"),
+            "/opt/homebrew/bin/openclaw",
+          ].filter(Boolean);
+          const entry = candidates.find((c) => { try { return existsSync(c); } catch { return false; } }) ?? candidates[0];
           const wake = ({ agent, message }) =>
             new Promise((resolve, reject) => {
               const args = [
