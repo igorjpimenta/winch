@@ -74,12 +74,23 @@ returns `undefined`; the call reaches the server unstamped and is refused
 ## Assignment dispatch (wake on routing)
 
 An assigned task is inert until someone starts the assignee's session, and a
-worker must never receive a hand-written brief: the record is the spec. The
-harness subscribes to `winch serve --ws` and, on a `task.assigned` row whose
-task is still `todo`, starts the assignee with nothing but the id
-(`winch-claim-<TASK-ID>` style one-shot session, prompt = `TASK-…`). The
-worker's own instructions tell it to call `backlog_get` first, then
-`backlog_claim`; no prose is authored per task.
+worker must never receive a hand-written brief: the record is the spec.
+
+The plugin does this itself: it follows `winch serve --ws` (config
+`dispatchWsUrl`, default `ws://127.0.0.1:38291`), and for each routable row
+opens a one-shot session whose message is just the item id — `TASK-…` to claim,
+`STORY-…` to break down, `EPIC-…` to review. Sessions are named
+`winch-task-<id>`, `winch-story-<id>`, `winch-epic-<id>`, tagged
+`winch-dispatch`, and deleted after the turn. Config: `dispatchEnabled`
+(default true), `dispatchPlanner` (fallback: atlas), `dispatchStatePath`
+(reviewed epics across restarts).
+
+Routing, one row per decision:
+
+- `task.assigned` → the assignee (never the planner itself)
+- `story.assigned` → the story owner, to append its tasks
+- `task.appended` → the epic's creator, to route the new work
+- `epic.completed` → the epic's creator, to review the delivery
 
 Two more rows matter to the dispatcher:
 
@@ -98,9 +109,10 @@ Two more rows matter to the dispatcher:
   epic) or reports it done. Act on each epic once, not on every replay.
 
 Dispatch is event-driven, never polled: `serve --ws` replays backlog history
-on connect (`{"type":"history"}`), so a restarted dispatcher catches up
-without a timer. Keep one dispatcher per harness and let it track in-flight
-task ids; the claim lease remains the real guard against double work.
+on connect (`{"type":"history"}`), so a restarted gateway catches up without a
+timer. A task wake is suppressed for 35 minutes and an epic review happens
+once per epic (remembered in `dispatchStatePath`); the claim lease remains the
+real guard against double work.
 
 ## Claim webhook (wake on attribution)
 

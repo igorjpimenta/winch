@@ -136,6 +136,23 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
   assert.equal(live.task.title, "T");
 });
 
+test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
+  const epic = store.epic.create({ title: "E", status: "planned", createdBy: "atlas" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
+  store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+    .run(story.id, "story", "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
+  const row = store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT 1").get();
+  const { toEventMessage } = await import("../../src/events-ws.js");
+  const msg = toEventMessage(store, row);
+  assert.equal(msg.kind, "story.assigned");
+  assert.equal(msg.item.kind, "story");
+  assert.equal(msg.item.id, story.id);
+  assert.equal(msg.item.assigned, "tester");
+  assert.equal(msg.epicId, epic.id);
+  assert.equal(msg.epicCreatedBy, "atlas");
+  assert.equal(msg.task, null);
+});
+
 test("history and live rows share one envelope", async () => {
   seedEvent();
   srv = await startEventServer({ store, port: 0, intervalMs: 50 });

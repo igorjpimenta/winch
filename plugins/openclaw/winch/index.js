@@ -2,6 +2,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
 import { registerClaimWebhook, registerClaimHeartbeat } from "./webhook.js";
 import { autoregister } from "./autoregister.js";
+import { createRouter, defaultStatePath, startDispatchClient, DEFAULT_WS_URL } from "./dispatch.js";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
 // a full replacement of event.params with _meta.winch set unconditionally on
@@ -45,6 +46,22 @@ export default definePluginEntry({
         type: "string",
         description: "Winch binary for self-registration (default: WINCH_BIN env or `winch` on PATH). Must share the store the harness claims from.",
       },
+      dispatchEnabled: {
+        type: "boolean",
+        description: "Wake agents from winch events (assignments, appended work, epic reviews). Default true.",
+      },
+      dispatchWsUrl: {
+        type: "string",
+        description: "Event stream to follow, e.g. ws://127.0.0.1:38291 (default: that).",
+      },
+      dispatchPlanner: {
+        type: "string",
+        description: "Fallback planner for rows without a recorded creator (default: atlas).",
+      },
+      dispatchStatePath: {
+        type: "string",
+        description: "File remembering reviewed epics across restarts (default: ~/.openclaw/state/winch-plugin-dispatch.json).",
+      },
     },
   }),
   register: (api) => {
@@ -63,6 +80,45 @@ export default definePluginEntry({
         },
       });
     }
-    api.logger.info("winch: registered (identity stamp + claim webhook + autoregister)");
+    let dispatch = null;
+    if (typeof api.registerService === "function") {
+      api.registerService({
+        id: "winch-dispatch",
+        start: async () => {
+          const cfg = api.pluginConfig ?? {};
+          if (cfg.dispatchEnabled === false) {
+            api.logger.info("winch: dispatch disabled by config");
+            return;
+          }
+          const workflow = api.session?.workflow;
+          const router = createRouter({
+            planner: cfg.dispatchPlanner ?? "atlas",
+            statePath: cfg.dispatchStatePath ?? defaultStatePath(),
+            logger: api.logger,
+            wake: async ({ agent, sessionKey, message }) => {
+              if (typeof workflow?.scheduleSessionTurn !== "function") {
+                throw new Error("gateway session workflow unavailable");
+              }
+              const h = await workflow.scheduleSessionTurn({
+                sessionKey,
+                message,
+                agentId: agent,
+                delayMs: 0,
+                deleteAfterRun: true,
+                tag: "winch-dispatch",
+                name: `winch ${message}`,
+              });
+              if (!h) throw new Error(`could not schedule ${sessionKey}`);
+            },
+          });
+          dispatch = startDispatchClient({ url: cfg.dispatchWsUrl ?? DEFAULT_WS_URL, router, logger: api.logger });
+        },
+        stop: async () => {
+          dispatch?.close();
+          dispatch = null;
+        },
+      });
+    }
+    api.logger.info("winch: registered (identity stamp + claim webhook + dispatch + autoregister)");
   },
 });

@@ -1,7 +1,7 @@
 {
   "id": "winch",
   "name": "Winch",
-  "description": "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls, receives claim webhooks, and opens a fresh session per attributed task.",
+  "description": "Stamps _meta.winch onto tool calls, receives claim webhooks, and wakes agents from the winch event stream.",
   "enabledByDefault": true,
   "activation": {
     "onStartup": true
@@ -29,6 +29,22 @@
       "webhookWinchBin": {
         "type": "string",
         "description": "Winch binary for self-registration (default: WINCH_BIN env or `winch` on PATH)."
+      },
+      "dispatchEnabled": {
+        "type": "boolean",
+        "description": "Wake agents from winch events (assignments, appended work, epic reviews). Default true."
+      },
+      "dispatchWsUrl": {
+        "type": "string",
+        "description": "Event stream to follow, e.g. ws://127.0.0.1:38291 (default: that)."
+      },
+      "dispatchPlanner": {
+        "type": "string",
+        "description": "Fallback planner for rows without a recorded creator (default: atlas)."
+      },
+      "dispatchStatePath": {
+        "type": "string",
+        "description": "File remembering reviewed epics across restarts (default: ~/.openclaw/state/winch-plugin-dispatch.json)."
       }
     }
   }
