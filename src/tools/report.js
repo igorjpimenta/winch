@@ -45,19 +45,33 @@ export function createReportTools({ store, logger }) {
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
         const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
         const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done", sessionKey });
-        // Close the loop at epic scope: the planner reviews what was delivered
-        // rather than each task as it lands. One marker per epic, so a
-        // dispatcher can wake on the row instead of counting on every close.
+        // Close upward, one level at a time: a story closes when its last task
+        // does, and the epic closes only when its last story does. The epic
+        // row is what wakes its creator to review the delivery.
+        const actor = `${identity.harness}:${identity.agent}`;
         const story = store.story.get(task.story_id);
+        let storyClosed = false;
+        if (story && story.status !== "done" && story.status !== "cancelled") {
+          const openTasks = store.db.prepare(
+            "SELECT COUNT(*) AS n FROM tasks WHERE story_id=? AND status NOT IN ('done','cancelled')"
+          ).get(story.id).n;
+          if (openTasks === 0) {
+            store.story.update(story.id, { status: "done" });
+            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+              .run(story.id, "story", story.status, "done", "story.completed", actor, story.id, Date.now());
+            storyClosed = true;
+          }
+        }
         const epicId = story?.epic_id;
-        if (epicId) {
-          const open = store.db.prepare(
-            "SELECT COUNT(*) AS n FROM tasks t JOIN stories s ON s.id=t.story_id WHERE s.epic_id=? AND t.status NOT IN ('done','cancelled')"
+        if (storyClosed && epicId) {
+          const openStories = store.db.prepare(
+            "SELECT COUNT(*) AS n FROM stories WHERE epic_id=? AND status NOT IN ('done','cancelled')"
           ).get(epicId).n;
           const marked = store.db.prepare("SELECT 1 FROM events WHERE kind='epic.completed' AND note=?").get(epicId);
-          if (open === 0 && !marked) {
-            store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-              .run(task.id, "done", "done", "epic.completed", `${identity.harness}:${identity.agent}`, epicId, Date.now());
+          if (openStories === 0 && !marked) {
+            store.epic.update(epicId, { status: "done" });
+            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+              .run(epicId, "epic", "in_progress", "done", "epic.completed", actor, epicId, Date.now());
           }
         }
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
