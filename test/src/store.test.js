@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore, MAX_ATTEMPTS } from "../src/store.js";
-import { kindForEvent } from "../src/events-ws.js";
+import { createStore, MAX_ATTEMPTS } from "../../src/store.js";
+import { kindForEvent } from "../../src/events-ws.js";
 import Database from "better-sqlite3";
 
 function tempDb() {

@@ -6,9 +6,9 @@ import http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../src/store.js";
-import { createToolHandlers } from "../src/tools.js";
-import { webhookConfig, claimPayload, notifyClaim } from "../src/claim-webhook.js";
+import { createStore } from "../../src/store.js";
+import { createToolHandlers } from "../../src/tools.js";
+import { webhookConfig, claimPayload, notifyClaim } from "../../src/claim-webhook.js";
 
 function freshStore(config = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "backlog-hook-"));
@@ -50,7 +50,7 @@ test("webhookConfig routes per harness, falls back to single, else disabled", ()
 });
 
 test("claimWebhooks knob parses JSON env and refuses malformed maps", async () => {
-  const { resolveConfig } = await import("../src/config.js");
+  const { resolveConfig } = await import("../../src/config.js");
   const cfg = resolveConfig({
     explicit: {},
     env: { WINCH_CLAIM_WEBHOOKS: '{"openclaw":{"url":"http://oc/h"}}' },

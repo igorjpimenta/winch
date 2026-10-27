@@ -3,7 +3,7 @@
 // unstamped or reserved agent/session. Nothing defaults anywhere.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey } from "../src/identity.js";
+import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey } from "../../src/identity.js";
 
 const BASE = { harness: "langgraph" };
 

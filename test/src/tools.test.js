@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../src/store.js";
-import { createToolHandlers } from "../src/tools.js";
-import { resolveIdentity, identitySessionKey } from "../src/identity.js";
+import { createStore } from "../../src/store.js";
+import { createToolHandlers } from "../../src/tools.js";
+import { resolveIdentity, identitySessionKey } from "../../src/identity.js";
 
 let dir, store, handle;
 
@@ -288,7 +288,7 @@ test("backlog_claim refuses unknown, non-todo, and not-ready ids distinctly", as
   const story = store.story.create({ epicId: epic.id, title: "S2", status: "ready" });
   const t1 = store.task.create({ storyId: story.id, title: "T1", status: "todo", executionKind: "manual" });
   const t2 = store.task.create({ storyId: story.id, title: "T2", status: "todo", executionKind: "manual" });
-  const { addDep } = await import("../src/deps.js");
+  const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, t2.id, t1.id).ok);
   const gated = await call("backlog_claim", { taskId: t2.id });
   assert.equal(gated.details.reason, "not_ready");
@@ -328,7 +328,7 @@ test("backlog_task_get explains why a task is not ready for this agent", async (
   const story = store.story.create({ epicId: epic.id, title: "S-get2", status: "ready", acceptance: "AC-2" });
   const dep = store.task.create({ storyId: story.id, title: "T-dep", status: "todo", executionKind: "manual" });
   const task = store.task.create({ storyId: story.id, title: "T-blocked", status: "todo", executionKind: "manual", capabilities: ["gpu"] });
-  const { addDep } = await import("../src/deps.js");
+  const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, task.id, dep.id).ok);
   const res = await call("backlog_task_get", { taskId: task.id, capabilities: ["gpu"] }, { harness: "test", agent: "someone-else", session: "s" });
   const body = JSON.parse(res.content[0].text);
@@ -415,7 +415,7 @@ test("backlog_done stamps session_ref on the completion event", async () => {
 });
 
 test("TOOL_DEFS exposes backlog_claim alongside the five existing tools", async () => {
-  const { createToolHandlers: make } = await import("../src/tools.js");
+  const { createToolHandlers: make } = await import("../../src/tools.js");
   const { TOOL_DEFS } = make(store, null);
   const names = TOOL_DEFS.map((d) => d.name);
   for (const n of ["backlog_next", "backlog_claim", "backlog_update", "backlog_done", "backlog_block", "backlog_resume"]) {

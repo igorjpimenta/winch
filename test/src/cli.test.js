@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-const root = path.join(import.meta.dirname, "..");
+const root = path.join(import.meta.dirname, "..", "..");
 
 function run(...args) {
   return spawnSync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
