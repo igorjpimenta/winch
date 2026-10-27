@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `item_kind` text DEFAULT 'task' NOT NULL;

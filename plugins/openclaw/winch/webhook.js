@@ -79,7 +79,7 @@ export function claimSessionKey(taskId) {
 // the handoff as prompt context. Entries expire (stale nags are worse than
 // silence) and the map is capped; a fresh claim replaces an older one for
 // the same agent. In-memory only: claims live in winch, so a restart loses
-// nothing durable — the next backlog_next re-establishes the trail.
+// nothing durable — the next backlog_claim re-establishes the trail.
 export const PENDING_TTL_MS = 4 * 3600 * 1000;
 const MAX_PENDING = 50;
 const pendingClaims = new Map();
@@ -122,7 +122,7 @@ export function heartbeatContext(event, now = Date.now()) {
   const prompt = entry.body?.handoff?.receiverPrompt;
   const text = typeof prompt === "string" && prompt.trim() !== ""
     ? `Winch attributed ${taskId} to you while you were away. Start it now:\n${prompt}`
-    : `Winch attributed ${taskId} to you while you were away. Run backlog_next to review it.`;
+    : `Winch attributed ${taskId} to you while you were away. Run backlog_claim to review it.`;
   return { appendContext: text };
 }
 
@@ -213,7 +213,7 @@ export function registerClaimWebhook({ api, logger }) {
         }
       }
       // 2) Fallback: wake inside the claiming (existing) session — it
-      // definitely exists, since it just called backlog_next.
+      // definitely exists, since it just called backlog_claim.
       if (!scheduled && workflow && typeof workflow.scheduleSessionTurn === "function") {
         try {
           const h = await workflow.scheduleSessionTurn({

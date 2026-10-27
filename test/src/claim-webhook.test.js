@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../../src/store.js";
-import { createToolHandlers } from "../../src/tools.js";
+import { createToolHandlers } from "../../src/tools/index.js";
 import { webhookConfig, claimPayload, notifyClaim } from "../../src/claim-webhook.js";
 
 function freshStore(config = {}) {
@@ -167,7 +167,7 @@ test("claimPayload carries task, session triple and handoff", () => {
   assert.equal(p.handoff.receiverPrompt, "P");
 });
 
-test("backlog_next POSTs handoff on claim when configured", async () => {
+test("backlog_claim POSTs handoff on claim when configured", async () => {
   const received = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -184,7 +184,7 @@ test("backlog_next POSTs handoff on claim when configured", async () => {
   try {
     seed(store);
     const { handle } = createToolHandlers(store, null);
-    const r = await handle("backlog_next", {}, ID);
+    const r = await handle("backlog_claim", {}, ID);
     assert.match(r.content[0].text, /"status":"ok"|"task"/);
     assert.equal(received.length, 1);
     assert.equal(received[0].auth, "Bearer s3cret");
@@ -228,7 +228,7 @@ test("no webhook configured: claim succeeds silently", async () => {
   try {
     seed(store);
     const { handle } = createToolHandlers(store, null);
-    const r = await handle("backlog_next", {}, ID);
+    const r = await handle("backlog_claim", {}, ID);
     assert.doesNotMatch(r.content[0].text, /claim webhook/);
     assert.equal(r.details.status, "ok");
   } finally {

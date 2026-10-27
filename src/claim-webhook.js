@@ -1,6 +1,6 @@
 // claim-webhook.js — push claimed-task handoffs to a harness webhook.
 //
-// When backlog_next wins a CAS claim, the claiming agent often sits idle
+// When backlog_claim wins a CAS claim, the claiming agent often sits idle
 // waiting on its next heartbeat. If the operator configured a claim webhook
 // (WINCH_CLAIM_WEBHOOK_URL), the winch server POSTs the handoff the moment
 // the claim lands, so the harness can wake the agent — e.g. the openclaw

@@ -2,7 +2,7 @@
 // so it loads under `node --test` outside the openclaw gateway.
 
 // openclaw exposes MCP tools as mcp__<server>__<tool> (e.g.
-// mcp__winch__backlog_next); the substring match survives a prefix change.
+// mcp__winch__backlog_claim); the substring match survives a prefix change.
 export function isWinchTool(name) {
   return typeof name === "string" && name.includes("winch");
 }

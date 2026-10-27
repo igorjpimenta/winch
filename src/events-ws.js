@@ -14,7 +14,7 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
-import { collectStoryArtifacts } from "./tools.js";
+import { collectStoryArtifacts } from "./tools/index.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;

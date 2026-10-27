@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod/v4-mini";
-import { createToolHandlers } from "./tools.js";
+import { createToolHandlers } from "./tools/index.js";
 import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 import { toolErrorResult } from "./mcp.js";
 
