@@ -131,11 +131,15 @@ export default definePluginEntry({
               ]) delete env[key];
               const child = spawn(process.execPath, args, {
                 detached: true,
-                stdio: ["ignore", "ignore", "ignore"],
+                stdio: ["ignore", "ignore", "pipe"],
                 env,
               });
+              let stderr = "";
+              child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
               child.on("error", reject);
-              child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`wake exited ${code}`))));
+              child.on("exit", (code) =>
+                code === 0 ? resolve() : reject(new Error(`wake exited ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-3).join(" | ")}` : ""}`))
+              );
               child.unref();
             });
           const router = createRouter({
