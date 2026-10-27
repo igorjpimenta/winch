@@ -87,7 +87,11 @@ export const tasks = sqliteTable("tasks", {
 
 export const events = sqliteTable("events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  // Item-scoped audit log: task_id carries the id of the item the row is
+  // about, and item_kind says which (task for everything task-level; story
+  // for assignment of a story to an agent).
   taskId: text("task_id").notNull(),
+  itemKind: text("item_kind").notNull().default("task"),
   fromStatus: text("from_status"),
   toStatus: text("to_status").notNull(),
   // Declared by the producer at write time (openGate stamps gate.opened,

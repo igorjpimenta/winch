@@ -148,10 +148,10 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
   // Every status-changing caller writes its event row inside the same
   // transaction as the UPDATE — a status change committed without its event
   // desyncs the audit trail the sweeper and operators read.
-  function insertEvent({ taskId, fromStatus, toStatus, kind = null, actor, note, at, sessionRef }) {
+  function insertEvent({ taskId, itemKind = "task", fromStatus, toStatus, kind = null, actor, note, at, sessionRef }) {
     const r = db.prepare(`
-      INSERT INTO events(task_id, from_status, to_status, kind, actor, note, session_ref, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(taskId, fromStatus ?? null, toStatus, kind, actor ?? null, note ?? null, sessionRef ?? null, at);
+      INSERT INTO events(task_id, item_kind, from_status, to_status, kind, actor, note, session_ref, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(taskId, itemKind, fromStatus ?? null, toStatus, kind, actor ?? null, note ?? null, sessionRef ?? null, at);
     return Number(r.lastInsertRowid);
   }
 

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../../src/store.js";
-import { createToolHandlers } from "../../src/tools.js";
+import { createToolHandlers } from "../../src/tools/index.js";
 import { tick } from "../../src/watcher.js";
 
 let dir, store, handle;

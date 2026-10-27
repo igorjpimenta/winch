@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
-import { createToolHandlers } from "../../src/tools.js";
+import { createStore } from "../../../src/store.js";
+import { createToolHandlers } from "../../../src/tools/index.js";
 
 let dir, store, handle;
 
@@ -78,7 +78,7 @@ test("unknown task is refused without writing anything", async () => {
 
 test("a live claim cannot be reassigned out from under its worker", async () => {
   const task = seed();
-  await handle("backlog_next", {}, WORKER);
+  await handle("backlog_claim", {}, WORKER);
   assert.equal(store.task.get(task.id).status, "in_progress");
   const r = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, PLANNER);
   assert.equal(r.details.reason, "rejected");
@@ -88,8 +88,34 @@ test("a live claim cannot be reassigned out from under its worker", async () => 
 
 test("re-assigning a live task to its own worker is a no-op, not an error", async () => {
   const task = seed();
-  await handle("backlog_next", {}, WORKER);
+  await handle("backlog_claim", {}, WORKER);
   const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
   assert.equal(r.details.status, "ok");
   assert.equal(store.task.get(task.id).assigned, "tester");
+});
+
+test("a story can be assigned, and its owner is the one woken", async () => {
+  const epic = store.epic.create({ title: "E-story", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S-story", acceptance: "AC", status: "ready" });
+  const res = await handle("backlog_assign", { id: story.id, agent: "tester", capabilities: ["verify"] }, PLANNER);
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.level, "story");
+  assert.equal(store.story.get(story.id).assigned, "tester");
+  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.assigned'").all(story.id);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].item_kind, "story");
+});
+
+test("clearing a story assignee works and closed stories refuse assignment", async () => {
+  const epic = store.epic.create({ title: "E-story2", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S-story2", status: "ready" });
+  await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
+  const cleared = await handle("backlog_assign", { id: story.id, agent: null }, PLANNER);
+  assert.equal(cleared.details.status, "ok");
+  assert.equal(store.story.get(story.id).assigned, null);
+  store.story.update(story.id, { status: "done" });
+  const refused = await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
+  assert.equal(refused.details.reason, "rejected");
+  const missing = await handle("backlog_assign", { id: "STORY-nope", agent: "tester" }, PLANNER);
+  assert.equal(missing.details.reason, "not_found");
 });

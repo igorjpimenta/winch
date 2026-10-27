@@ -10,7 +10,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4-mini";
-import { createToolHandlers } from "./tools.js";
+import { createToolHandlers } from "./tools/index.js";
 import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 
 // JSON Schema → zod raw shape for the subset the tool defs use (string,

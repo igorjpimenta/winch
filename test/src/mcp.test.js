@@ -38,7 +38,7 @@ test("startMcpServer rejects a reserved harness before connecting", async () => 
 });
 
 test("toolErrorResult: unexpected failures become isError tool results", () => {
-  const r = toolErrorResult(new Error("winch: refused caller identity for backlog_next (bad layers: agent)"));
+  const r = toolErrorResult(new Error("winch: refused caller identity for backlog_claim (bad layers: agent)"));
   assert.equal(r.isError, true);
   const body = JSON.parse(r.content[0].text);
   assert.match(body.error, /refused caller identity/);

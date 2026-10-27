@@ -62,7 +62,7 @@ carries no explicit extensions path; the browser-lease extension lives at
 }
 ```
 
-Calls arrive as `mcp__winch__backlog_next` etc.; the hook filters on the
+Calls arrive as `mcp__winch__backlog_claim` etc.; the hook filters on the
 `winch` substring and stamps meta from `ctx.sessionKey` → `ctx.sessionId` →
 `ctx.runId` (mirroring the HookContext the host guarantees for bundled MCP
 calls since v2026.5.16-beta.7; oldest compatible stable is v2026.5.18,
@@ -78,8 +78,21 @@ worker must never receive a hand-written brief: the record is the spec. The
 harness subscribes to `winch serve --ws` and, on a `task.assigned` row whose
 task is still `todo`, starts the assignee with nothing but the id
 (`winch-claim-<TASK-ID>` style one-shot session, prompt = `TASK-…`). The
-worker's own instructions tell it to call `backlog_task_get` first, then
-claim; no prose is authored per task.
+worker's own instructions tell it to call `backlog_get` first, then
+`backlog_claim`; no prose is authored per task.
+
+Two more rows matter to the dispatcher:
+
+- `story.assigned` — a story handed to one agent to break down. Wake that
+  agent with the story id; it reads the story and appends tasks, which then
+  arrive as `task.appended` rows for the planner to route.
+- `task.appended` — work recorded after the plan (`backlog_append`) lands
+  unassigned. Wake the planner so it routes the task; a dispatcher can wait a
+  few seconds first and skip it if the appending turn already assigned.
+- `epic.completed` — exactly one row per epic, written when its last task
+  closes. Wake the planner with the epic id; it calls `backlog_get`,
+  reviews the delivered results and artifacts, and either appends follow-up
+  tasks or reports the epic done. Act on each epic once, not on every replay.
 
 Dispatch is event-driven, never polled: `serve --ws` replays backlog history
 on connect (`{"type":"history"}`), so a restarted dispatcher catches up
@@ -88,7 +101,7 @@ task ids; the claim lease remains the real guard against double work.
 
 ## Claim webhook (wake on attribution)
 
-Polling `backlog_next` leaves an idle agent waiting for its next heartbeat.
+Polling `backlog_claim` leaves an idle agent waiting for its next heartbeat.
 Instead, winch can push the handoff the moment a claim lands and the plugin
 opens a **fresh session** for the task:
 

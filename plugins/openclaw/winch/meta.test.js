@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { isWinchTool, buildWinchMeta } from "./meta.js";
 
 test("isWinchTool matches the mcp__winch__ naming and rejects other tools", () => {
-  assert.equal(isWinchTool("mcp__winch__backlog_next"), true);
+  assert.equal(isWinchTool("mcp__winch__backlog_claim"), true);
   assert.equal(isWinchTool("mcp__winch__backlog_done"), true);
   assert.equal(isWinchTool("mcp__gbrain__query"), false);
   assert.equal(isWinchTool("bash"), false);
@@ -21,7 +21,7 @@ test("non-winch tool: undefined (call passes through untouched)", () => {
 
 test("winch tool: stamps harness/agent/session from ctx fields", () => {
   const out = buildWinchMeta(
-    { toolName: "mcp__winch__backlog_next", params: { capabilities: ["go"] } },
+    { toolName: "mcp__winch__backlog_claim", params: { capabilities: ["go"] } },
     { agentId: "scout", sessionKey: "ses_42" },
   );
   assert.deepEqual(out.params._meta.winch, { harness: "openclaw", agent: "scout", session: "ses_42" });
@@ -35,7 +35,7 @@ test("runId stands in for sessionKey — the browser-lease ownerFor fallback cha
 
 test("ctx.sessionId beats runId — the 5.18-guaranteed HookContext field", () => {
   const out = buildWinchMeta(
-    { toolName: "mcp__winch__backlog_next" },
+    { toolName: "mcp__winch__backlog_claim" },
     { agentId: "scout", sessionId: "ses_9", runId: "run_7" },
   );
   assert.equal(out.params._meta.winch.session, "ses_9");
@@ -43,7 +43,7 @@ test("ctx.sessionId beats runId — the 5.18-guaranteed HookContext field", () =
 
 test("sessionKey still wins over sessionId — most stable first", () => {
   const out = buildWinchMeta(
-    { toolName: "mcp__winch__backlog_next" },
+    { toolName: "mcp__winch__backlog_claim" },
     { agentId: "scout", sessionKey: "ses_live", sessionId: "ses_9", runId: "run_7" },
   );
   assert.equal(out.params._meta.winch.session, "ses_live");
@@ -62,13 +62,13 @@ test("event.runId is read when ctx carries neither sessionKey nor runId", () => 
 });
 
 test("no resolvable session or agent: undefined (server refuses the unstamped call)", () => {
-  assert.equal(buildWinchMeta({ toolName: "mcp__winch__backlog_next", params: {} }, {}), undefined);
+  assert.equal(buildWinchMeta({ toolName: "mcp__winch__backlog_claim", params: {} }, {}), undefined);
 });
 
 test("a model-supplied _meta.winch is overwritten, sibling keys preserved", () => {
   const out = buildWinchMeta(
     {
-      toolName: "mcp__winch__backlog_next",
+      toolName: "mcp__winch__backlog_claim",
       params: { _meta: { winch: { harness: "evil", agent: "mallory", session: "s" }, progressToken: "p1" } },
     },
     { agentId: "scout", sessionKey: "ses_42" },
@@ -78,6 +78,6 @@ test("a model-supplied _meta.winch is overwritten, sibling keys preserved", () =
 });
 
 test("params is optional — a call with no params still gets stamped", () => {
-  const out = buildWinchMeta({ toolName: "mcp__winch__backlog_next" }, { agentId: "a", sessionKey: "s" });
+  const out = buildWinchMeta({ toolName: "mcp__winch__backlog_claim" }, { agentId: "a", sessionKey: "s" });
   assert.equal(out.params._meta.winch.harness, "openclaw");
 });
