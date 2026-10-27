@@ -51,7 +51,7 @@ jobs:
           # Versions carry the UTC date of the release; compare against the
           # tag's own date so a release cut after 00:00 UTC cannot ship
           # yesterday's date.
-          TAG_DATE="$(printf '%s' "$TAG" | cut -d. -f1-3 | tr . -)"
+          TAG_DATE="$(printf '%s' "${TAG%%-*}" | tr . -)"
           UTC_DATE="$(date -u +%Y-%m-%d)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
             echo "::error::tag date $TAG_DATE != UTC date $UTC_DATE — rename the version"
@@ -91,7 +91,7 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != plugin package.json $PKG — bump it first"
             exit 1
           fi
-          TAG_DATE="$(printf '%s' "$TAG" | cut -d. -f1-3 | tr . -)"
+          TAG_DATE="$(printf '%s' "${TAG%%-*}" | tr . -)"
           UTC_DATE="$(date -u +%Y-%m-%d)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
             echo "::error::tag date $TAG_DATE != UTC date $UTC_DATE — rename the version"
