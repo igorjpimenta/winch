@@ -157,7 +157,7 @@ test("a close carries the work it just made claimable", async () => {
   const epic = store.epic.create({ title: "E", status: "planned" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
-  const next = store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual", assigned: "builder" });
+  const next = store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual", assigned: "builder", capabilities: ["verify"] });
   const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
   const row = store.db.prepare("SELECT * FROM events WHERE task_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);

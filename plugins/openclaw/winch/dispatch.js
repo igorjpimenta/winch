@@ -40,6 +40,14 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
       if (!agent) return null;
       return { agent, sessionKey: `winch-story-${id}`, message: id, kind: "story" };
     }
+    case "task.restored": {
+      // Restoring brings work back without an assignment row; the assignee it
+      // already had must be woken or the task sits until something else fires.
+      if (ev.item?.status && ev.item.status !== "todo") return null;
+      const agent = ev.item?.assigned ?? null;
+      if (!agent || agent === planner) return null;
+      return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
+    }
     case "task.appended": {
       if (ev.item?.status && ev.item.status !== "todo") return null;
       const agent = ev.epicCreatedBy ?? planner;
