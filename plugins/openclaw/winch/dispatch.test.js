@@ -51,6 +51,17 @@ test("history replay does not wake anyone for work that already moved", () => {
   assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "todo", assigned: "builder" } }).agent, "builder");
 });
 
+test("a close wakes the work it made claimable", () => {
+  const woken = [];
+  const router = createRouter({ wake: (r) => woken.push(r), planner: "atlas" });
+  router.handle({ kind: "task.completed", item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
+  assert.equal(woken.length, 1);
+  assert.equal(woken[0].agent, "tester");
+  assert.equal(woken[0].message, "TASK-2");
+  router.handle({ kind: "task.completed", item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
+  assert.equal(woken.length, 1, "same task is not woken twice inside the window");
+});
+
 test("unroutable rows are ignored", () => {
   assert.equal(wakeFor({ kind: "task.claimed", item: { id: "TASK-1" } }), null);
   assert.equal(wakeFor({ kind: "epic.completed", item: { id: "TASK-1" } }), null);

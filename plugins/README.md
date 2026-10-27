@@ -91,6 +91,8 @@ Routing, one row per decision:
 - `task.assigned` → the assignee (never the planner itself)
 - `story.assigned` → the story owner, to append its tasks
 - `task.appended` → the epic's creator, to route the new work
+- a close (`done`/`cancelled`) → every assigned task the envelope reports as
+  `unblocked`, so dependents start without a scheduler
 - `epic.completed` → the epic's creator, to review the delivery
 
 Two more rows matter to the dispatcher:

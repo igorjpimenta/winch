@@ -15,6 +15,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
+import { readyTasks } from "./ready-queue.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -118,6 +119,13 @@ export function toEventMessage(store, row) {
     epicCreatedBy: epic?.created_by ?? null,
     storyId: story?.id ?? null,
     storyAssigned: story?.assigned ?? null,
+    // Work that a close just made claimable: a dispatcher wakes these without
+    // recomputing the dependency graph.
+    unblocked: row.to_status === "done" || row.to_status === "cancelled"
+      ? readyTasks(store, { limit: 20 })
+          .filter((r) => r.task.assigned)
+          .map((r) => ({ id: r.task.id, assigned: r.task.assigned }))
+      : [],
     task: task
       ? {
           id: task.id,
