@@ -108,31 +108,32 @@ export default definePluginEntry({
             "/opt/homebrew/bin/openclaw",
           ].filter(Boolean);
           const entry = candidates.find((c) => { try { return existsSync(c); } catch { return false; } }) ?? candidates[0];
-          const wake = ({ agent, message }) =>
-            new Promise((resolve, reject) => {
-              // Let the gateway finish the turn that produced the event before
-              // a child dials back in: a nested call made inline is dropped.
-              const started = Date.now() + 2000;
-              const args = [
-                entry,
-                "agent",
-                "--agent", agent,
-                "--session-key", `agent:${agent}:winch:${message}`,
-                "--message", message,
-              ];
-              // The gateway marks its own env; a child that inherits the
-              // service markers exits 1 before doing any work.
-              const env = { ...process.env };
-              for (const key of [
-                "OPENCLAW_LAUNCHD_LABEL",
-                "OPENCLAW_SERVICE_KIND",
-                "OPENCLAW_SERVICE_MARKER",
-                "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
-                "OPENCLAW_SYSTEMD_UNIT",
-                "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
-                "OPENCLAW_WINDOWS_TASK_NAME",
-              ]) delete env[key];
-              setTimeout(() => {
+          // A wake is a one-shot agent turn carrying nothing but the item id.
+          // The child CLI dials back into this gateway, and that connection is
+          // occasionally closed while the host is busy (a boot, a heavy turn),
+          // so an attempt is retried before the failure is reported.
+          const wake = ({ agent, message }) => {
+            const tryOnce = () =>
+              new Promise((resolve, reject) => {
+                const args = [
+                  entry,
+                  "agent",
+                  "--agent", agent,
+                  "--session-key", `agent:${agent}:winch:${message}`,
+                  "--message", message,
+                ];
+                // The gateway marks its own env; a child that inherits the
+                // service markers exits before doing any work.
+                const env = { ...process.env };
+                for (const key of [
+                  "OPENCLAW_LAUNCHD_LABEL",
+                  "OPENCLAW_SERVICE_KIND",
+                  "OPENCLAW_SERVICE_MARKER",
+                  "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
+                  "OPENCLAW_SYSTEMD_UNIT",
+                  "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
+                  "OPENCLAW_WINDOWS_TASK_NAME",
+                ]) delete env[key];
                 const child = spawn(process.execPath, args, {
                   detached: true,
                   stdio: ["ignore", "ignore", "pipe"],
@@ -142,11 +143,23 @@ export default definePluginEntry({
                 child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
                 child.on("error", reject);
                 child.on("exit", (code) =>
-                  code === 0 ? resolve() : reject(new Error(`wake exited ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-3).join(" | ")}` : ""}`))
+                  code === 0 ? resolve() : reject(new Error(`exit ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-2).join(" | ")}` : ""}`))
                 );
                 child.unref();
-              }, Math.max(0, started - Date.now()));
-            });
+              });
+            return (async () => {
+              let last;
+              for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                  return await tryOnce();
+                } catch (e) {
+                  last = e;
+                  await new Promise((r) => setTimeout(r, 5000));
+                }
+              }
+              throw last;
+            })();
+          };
           const router = createRouter({
             planner: cfg.dispatchPlanner ?? "atlas",
             statePath: cfg.dispatchStatePath ?? defaultStatePath(),

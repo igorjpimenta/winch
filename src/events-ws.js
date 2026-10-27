@@ -15,7 +15,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
-import { readyTasks } from "./ready-queue.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -121,10 +120,25 @@ export function toEventMessage(store, row) {
     storyAssigned: story?.assigned ?? null,
     // Work that a close just made claimable: a dispatcher wakes these without
     // recomputing the dependency graph.
+    // Structural readiness only: capability tags are the claimant's business,
+    // so a tagged task must still appear here or it never gets woken.
     unblocked: row.to_status === "done" || row.to_status === "cancelled"
-      ? readyTasks(store, { limit: 20 })
-          .filter((r) => r.task.assigned)
-          .map((r) => ({ id: r.task.id, assigned: r.task.assigned }))
+      ? store.db.prepare(`
+          SELECT t.id, t.assigned FROM tasks t
+            JOIN stories s ON s.id=t.story_id
+            JOIN epics   e ON e.id=s.epic_id
+           WHERE t.status='todo' AND t.assigned IS NOT NULL
+             AND s.status IN ('ready','in_progress') AND e.status IN ('planned','in_progress')
+             AND NOT EXISTS (
+               SELECT 1 FROM deps d
+                 LEFT JOIN tasks   dt ON d.to_kind='task'  AND dt.id=d.to_id
+                 LEFT JOIN stories ds ON d.to_kind='story' AND ds.id=d.to_id
+                 LEFT JOIN epics   de ON d.to_kind='epic'  AND de.id=d.to_id
+                WHERE d.from_id=t.id
+                  AND COALESCE(dt.status, ds.status, de.status, 'missing') NOT IN ('done','cancelled')
+             )
+           ORDER BY t.created_at LIMIT 20
+        `).all()
       : [],
     task: task
       ? {
