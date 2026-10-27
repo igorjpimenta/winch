@@ -31,6 +31,18 @@ test("plan writes a whole demand into records and wires dependencies", async () 
   assert.equal(got.readiness.ready, false);
 });
 
+test("plan records who created the epic, and append reopens a closed one", async () => {
+  const res = await h.call("backlog_plan", {
+    epic: { title: "Owned" },
+    stories: [{ title: "S", tasks: [{ title: "t" }] }],
+  });
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(h.store.epic.get(body.epic.id).created_by, "atlas");
+  h.store.epic.update(body.epic.id, { status: "done" });
+  await h.call("backlog_append", { epicId: body.epic.id, stories: [{ title: "late", tasks: [{ title: "fix" }] }] });
+  assert.equal(h.store.epic.get(body.epic.id).status, "in_progress");
+});
+
 test("plan rejects a bad plan without leaving partial records", async () => {
   const before = h.store.db.prepare("SELECT COUNT(*) AS n FROM epics").get().n;
   const dup = await h.call("backlog_plan", {

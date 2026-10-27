@@ -55,6 +55,35 @@ test("the epic is marked complete exactly once, after its last task", async () =
   assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
 });
 
+test("a story closes with its last task and records the transition", async () => {
+  const epic = h.store.epic.create({ title: "E-story-close", status: "planned" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-close", status: "ready" });
+  const a = h.store.task.create({ storyId: story.id, title: "a", status: "in_progress", executionKind: "manual", assigned: "atlas" });
+  const b = h.store.task.create({ storyId: story.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  await h.call("backlog_done", { taskId: a.id, resultSummary: "a done" });
+  assert.equal(h.store.story.get(story.id).status, "ready");
+  await h.call("backlog_claim", { taskId: b.id });
+  await h.call("backlog_done", { taskId: b.id, resultSummary: "b done" });
+  assert.equal(h.store.story.get(story.id).status, "done");
+  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.completed'").all(story.id);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].item_kind, "story");
+});
+
+test("the epic closes only when its last story does", async () => {
+  const epic = h.store.epic.create({ title: "E-two", status: "planned" });
+  const s1 = h.store.story.create({ epicId: epic.id, title: "s1", status: "ready" });
+  const s2 = h.store.story.create({ epicId: epic.id, title: "s2", status: "ready" });
+  const a = h.store.task.create({ storyId: s1.id, title: "a", status: "todo", executionKind: "manual", assigned: "atlas" });
+  const b = h.store.task.create({ storyId: s2.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  for (const t of [a, b]) {
+    await h.call("backlog_claim", { taskId: t.id });
+    await h.call("backlog_done", { taskId: t.id, resultSummary: "done" });
+  }
+  assert.equal(h.store.epic.get(epic.id).status, "done");
+  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
+});
+
 test("block records a reason and an optional dependency", async () => {
   const { task } = h.seedReadyTask();
   const blocker = h.store.task.create({ storyId: task.story_id, title: "blocker", status: "todo", executionKind: "manual" });

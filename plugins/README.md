@@ -89,10 +89,13 @@ Two more rows matter to the dispatcher:
 - `task.appended` — work recorded after the plan (`backlog_append`) lands
   unassigned. Wake the planner so it routes the task; a dispatcher can wait a
   few seconds first and skip it if the appending turn already assigned.
-- `epic.completed` — exactly one row per epic, written when its last task
-  closes. Wake the planner with the epic id; it calls `backlog_get`,
-  reviews the delivered results and artifacts, and either appends follow-up
-  tasks or reports the epic done. Act on each epic once, not on every replay.
+- `story.completed` — written when a story's last task closes; usually just
+  bookkeeping for dashboards.
+- `epic.completed` — exactly one row per epic, written when its last story
+  closes (each story closes when its last task does). Wake `epics.created_by`
+  with the epic id; the planner calls `backlog_get`, reviews the delivered
+  results and artifacts, and either appends follow-up tasks (which reopens the
+  epic) or reports it done. Act on each epic once, not on every replay.
 
 Dispatch is event-driven, never polled: `serve --ws` replays backlog history
 on connect (`{"type":"history"}`), so a restarted dispatcher catches up

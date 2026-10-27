@@ -174,6 +174,10 @@ test("0001 adds events.kind without rewriting history", (t) => {
   {
     const db = new Database(dbPath);
     db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE epics (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+        acceptance TEXT, status TEXT NOT NULL, owner_team TEXT,
+        priority INTEGER NOT NULL DEFAULT 50, created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, closed_at INTEGER);
       CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
         status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
         gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);

@@ -57,15 +57,15 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
 
   // ────────────────────────────────────────────────────────────── EPICS
   const epicApi = {
-    create({ title, description, acceptance, status, ownerTeam, priority, id }) {
+    create({ title, description, acceptance, status, ownerTeam, priority, id, createdBy }) {
       const epicId = id || newEpicId();
       const t = now();
       const s = status || "idea";
       if (!EPIC_STATUSES.includes(s)) throw new Error(`invalid epic status: ${s}`);
       db.prepare(`
-        INSERT INTO epics(id, title, description, acceptance, status, owner_team, priority, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(epicId, title, description ?? null, acceptance ?? null, s, ownerTeam ?? null, priority ?? 50, t, t);
+        INSERT INTO epics(id, title, description, acceptance, status, owner_team, priority, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(epicId, title, description ?? null, acceptance ?? null, s, ownerTeam ?? null, priority ?? 50, createdBy ?? null, t, t);
       return epicApi.get(epicId);
     },
     get(id) {

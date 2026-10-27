@@ -40,6 +40,7 @@ export function createPlanTools({ store, logger }) {
           acceptance: epicIn.acceptance,
           status: "planned",
           priority: epicIn.priority ?? 50,
+          createdBy: identity.agent,
         });
         const idByKey = new Map();
         const stories = storiesIn.map((s, si) => {
@@ -99,6 +100,14 @@ export function createPlanTools({ store, logger }) {
       if (args?.tasks?.length && !story) return err("backlog_append: storyId is required to add tasks", "rejected");
       if (!args?.stories?.length && !args?.tasks?.length) {
         return err("backlog_append: pass stories[] or tasks[]", "rejected");
+      }
+      // Appending after a close is a review finding: reopen the containers so
+      // the new work can actually be claimed.
+      if (epic && (epic.status === "done" || epic.status === "cancelled")) {
+        store.epic.update(epic.id, { status: "in_progress" });
+      }
+      if (story && (story.status === "done" || story.status === "cancelled")) {
+        store.story.update(story.id, { status: "ready" });
       }
       const created = { stories: [], tasks: [] };
       const idByKey = new Map();

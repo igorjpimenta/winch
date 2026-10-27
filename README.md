@@ -41,7 +41,7 @@ contract itself is the only integration surface.
 | `backlog_get` | read an epic, story or task by id — acceptance, results, artifacts, dependencies, readiness |
 | `backlog_claim` | claim one task by id, or the highest-priority ready task when the id is omitted; atomic CAS under a lease |
 | `backlog_update` | heartbeat and append progress, comment or artifact to a claimed task |
-| `backlog_done` | close a claimed task with a result; the last close in an epic marks it complete |
+| `backlog_done` | close a claimed task with a result; closing the last task closes its story, and the last story closes the epic and wakes the agent that planned it |
 | `backlog_block` / `backlog_resume` | open a human gate and resolve it |
 
 ## CLI

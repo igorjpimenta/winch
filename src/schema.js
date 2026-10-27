@@ -26,6 +26,9 @@ export const epics = sqliteTable("epics", {
   description: text("description"),
   acceptance: text("acceptance"),
   status: text("status").notNull(),
+  // Agent that planned the epic; the dispatcher wakes it for the review when
+  // the last story closes.
+  createdBy: text("created_by"),
   ownerTeam: text("owner_team"),
   priority: integer("priority").notNull().default(50),
   createdAt: integer("created_at").notNull(),
