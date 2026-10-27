@@ -2,6 +2,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
 import { registerClaimWebhook, registerClaimHeartbeat } from "./webhook.js";
 import { autoregister } from "./autoregister.js";
+import { spawn } from "node:child_process";
 import { createRouter, defaultStatePath, startDispatchClient, DEFAULT_WS_URL } from "./dispatch.js";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
@@ -90,26 +91,34 @@ export default definePluginEntry({
             api.logger.info("winch: dispatch disabled by config");
             return;
           }
-          const workflow = api.session?.workflow;
+          // scheduleSessionTurn only commits for bundled plugins (the host
+          // returns undefined otherwise), so an npm-installed adapter wakes by
+          // starting a one-shot agent session through the CLI — same entry the
+          // gateway itself was launched from, detached from this process.
+          const entry = process.argv[1];
+          const wake = ({ agent, message }) =>
+            new Promise((resolve, reject) => {
+              const args = [
+                entry,
+                "agent",
+                "--agent", agent,
+                "--session-key", `agent:${agent}:winch:${message}`,
+                "--message", message,
+              ];
+              const child = spawn(process.execPath, args, {
+                detached: true,
+                stdio: ["ignore", "ignore", "ignore"],
+                env: process.env,
+              });
+              child.on("error", reject);
+              child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`wake exited ${code}`))));
+              child.unref();
+            });
           const router = createRouter({
             planner: cfg.dispatchPlanner ?? "atlas",
             statePath: cfg.dispatchStatePath ?? defaultStatePath(),
             logger: api.logger,
-            wake: async ({ agent, sessionKey, message }) => {
-              if (typeof workflow?.scheduleSessionTurn !== "function") {
-                throw new Error("gateway session workflow unavailable");
-              }
-              const h = await workflow.scheduleSessionTurn({
-                sessionKey,
-                message,
-                agentId: agent,
-                delayMs: 0,
-                deleteAfterRun: true,
-                tag: "winch-dispatch",
-                name: `winch ${message}`,
-              });
-              if (!h) throw new Error(`could not schedule ${sessionKey}`);
-            },
+            wake,
           });
           dispatch = startDispatchClient({ url: cfg.dispatchWsUrl ?? DEFAULT_WS_URL, router, logger: api.logger });
         },
