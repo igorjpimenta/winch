@@ -43,6 +43,14 @@ test("appended work and a finished epic wake the epic's creator", () => {
   assert.equal(review.message, "EPIC-9");
 });
 
+test("history replay does not wake anyone for work that already moved", () => {
+  assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "done", assigned: "builder" } }), null);
+  assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "in_progress", assigned: "builder" } }), null);
+  assert.equal(wakeFor({ kind: "task.appended", item: { id: "TASK-1", status: "cancelled" } }), null);
+  assert.equal(wakeFor({ kind: "story.assigned", item: { id: "STORY-1", status: "done", assigned: "tester" } }), null);
+  assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "todo", assigned: "builder" } }).agent, "builder");
+});
+
 test("unroutable rows are ignored", () => {
   assert.equal(wakeFor({ kind: "task.claimed", item: { id: "TASK-1" } }), null);
   assert.equal(wakeFor({ kind: "epic.completed", item: { id: "TASK-1" } }), null);
