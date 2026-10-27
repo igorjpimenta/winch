@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defaultDbPath, resolveDbPath } from "../src/paths.js";
+import { defaultDbPath, resolveDbPath } from "../../src/paths.js";
 
 function tempHome(t) {
   const home = mkdtempSync(path.join(tmpdir(), "winch-paths-"));

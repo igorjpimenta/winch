@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { createStore } from "../src/store.js";
+import { createStore } from "../../src/store.js";
 
-const storeUrl = pathToFileURL(path.resolve(import.meta.dirname, "..", "src", "store.js")).href;
+const storeUrl = pathToFileURL(path.resolve(import.meta.dirname, "..", "..", "src", "store.js")).href;
 let dir;
 
 afterEach(() => {
