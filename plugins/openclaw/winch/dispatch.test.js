@@ -54,12 +54,24 @@ test("history replay does not wake anyone for work that already moved", () => {
 test("a close wakes the work it made claimable", () => {
   const woken = [];
   const router = createRouter({ wake: (r) => woken.push(r), planner: "atlas" });
-  router.handle({ kind: "task.completed", item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
+  router.handle({ kind: "task.completed", id: 11, item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
   assert.equal(woken.length, 1);
   assert.equal(woken[0].agent, "tester");
   assert.equal(woken[0].message, "TASK-2");
+  router.handle({ kind: "task.completed", id: 11, item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
+  assert.equal(woken.length, 1);
+  router.handle({ kind: "task.completed", id: 11, item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
+  assert.equal(woken.length, 1, "the same replayed row does not wake twice");
+});
+
+test("an unblock re-wakes a task that was refused earlier", () => {
+  const woken = [];
+  let clock = 1000;
+  const router = createRouter({ wake: (r) => woken.push(r), planner: "atlas", now: () => clock });
+  router.handle(taskEvent("task.assigned", { id: "TASK-2", assigned: "tester" }));
+  clock += 5000;
   router.handle({ kind: "task.completed", item: { id: "TASK-1", status: "done" }, unblocked: [{ id: "TASK-2", assigned: "tester" }] });
-  assert.equal(woken.length, 1, "same task is not woken twice inside the window");
+  assert.equal(woken.length, 2, "the close outranks the earlier suppression");
 });
 
 test("unroutable rows are ignored", () => {
