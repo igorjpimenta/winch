@@ -58,6 +58,10 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
 export function createRouter({ wake, planner, now = Date.now, statePath = null, logger = null }) {
   const inflight = new Map();
   const reviewed = new Set(readReviewed(statePath));
+  // Rows are replayed on every reconnect; each row is acted on once, while a
+  // later row about the same task may still wake it again.
+  const seenRows = new Set();
+  const seenOrder = [];
 
   function rememberReview(epicId) {
     reviewed.add(epicId);
@@ -88,10 +92,19 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
 
   return {
     handle(ev) {
+      if (ev?.id != null) {
+        if (seenRows.has(ev.id)) return null;
+        seenRows.add(ev.id);
+        seenOrder.push(ev.id);
+        if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
+      }
       // A close can make already-assigned tasks claimable; the envelope names
       // them so no subscriber has to recompute the dependency graph.
       for (const u of ev?.unblocked ?? []) {
         if (!u?.assigned || !u?.id || u.assigned === planner) continue;
+        // An earlier wake may have been refused as not-ready; that suppression
+        // must not outlive the event that made the task claimable.
+        inflight.delete(`task:${u.id}`);
         send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" });
       }
       const route = wakeFor(ev, { planner });
