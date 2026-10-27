@@ -92,12 +92,8 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
 
   return {
     handle(ev) {
-      if (ev?.id != null) {
-        if (seenRows.has(ev.id)) return null;
-        seenRows.add(ev.id);
-        seenOrder.push(ev.id);
-        if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
-      }
+      if (ev?.id != null && seenRows.has(ev.id)) return null;
+      let acted = false;
       // A close can make already-assigned tasks claimable; the envelope names
       // them so no subscriber has to recompute the dependency graph.
       for (const u of ev?.unblocked ?? []) {
@@ -105,10 +101,18 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
         // An earlier wake may have been refused as not-ready; that suppression
         // must not outlive the event that made the task claimable.
         inflight.delete(`task:${u.id}`);
-        send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" });
+        if (send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" })) acted = true;
       }
       const route = wakeFor(ev, { planner });
-      return route ? send(route) : null;
+      if (route && send(route)) acted = true;
+      // A row is remembered only once it caused a wake: an unroutable row (an
+      // older envelope, a filter hit) must stay retryable on the next replay.
+      if (acted && ev?.id != null) {
+        seenRows.add(ev.id);
+        seenOrder.push(ev.id);
+        if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
+      }
+      return route ?? null;
     },
   };
 }
