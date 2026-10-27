@@ -70,23 +70,32 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
     }
   }
 
+  function send(route) {
+    const key = `${route.kind}:${route.message}`;
+    if (route.kind === "review") {
+      if (reviewed.has(route.message)) return null;
+      rememberReview(route.message);
+    } else {
+      const seen = inflight.get(key);
+      if (seen && now() - seen < INFLIGHT_TTL_MS) return null;
+      inflight.set(key, now());
+      for (const [k, at] of inflight) if (now() - at > INFLIGHT_TTL_MS) inflight.delete(k);
+    }
+    logger?.info?.(`winch: waking ${route.agent} for ${route.message} (${route.kind})`);
+    Promise.resolve(wake(route)).catch((e) => logger?.warn?.(`winch: wake failed: ${e?.message ?? e}`));
+    return route;
+  }
+
   return {
     handle(ev) {
-      const route = wakeFor(ev, { planner });
-      if (!route) return null;
-      const key = `${route.kind}:${route.message}`;
-      if (route.kind === "review") {
-        if (reviewed.has(route.message)) return null;
-        rememberReview(route.message);
-      } else {
-        const seen = inflight.get(key);
-        if (seen && now() - seen < INFLIGHT_TTL_MS) return null;
-        inflight.set(key, now());
-        for (const [k, at] of inflight) if (now() - at > INFLIGHT_TTL_MS) inflight.delete(k);
+      // A close can make already-assigned tasks claimable; the envelope names
+      // them so no subscriber has to recompute the dependency graph.
+      for (const u of ev?.unblocked ?? []) {
+        if (!u?.assigned || !u?.id || u.assigned === planner) continue;
+        send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" });
       }
-      logger?.info?.(`winch: waking ${route.agent} for ${route.message} (${route.kind})`);
-      Promise.resolve(wake(route)).catch((e) => logger?.warn?.(`winch: wake failed: ${e?.message ?? e}`));
-      return route;
+      const route = wakeFor(ev, { planner });
+      return route ? send(route) : null;
     },
   };
 }
