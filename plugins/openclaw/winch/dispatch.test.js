@@ -83,6 +83,14 @@ test("a row that routed nothing is retried on the next replay", () => {
   assert.equal(woken.length, 1, "the unroutable row did not consume the task");
 });
 
+test("a restored task wakes the assignee it already had", () => {
+  const route = wakeFor({ kind: "task.restored", item: { id: "TASK-4", kind: "task", status: "todo", assigned: "builder" } });
+  assert.equal(route.agent, "builder");
+  assert.equal(route.sessionKey, "winch-task-TASK-4");
+  assert.equal(wakeFor({ kind: "task.restored", item: { id: "TASK-4", status: "cancelled", assigned: "builder" } }), null);
+  assert.equal(wakeFor({ kind: "task.restored", item: { id: "TASK-4", status: "todo", assigned: null } }), null);
+});
+
 test("unroutable rows are ignored", () => {
   assert.equal(wakeFor({ kind: "task.claimed", item: { id: "TASK-1" } }), null);
   assert.equal(wakeFor({ kind: "epic.completed", item: { id: "TASK-1" } }), null);
