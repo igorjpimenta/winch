@@ -110,6 +110,9 @@ export default definePluginEntry({
           const entry = candidates.find((c) => { try { return existsSync(c); } catch { return false; } }) ?? candidates[0];
           const wake = ({ agent, message }) =>
             new Promise((resolve, reject) => {
+              // Let the gateway finish the turn that produced the event before
+              // a child dials back in: a nested call made inline is dropped.
+              const started = Date.now() + 2000;
               const args = [
                 entry,
                 "agent",
@@ -129,18 +132,20 @@ export default definePluginEntry({
                 "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
                 "OPENCLAW_WINDOWS_TASK_NAME",
               ]) delete env[key];
-              const child = spawn(process.execPath, args, {
-                detached: true,
-                stdio: ["ignore", "ignore", "pipe"],
-                env,
-              });
-              let stderr = "";
-              child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
-              child.on("error", reject);
-              child.on("exit", (code) =>
-                code === 0 ? resolve() : reject(new Error(`wake exited ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-3).join(" | ")}` : ""}`))
-              );
-              child.unref();
+              setTimeout(() => {
+                const child = spawn(process.execPath, args, {
+                  detached: true,
+                  stdio: ["ignore", "ignore", "pipe"],
+                  env,
+                });
+                let stderr = "";
+                child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
+                child.on("error", reject);
+                child.on("exit", (code) =>
+                  code === 0 ? resolve() : reject(new Error(`wake exited ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-3).join(" | ")}` : ""}`))
+                );
+                child.unref();
+              }, Math.max(0, started - Date.now()));
             });
           const router = createRouter({
             planner: cfg.dispatchPlanner ?? "atlas",
