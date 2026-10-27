@@ -74,6 +74,15 @@ test("an unblock re-wakes a task that was refused earlier", () => {
   assert.equal(woken.length, 2, "the close outranks the earlier suppression");
 });
 
+test("a row that routed nothing is retried on the next replay", () => {
+  const woken = [];
+  const router = createRouter({ wake: (r) => woken.push(r), planner: "atlas" });
+  router.handle({ kind: "task.claimed", id: 7, item: { id: "TASK-1", status: "in_progress" } });
+  assert.equal(woken.length, 0);
+  router.handle(taskEvent("task.assigned", { id: "TASK-7", assigned: "builder" }));
+  assert.equal(woken.length, 1, "the unroutable row did not consume the task");
+});
+
 test("unroutable rows are ignored", () => {
   assert.equal(wakeFor({ kind: "task.claimed", item: { id: "TASK-1" } }), null);
   assert.equal(wakeFor({ kind: "epic.completed", item: { id: "TASK-1" } }), null);
