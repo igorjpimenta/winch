@@ -27,16 +27,21 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
   if (!id) return null;
   switch (ev.kind) {
     case "task.assigned": {
+      // History replay reaches here on connect: a closed or claimed task must
+      // not wake anyone just because its assignment row is recent.
+      if (ev.item?.status && ev.item.status !== "todo") return null;
       const agent = ev.item?.assigned ?? ev.task?.assignee ?? null;
       if (!agent || agent === planner) return null;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
     }
     case "story.assigned": {
+      if (ev.item?.status && !["ready", "in_progress", "backlog"].includes(ev.item.status)) return null;
       const agent = ev.item?.assigned ?? null;
       if (!agent) return null;
       return { agent, sessionKey: `winch-story-${id}`, message: id, kind: "story" };
     }
     case "task.appended": {
+      if (ev.item?.status && ev.item.status !== "todo") return null;
       const agent = ev.epicCreatedBy ?? planner;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "append" };
     }
