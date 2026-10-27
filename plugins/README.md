@@ -78,10 +78,11 @@ worker must never receive a hand-written brief: the record is the spec.
 
 The plugin does this itself: it follows `winch serve --ws` (config
 `dispatchWsUrl`, default `ws://127.0.0.1:38291`), and for each routable row
-opens a one-shot session whose message is just the item id — `TASK-…` to claim,
-`STORY-…` to break down, `EPIC-…` to review. Sessions are named
-`winch-task-<id>`, `winch-story-<id>`, `winch-epic-<id>`, tagged
-`winch-dispatch`, and deleted after the turn. Config: `dispatchEnabled`
+starts a one-shot agent session whose message is just the item id — `TASK-…` to
+claim, `STORY-…` to break down, `EPIC-…` to review. The session is started
+through the gateway's own CLI entry (`agent --session-key
+agent:<agent>:winch:<id>`), because the host only lets bundled plugins schedule
+turns in-process. Config: `dispatchEnabled`
 (default true), `dispatchPlanner` (fallback: atlas), `dispatchStatePath`
 (reviewed epics across restarts).
 
