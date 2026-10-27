@@ -86,14 +86,38 @@ export function kindForEvent(row) {
 // once per row. Artifacts come from the same collector the claim handoff
 // uses, so both paths agree on what "the artifacts" means.
 export function toEventMessage(store, row) {
-  const task = row.task_id ? store.task.get(row.task_id) : null;
-  const story = task ? store.story.get(task.story_id) : null;
-  const epic = story ? store.epic.get(story.epic_id) : null;
+  const itemKind = row.item_kind ?? "task";
+  const item = !row.task_id
+    ? null
+    : itemKind === "story"
+      ? store.story.get(row.task_id)
+      : itemKind === "epic"
+        ? store.epic.get(row.task_id)
+        : store.task.get(row.task_id);
+  const task = itemKind === "task" ? item : null;
+  const story = itemKind === "story" ? item : task ? store.story.get(task.story_id) : null;
+  const epic = itemKind === "epic" ? item : story ? store.epic.get(story.epic_id) : null;
   return {
     type: "event",
     kind: kindForEvent(row),
     id: row.id,
     at: row.at,
+    // Normalised item: a dispatcher routes assignment and review wakes without
+    // knowing which level the row is about.
+    item: item
+      ? {
+          id: item.id,
+          kind: itemKind,
+          title: item.title,
+          status: item.status,
+          assigned: item.assigned ?? null,
+          createdBy: item.created_by ?? null,
+        }
+      : null,
+    epicId: epic?.id ?? null,
+    epicCreatedBy: epic?.created_by ?? null,
+    storyId: story?.id ?? null,
+    storyAssigned: story?.assigned ?? null,
     task: task
       ? {
           id: task.id,
