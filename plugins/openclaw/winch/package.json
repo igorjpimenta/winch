@@ -1,7 +1,7 @@
 {
   "name": "@igorjpimenta/winch-openclaw",
-  "version": "2026.10.26-beta.3",
-  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives claim webhooks, and opens a fresh session per attributed task.",
+  "version": "2026.10.26-beta.4",
+  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives claim webhooks, and wakes agents from the winch event stream.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -17,6 +17,7 @@
     "meta.js",
     "webhook.js",
     "autoregister.js",
+    "dispatch.js",
     "openclaw.plugin.json",
     "README.md"
   ],
