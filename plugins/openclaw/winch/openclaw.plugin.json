@@ -45,6 +45,10 @@
       "dispatchStatePath": {
         "type": "string",
         "description": "File remembering reviewed epics across restarts (default: ~/.openclaw/state/winch-plugin-dispatch.json)."
+      },
+      "dispatchOpenclawBin": {
+        "type": "string",
+        "description": "OpenClaw CLI entry used to start a wake session (default: the shim beside the gateway entry)."
       }
     }
   }
