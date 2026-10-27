@@ -117,10 +117,22 @@ export default definePluginEntry({
                 "--session-key", `agent:${agent}:winch:${message}`,
                 "--message", message,
               ];
+              // The gateway marks its own env; a child that inherits the
+              // service markers exits 1 before doing any work.
+              const env = { ...process.env };
+              for (const key of [
+                "OPENCLAW_LAUNCHD_LABEL",
+                "OPENCLAW_SERVICE_KIND",
+                "OPENCLAW_SERVICE_MARKER",
+                "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
+                "OPENCLAW_SYSTEMD_UNIT",
+                "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
+                "OPENCLAW_WINDOWS_TASK_NAME",
+              ]) delete env[key];
               const child = spawn(process.execPath, args, {
                 detached: true,
                 stdio: ["ignore", "ignore", "ignore"],
-                env: process.env,
+                env,
               });
               child.on("error", reject);
               child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`wake exited ${code}`))));
