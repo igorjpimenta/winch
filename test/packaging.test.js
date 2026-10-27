@@ -30,6 +30,13 @@ test("the adapter is publishable as its own openclaw plugin package", () => {
   assert.equal(pkg.name, "@igorjpimenta/winch-openclaw");
   assert.deepEqual(pkg.openclaw?.extensions, ["./index.js"]);
   assert.ok(pkg.files.includes("openclaw.plugin.json"), "plugin manifest ships in the tarball");
+  // Every local module the entry imports must ship: the tarball is a file
+  // whitelist, so a missing entry fails only at install time on the host.
+  const entry = readFileSync(path.join(dir, "index.js"), "utf8");
+  const localImports = [...entry.matchAll(/from "(\.\/[^"]+)"/g)].map((m) => m[1].replace("./", ""));
+  for (const file of localImports) {
+    assert.ok(pkg.files.includes(file), `${file} is imported by index.js but not in files[]`);
+  }
   assert.ok(existsSync(path.join(dir, "openclaw.plugin.json")));
   assert.equal(pkg.private, undefined, "publishable, not a private workspace package");
 });
