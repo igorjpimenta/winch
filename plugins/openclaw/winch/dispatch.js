@@ -56,7 +56,7 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
     case "epic.completed": {
       if (!id.startsWith("EPIC-")) return null;
       const agent = ev.epicCreatedBy ?? planner;
-      return { agent, sessionKey: `winch-epic-${id}`, message: id, kind: "review" };
+      return { agent, sessionKey: `winch-epic-${id}`, message: id, kind: "review", eventId: ev.id ?? null };
     }
     default:
       return null;
@@ -65,18 +65,19 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
 
 export function createRouter({ wake, planner, now = Date.now, statePath = null, logger = null }) {
   const inflight = new Map();
-  const reviewed = new Set(readReviewed(statePath));
+  const reviewedIds = readReviewed(statePath); // epicId -> last reviewed event id
   // Rows are replayed on every reconnect; each row is acted on once, while a
   // later row about the same task may still wake it again.
   const seenRows = new Set();
   const seenOrder = [];
 
-  function rememberReview(epicId) {
-    reviewed.add(epicId);
+  function rememberReview(epicId, eventId) {
+    reviewedIds[epicId] = eventId ?? 0;
     if (!statePath) return;
     try {
       fs.mkdirSync(path.dirname(statePath), { recursive: true });
-      fs.writeFileSync(statePath, JSON.stringify({ reviewedEpics: [...reviewed].slice(-500) }));
+      const entries = Object.entries(reviewedIds).slice(-500);
+      fs.writeFileSync(statePath, JSON.stringify({ reviewedEpics: Object.fromEntries(entries) }));
     } catch (e) {
       logger?.warn?.(`winch: review state not written: ${e?.message ?? e}`);
     }
@@ -85,8 +86,10 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
   function send(route) {
     const key = `${route.kind}:${route.message}`;
     if (route.kind === "review") {
-      if (reviewed.has(route.message)) return null;
-      rememberReview(route.message);
+      // A later marker for the same epic is a new review cycle.
+      const last = reviewedIds[route.message] ?? 0;
+      if (route.eventId != null && route.eventId <= last) return null;
+      rememberReview(route.message, route.eventId);
     } else {
       const seen = inflight.get(key);
       if (seen && now() - seen < INFLIGHT_TTL_MS) return null;
@@ -126,12 +129,14 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
 }
 
 function readReviewed(statePath) {
-  if (!statePath) return [];
+  if (!statePath) return {};
   try {
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    return Array.isArray(parsed?.reviewedEpics) ? parsed.reviewedEpics : [];
+    const value = parsed?.reviewedEpics;
+    if (Array.isArray(value)) return Object.fromEntries(value.map((id) => [id, 0]));
+    return value && typeof value === "object" ? value : {};
   } catch {
-    return [];
+    return {};
   }
 }
 

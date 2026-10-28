@@ -67,8 +67,10 @@ export function createReportTools({ store, logger }) {
           const openStories = store.db.prepare(
             "SELECT COUNT(*) AS n FROM stories WHERE epic_id=? AND status NOT IN ('done','cancelled')"
           ).get(epicId).n;
-          const marked = store.db.prepare("SELECT 1 FROM events WHERE kind='epic.completed' AND note=?").get(epicId);
-          if (openStories === 0 && !marked) {
+          // One marker per close cycle, not per epic: a review that appends
+          // work reopens the epic, and its second close must wake the planner
+          // again or the fix is never confirmed.
+          if (openStories === 0) {
             store.epic.update(epicId, { status: "done" });
             store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
               .run(epicId, "epic", "in_progress", "done", "epic.completed", actor, epicId, Date.now());

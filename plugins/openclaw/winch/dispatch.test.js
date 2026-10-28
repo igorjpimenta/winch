@@ -111,19 +111,24 @@ test("a task wake is not repeated inside the in-flight window", () => {
   assert.equal(woken.length, 2);
 });
 
-test("an epic review happens once, and the note survives a restart", () => {
+test("an epic review happens once per close cycle, across restarts", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "winch-dispatch-"));
   const statePath = path.join(dir, "state.json");
+  const review = (id) => ({ kind: "epic.completed", id, item: { id: "EPIC-1", kind: "epic" }, epicCreatedBy: "atlas" });
   try {
     const first = [];
     const router = createRouter({ wake: (r) => first.push(r), statePath });
-    router.handle({ kind: "epic.completed", item: { id: "EPIC-1", kind: "epic" }, epicCreatedBy: "atlas" });
-    router.handle({ kind: "epic.completed", item: { id: "EPIC-1", kind: "epic" }, epicCreatedBy: "atlas" });
-    assert.equal(first.length, 1);
+    router.handle(review(5));
+    router.handle(review(5));
+    assert.equal(first.length, 1, "same marker replayed");
+    router.handle(review(9));
+    assert.equal(first.length, 2, "a new marker is a new review cycle");
     const second = [];
     const rebooted = createRouter({ wake: (r) => second.push(r), statePath });
-    rebooted.handle({ kind: "epic.completed", item: { id: "EPIC-1", kind: "epic" }, epicCreatedBy: "atlas" });
-    assert.equal(second.length, 0);
+    rebooted.handle(review(9));
+    assert.equal(second.length, 0, "the reviewed marker survives a restart");
+    rebooted.handle(review(12));
+    assert.equal(second.length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
