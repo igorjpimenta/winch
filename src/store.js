@@ -427,8 +427,10 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     release(id, note = "release", at = now()) {
       db.exec("BEGIN IMMEDIATE");
       try {
+        // Keep the assignee: a lost lease means the worker died, not that the
+        // work lost its owner, and the dispatcher can only re-wake an owner.
         const r = db.prepare(`
-          UPDATE tasks SET status='todo', assigned=NULL, claimed_at=NULL, claim_expires_at=NULL, attempt_count=attempt_count+1, updated_at=?
+          UPDATE tasks SET status='todo', claimed_at=NULL, claim_expires_at=NULL, attempt_count=attempt_count+1, updated_at=?
           WHERE id=? AND status='in_progress'
         `).run(at, id);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }

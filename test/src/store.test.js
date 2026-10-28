@@ -167,6 +167,19 @@ test("task.update: actor/note optional — defaults to system", (t) => {
   assert.equal(ev.note, null);
 });
 
+test("an expired lease requeues the task to its own worker", (t) => {
+  const store = makeStore(t);
+  const epic = store.epic.create({ title: "E-sweep", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "ready" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
+  store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1000 });
+  store.task.sweepExpired({ now: Date.now() + 5000 });
+  const after = store.task.get(task.id);
+  assert.equal(after.status, "todo");
+  assert.equal(after.assigned, "worker", "the owner is kept so a dispatcher can re-wake it");
+  assert.equal(after.attempt_count, 1);
+});
+
 test("0001 adds events.kind without rewriting history", (t) => {
   const { dir, dbPath } = tempDb();
   t.after(() => rmSync(dir, { recursive: true, force: true }));

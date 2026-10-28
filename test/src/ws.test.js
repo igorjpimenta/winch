@@ -136,6 +136,19 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
   assert.equal(live.task.title, "T");
 });
 
+test("a requeue lists the task so its owner can be woken again", async () => {
+  const epic = store.epic.create({ title: "E-req", status: "planned" });
+  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "ready" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
+  store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1 });
+  store.task.sweepExpired({ now: Date.now() + 10 });
+  const row = store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const { toEventMessage } = await import("../../src/events-ws.js");
+  const msg = toEventMessage(store, row);
+  assert.equal(msg.kind, "task.released");
+  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker" }]);
+});
+
 test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
   const epic = store.epic.create({ title: "E", status: "planned", createdBy: "atlas" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
