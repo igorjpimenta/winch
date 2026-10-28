@@ -42,7 +42,7 @@ test("done records the result, artifacts and the session", async () => {
   assert.equal(ev.session_ref, "test:atlas:sess-atlas");
 });
 
-test("the epic is marked complete exactly once, after its last task", async () => {
+test("reopening and closing the epic again writes a second marker", async () => {
   const epic = h.store.epic.create({ title: "E-epic", status: "planned" });
   const story = h.store.story.create({ epicId: epic.id, title: "S-epic", status: "ready" });
   const t1 = h.store.task.create({ storyId: story.id, title: "one", status: "in_progress", executionKind: "manual", assigned: "atlas" });
@@ -51,8 +51,12 @@ test("the epic is marked complete exactly once, after its last task", async () =
   assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 0);
   await h.call("backlog_done", { taskId: t2.id, resultSummary: "two done" });
   assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
-  await h.call("backlog_done", { taskId: t2.id, resultSummary: "again" }).catch(() => {});
-  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
+  // A review finding reopens the epic; the next close is a new cycle.
+  const t3 = h.store.task.create({ storyId: story.id, title: "three", status: "in_progress", executionKind: "manual", assigned: "atlas" });
+  h.store.epic.update(epic.id, { status: "in_progress" });
+  h.store.story.update(story.id, { status: "ready" });
+  await h.call("backlog_done", { taskId: t3.id, resultSummary: "fix" });
+  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 2);
 });
 
 test("a story closes with its last task and records the transition", async () => {
