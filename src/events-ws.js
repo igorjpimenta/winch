@@ -122,7 +122,9 @@ export function toEventMessage(store, row) {
     // recomputing the dependency graph.
     // Structural readiness only: capability tags are the claimant's business,
     // so a tagged task must still appear here or it never gets woken.
-    unblocked: row.to_status === "done" || row.to_status === "cancelled"
+    // A close frees dependents; a requeue (lease lost) makes the task itself
+    // claimable again. Both need a wake, so both carry the list.
+    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "todo"
       ? store.db.prepare(`
           SELECT t.id, t.assigned FROM tasks t
             JOIN stories s ON s.id=t.story_id
@@ -163,6 +165,14 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   const histLimit = historyLimit ?? cfg.wsHistoryLimit ?? HISTORY_LIMIT;
   const clients = new Set();
   let cursor = lastEventId(store);
+  // The ws service is the only long-lived process winch guarantees, so it also
+  // sweeps expired leases; without this a crashed worker holds its task until
+  // a human runs the CLI.
+  const sweepMs = cfg.wsSweepMs ?? 30000;
+  const sweeper = sweepMs > 0
+    ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
+    : null;
+  sweeper?.unref?.();
 
   function broadcast(obj) {
     const frame = encodeFrame(JSON.stringify(obj));
@@ -261,6 +271,7 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         close: () =>
           new Promise((res) => {
             clearInterval(timer);
+            if (sweeper) clearInterval(sweeper);
             for (const s of clients) s.destroy();
             server.close(() => res());
           }),
