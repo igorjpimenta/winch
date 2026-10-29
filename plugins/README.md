@@ -147,21 +147,16 @@ opens a **fresh session** for the task:
 
 ## opencode
 
-Why env, not meta: opencode's `tool.execute.before` can mutate the outgoing
-call's `args` (the plugin types declare `output: { args: any }`, return
-`Promise<void>` — mutation is the only channel), but opencode's MCP path
-builds the request as `callTool({ name, arguments: args })`: params carry
-only name + arguments, there is **no `params._meta` slot**, and every MCP
-input schema is forced `additionalProperties: false`, so an `args._meta`
-injection is stripped or rejected before the wire. The winch server reads
-`extra._meta` (= request `params._meta`), unreachable from this hook on the
-checked opencode surface (1.18.32 plugin types and binary). So
-`plugins/opencode/winch-meta.js` is a registered no-op that documents the
-constraint in place and keeps a hook point for an opencode version that grows
-request-level meta mutation.
+opencode's `tool.execute.before` hook can mutate the outgoing call's `args`
+but cannot reach request `_meta` (its MCP path sends only name + arguments).
+winch therefore declares `winch_agent` / `winch_session` as optional schema
+slots (`src/mcp.js`) and reads them as a whole pair (`src/identity.js`); the
+companion stamps them unconditionally, so a model-supplied pair never
+survives. This channel is sound over stdio, where the spawner is the sole
+peer — use a stdio MCP entry, not a shared HTTP daemon.
 
-`~/.config/opencode/opencode.jsonc` — MCP entry plus plugin line, mirroring
-the existing `file://` entries in that file's `plugin` array:
+`@igorjpimenta/winch-opencode` is that companion. Install it and add the MCP
+entry:
 
 ```jsonc
 {
@@ -169,25 +164,17 @@ the existing `file://` entries in that file's `plugin` array:
     "winch": {
       "type": "local",
       "command": ["winch", "serve", "--mcp", "stdio"],
-      "env": {
-        "WINCH_HARNESS": "opencode"
-      }
+      "environment": { "WINCH_HARNESS": "opencode" }
     }
   },
-  "plugin": [
-    "file:///opt/homebrew/lib/node_modules/@igorjpimenta/doppler-harness/dist/loader.js",
-    "file:///opt/homebrew/lib/node_modules/@igorjpimenta/doppler-harness/dist/doppler.js",
-    "file://<npm-root-g>/@igorjpimenta/winch/plugins/opencode/winch-meta.js"
-  ]
+  "plugin": ["@igorjpimenta/winch-opencode"]
 }
 ```
 
-`<npm-root-g>` is `npm root -g` (where `npm install -g @igorjpimenta/winch`
-lands) — the plugin loads from the published package, never a git checkout.
-
-Agent/session on opencode: opencode's hooks cannot carry per-call identity,
-so winch refuses unstamped calls there. Per-agent, per-session support needs
-a future meta-capable hook; until then identity-bearing calls are refused.
+The hook learns the agent from `chat.message` / `chat.params` per session and
+falls back to `WINCH_AGENT` when the host does not surface it. Agent and
+session are then stamped on every winch call, so claims are attributed to the
+real caller instead of being refused.
 
 ## Remote servers: URL + credentials
 

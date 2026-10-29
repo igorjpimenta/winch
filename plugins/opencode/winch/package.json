@@ -1,0 +1,25 @@
+{
+  "name": "@igorjpimenta/winch-opencode",
+  "version": "2026.10.28-beta.1",
+  "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorjpimenta/winch.git",
+    "directory": "plugins/opencode/winch"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "hooks.js",
+    "identity.js"
+  ],
+  "main": "index.js"
+}
