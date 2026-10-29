@@ -141,7 +141,14 @@ jobs:
             *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
             * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
-      - run: npm publish --tag ${{ steps.channel.outputs.tag }}
+      - name: Publish unless this version already exists
+        run: |
+          V="$(node -p "require('./package.json').version")"
+          if npm view "@igorjpimenta/winch-opencode@$V" version >/dev/null 2>&1; then
+            echo "::notice::$V is already published; skipping (tag kept for provenance)"
+          else
+            npm publish --tag ${{ steps.channel.outputs.tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - if: steps.channel.outputs.tag == 'beta'
