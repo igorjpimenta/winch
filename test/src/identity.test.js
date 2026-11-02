@@ -68,6 +68,35 @@ test("resolveIdentity: empty-string meta is unstamped, not an identity", () => {
   );
 });
 
+test("resolveIdentity: opencode v2 native sessionID pairs with the adapter's agent arg", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { "ai.opencode/sessionID": "ses_native1" },
+    args: { winch_agent: "build" },
+  });
+  assert.equal(id.agent, "build");
+  assert.equal(id.session, "ses_native1");
+  assert.equal(id.source.agent, "native");
+  assert.equal(id.source.session, "native");
+});
+
+test("resolveIdentity: a complete args pair still wins over the native session", () => {
+  const id = resolveIdentity({
+    base: BASE,
+    meta: { "ai.opencode/sessionID": "ses_native2" },
+    args: { winch_agent: "build", winch_session: "ses_args" },
+  });
+  assert.equal(id.session, "ses_args");
+  assert.equal(id.source.agent, "args");
+});
+
+test("resolveIdentity: a native session without an agent is refused", () => {
+  assert.throws(
+    () => resolveIdentity({ base: BASE, meta: { "ai.opencode/sessionID": "ses_x" } }),
+    /unresolved agent/
+  );
+});
+
 test("resolveIdentity: meta carrying reserved tokens fails instead of minting", () => {
   assert.throws(
     () => resolveIdentity({ base: BASE, meta: { winch: { agent: "UNKNOWN", session: "s" } } }),

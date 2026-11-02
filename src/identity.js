@@ -81,6 +81,13 @@ export function resolveIdentity({ meta, args, base }) {
   const mAgent = usable(m?.agent), mSession = usable(m?.session);
   const amAgent = usable(am?.agent), amSession = usable(am?.session);
   const aAgent = usable(args?.winch_agent), aSession = usable(args?.winch_session);
+  // opencode v2 writes the session natively on every MCP call:
+  // params._meta["ai.opencode/sessionID"]. That half is host-written, and the
+  // agent half comes from the installed adapter's args — both originate in the
+  // opencode host, so they form one pair inside one trust domain. The adapter
+  // still stamps winch_session when it can; this channel exists so v2 identity
+  // does not depend on it.
+  const nSession = usable(meta?.["ai.opencode/sessionID"]);
   // Whole pairs only: a meta half never splices with an args half, so no
   // call can assemble an identity across trust channels.
   const pair = (mAgent && mSession)
@@ -89,7 +96,9 @@ export function resolveIdentity({ meta, args, base }) {
       ? { agent: amAgent, session: amSession, source: "args-meta" }
       : (aAgent && aSession)
         ? { agent: aAgent, session: aSession, source: "args" }
-        : null;
+        : (aAgent && nSession)
+          ? { agent: aAgent, session: nSession, source: "native" }
+          : null;
   if (!pair) {
     if ((mAgent || amAgent || aAgent) && (mSession || amSession || aSession)) {
       throw new Error(
