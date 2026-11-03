@@ -1,7 +1,7 @@
 {
   "name": "@igorjpimenta/winch-opencode",
-  "version": "2026.10.29-beta.1",
-  "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls.",
+  "version": "2026.11.03-beta.1",
+  "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls (V1 hooks + V2 setup). No SDK dependency \u2014 a plain id/setup/server export.",
   "license": "MIT",
   "type": "module",
   "repository": {

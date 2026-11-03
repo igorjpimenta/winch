@@ -13,7 +13,10 @@ export function createWinchHooks() {
       if (input?.sessionID && input?.agent) agents.set(input.sessionID, input.agent);
     },
     "tool.execute.before": async (input, output) => {
-      stampWinchIdentity(input, output, { agent: agents.get(input?.sessionID) ?? process.env.WINCH_AGENT });
+      // Unconditional: when the agent is unknown the slot is blanked, so a
+      // model-supplied pair can never ride through as identity. Blank means
+      // unstamped, and the server refuses that rather than trusting it.
+      stampWinchIdentity(input, output, { agent: agents.get(input?.sessionID) ?? process.env.WINCH_AGENT ?? null });
     },
   };
 }

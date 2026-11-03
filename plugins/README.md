@@ -152,11 +152,15 @@ but cannot reach request `_meta` (its MCP path sends only name + arguments).
 winch therefore declares `winch_agent` / `winch_session` as optional schema
 slots (`src/mcp.js`) and reads them as a whole pair (`src/identity.js`); the
 companion stamps them unconditionally, so a model-supplied pair never
-survives. This channel is sound over stdio, where the spawner is the sole
-peer — use a stdio MCP entry, not a shared HTTP daemon.
+survives.
 
-`@igorjpimenta/winch-opencode` is that companion. Install it and add the MCP
-entry:
+`@igorjpimenta/winch-opencode` is that companion, and it is dual-entry: V1
+opencode calls `server()` (object hooks), V2 calls `setup()` — which learns
+the session's agent from `ctx.session.hook("context")` and stamps in
+`ctx.tool.hook("execute.before")`. No SDK dependency: a plain
+`{ id, setup, server }` export satisfies both loaders.
+
+### Local (stdio) — the strong shape
 
 ```jsonc
 {
@@ -171,10 +175,50 @@ entry:
 }
 ```
 
-The hook learns the agent from `chat.message` / `chat.params` per session and
-falls back to `WINCH_AGENT` when the host does not surface it. Agent and
-session are then stamped on every winch call, so claims are attributed to the
-real caller instead of being refused.
+Stdio keeps the channel sound by construction: the spawner is the sole peer,
+so nobody but the adapter can write the identity args.
+
+### Remote (HTTP) — loopback with a bearer
+
+A persistent server (`winch serve --mcp http --port 3899`) avoids per-call
+spawns. Read the bearer from a `0600` file, not from the environment:
+
+```jsonc
+{
+  "mcp": {
+    "winch": {
+      "type": "remote",
+      "url": "http://127.0.0.1:3899/mcp",
+      "headers": {
+        "Authorization": "Bearer {file:~/.secrets/winch-bearer}",
+        "X-Winch-Harness": "opencode"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+- `{env:NAME}` resolves from the process environment only, an unset variable
+  becomes an **empty string**, and opencode does not load `.env` — so an
+  `{env:…}` header that nobody exported makes every run hang on MCP connect
+  with no error. `{file:…}` has no such failure mode; write the value with
+  no trailing newline and `chmod 600`.
+- Trust note: over HTTP, anyone holding the bearer can call the server and
+  stamp any identity the schema accepts. Keep the listener on loopback and
+  treat the bearer as the trust boundary; use stdio where that matters.
+
+### v2
+
+Pin `"codemode": false` on the server entry when you want winch tools on the
+model's native tool list (the shape the adapter's hooks are verified against).
+On v2, hot config reload reconciles MCP at the next step boundary, so adding
+this entry does not require restarting a running session.
+
+The hook learns the agent from `chat.message` / `chat.params` (V1) or the
+`context` hook (V2) per session, and falls back to `WINCH_AGENT`. Agent and
+session are stamped on every winch call, so claims are attributed to the real
+caller instead of being refused.
 
 ## Remote servers: URL + credentials
 
