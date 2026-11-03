@@ -52,8 +52,18 @@ jobs:
           # Versions carry the UTC date of the release; compare against the
           # tag's own date so a release cut after 00:00 UTC cannot ship
           # yesterday's date.
-          TAG_DATE="$(printf '%s' "${TAG%%-*}" | tr . -)"
-          UTC_DATE="$(date -u +%Y-%m-%d)"
+          # npm normalizes zero-padded version components (2026.11.03 ->
+          # 2026.11.3), so compare semver-normalized integers on both sides.
+          norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
+          # npm rewrites zero-padded components (2026.11.03 publishes as
+          # 2026.11.3), so a padded package.json would ship a version its own
+          # tag and consumers cannot address. Refuse the pad at the door.
+          if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
+            echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
+            exit 1
+          fi
+          TAG_DATE="$(norm "${TAG%%-*}" | tr . -)"
+          UTC_DATE="$(norm "$(date -u +%Y.%m.%d)" | tr . -)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
             echo "::error::tag date $TAG_DATE != UTC date $UTC_DATE — rename the version"
             exit 1
@@ -92,8 +102,18 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != plugin package.json $PKG — bump it first"
             exit 1
           fi
-          TAG_DATE="$(printf '%s' "${TAG%%-*}" | tr . -)"
-          UTC_DATE="$(date -u +%Y-%m-%d)"
+          # npm normalizes zero-padded version components (2026.11.03 ->
+          # 2026.11.3), so compare semver-normalized integers on both sides.
+          norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
+          # npm rewrites zero-padded components (2026.11.03 publishes as
+          # 2026.11.3), so a padded package.json would ship a version its own
+          # tag and consumers cannot address. Refuse the pad at the door.
+          if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
+            echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
+            exit 1
+          fi
+          TAG_DATE="$(norm "${TAG%%-*}" | tr . -)"
+          UTC_DATE="$(norm "$(date -u +%Y.%m.%d)" | tr . -)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
             echo "::error::tag date $TAG_DATE != UTC date $UTC_DATE — rename the version"
             exit 1
@@ -131,8 +151,18 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != opencode package.json $PKG"
             exit 1
           fi
-          TAG_DATE="$(printf '%s' "${TAG%%-*}" | tr . -)"
-          UTC_DATE="$(date -u +%Y-%m-%d)"
+          # npm normalizes zero-padded version components (2026.11.03 ->
+          # 2026.11.3), so compare semver-normalized integers on both sides.
+          norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
+          # npm rewrites zero-padded components (2026.11.03 publishes as
+          # 2026.11.3), so a padded package.json would ship a version its own
+          # tag and consumers cannot address. Refuse the pad at the door.
+          if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
+            echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
+            exit 1
+          fi
+          TAG_DATE="$(norm "${TAG%%-*}" | tr . -)"
+          UTC_DATE="$(norm "$(date -u +%Y.%m.%d)" | tr . -)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
             echo "::error::tag date $TAG_DATE != UTC date $UTC_DATE — rename the version"
             exit 1
