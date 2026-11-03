@@ -213,7 +213,9 @@ spawns. Read the bearer from a `0600` file, not from the environment:
 Pin `"codemode": false` on the server entry when you want winch tools on the
 model's native tool list (the shape the adapter's hooks are verified against).
 On v2, hot config reload reconciles MCP at the next step boundary, so adding
-this entry does not require restarting a running session.
+this entry does not require restarting a running session. That claim is checked
+by `scripts/e2e-opencode.mjs --harness opencode2 --reload`, which starts a
+session without the entry, adds it, and calls a winch tool on the next turn.
 
 The hook learns the agent from `chat.message` / `chat.params` (V1) or the
 `context` hook (V2) per session, and falls back to `WINCH_AGENT`. Agent and
