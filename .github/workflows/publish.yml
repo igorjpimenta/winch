@@ -13,11 +13,13 @@
 #
 # The opencode line goes to npmjs through Trusted Publishing (OIDC): npm
 # exchanges this run's id-token for a short-lived token scoped by the package's
-# trusted-publisher entry (repo igorjpimenta/winch, file publish.yml, actions
-# publish + dist-tag). NODE_AUTH_TOKEN is pinned empty on those steps — a
+# trusted-publisher entry (repo igorjpimenta/winch, file publish.yml, action
+# publish). NODE_AUTH_TOKEN is pinned empty on the publish step — a
 # non-empty token hides a failed exchange behind a PUT 404 — and publish runs
 # --loglevel silly because npm logs OIDC failures at verbose only. A freshly
 # created entry can take hours before the exchange accepts it; re-run the job.
+# No step moves `latest` for a beta: a beta publishes under its beta tag and
+# `latest` holds the newest stable, taken natively by a stable publish.
 
 name: publish
 
@@ -192,9 +194,5 @@ jobs:
           else
             npm publish --tag ${{ steps.channel.outputs.tag }} --provenance --loglevel silly
           fi
-        env:
-          NODE_AUTH_TOKEN: ""
-      - if: steps.channel.outputs.tag == 'beta'
-        run: npm dist-tag add @igorjpimenta/winch-opencode@$(node -p "require('./package.json').version") latest
         env:
           NODE_AUTH_TOKEN: ""
