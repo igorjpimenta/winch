@@ -196,16 +196,18 @@ An order moves from ready through a claim and a running task to review. The
 verdict decides where it lands, and resume returns rejected or blocked work to
 ready.
 
-    flowchart LR
-      A[Order created] -->|status ready| B[Ready]
-      B -->|claim| C[Claimed]
-      C -->|attempt| D[Running]
-      D -->|checkpoint / evidence| D
-      D -->|done| E[Review]
-      D -->|blocked| F[Blocked]
-      E -->|approve| G[Approved]
-      E -->|reject| B
-      F -->|resume| B
+```mermaid
+flowchart LR
+  A[Order created] -->|status ready| B[Ready]
+  B -->|claim| C[Claimed]
+  C -->|attempt| D[Running]
+  D -->|checkpoint / evidence| D
+  D -->|done| E[Review]
+  D -->|blocked| F[Blocked]
+  E -->|approve| G[Approved]
+  E -->|reject| B
+  F -->|resume| B
+```
 
 Claim leases, attempt caps, and the checkpoint/evidence validation rules:
 [lifecycle](docs/lifecycle.md).
