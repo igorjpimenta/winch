@@ -23,7 +23,8 @@
   "scripts": {
     "test": "node --test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "test:e2e:opencode": "node scripts/e2e-opencode.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
