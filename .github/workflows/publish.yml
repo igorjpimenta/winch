@@ -1,14 +1,23 @@
-# Publish both packages to GitHub Packages.
+# Publish the release lines to their registries.
 #
-# Two independent release lines, each a bare tag (no v prefix):
-#   - `<semver>`            → @igorjpimenta/winch            (core MCP server)
-#   - `winch-openclaw-<semver>` → @igorjpimenta/winch-openclaw (OpenClaw plugin)
+# Three independent release lines, each a bare tag (no v prefix):
+#   - `<semver>`               → @igorjpimenta/winch             (core MCP server)
+#   - `winch-openclaw-<semver>`→ @igorjpimenta/winch-openclaw    (OpenClaw plugin)
+#   - `winch-opencode-<semver>`→ @igorjpimenta/winch-opencode    (OpenCode plugin)
 # Each job validates that the tag matches the version in its own package.json
 # and publishes stable to `latest`, prerelease to `beta`. Anything else fails.
 #
-# Consumers need an .npmrc scope line at npm.pkg.github.com, e.g.
+# Core and openclaw go to GitHub Packages; GITHUB_TOKEN has packages:write via
+# the `packages` permission below. Consumers need an .npmrc scope line:
 #   @igorjpimenta:registry=https://npm.pkg.github.com
-# GITHUB_TOKEN has packages:write via the `packages` permission below.
+#
+# The opencode line goes to npmjs through Trusted Publishing (OIDC): npm
+# exchanges this run's id-token for a short-lived token scoped by the package's
+# trusted-publisher entry (repo igorjpimenta/winch, file publish.yml, actions
+# publish + dist-tag). NODE_AUTH_TOKEN is pinned empty on those steps — a
+# non-empty token hides a failed exchange behind a PUT 404 — and publish runs
+# --loglevel silly because npm logs OIDC failures at verbose only. A freshly
+# created entry can take hours before the exchange accepts it; re-run the job.
 
 name: publish
 
@@ -22,6 +31,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 jobs:
   core:
@@ -138,6 +148,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # Node 22 bundles npm 10, which has no trusted publishing at all and
+      # fails the exchange silently — npm >= 11.5.1 is the floor.
+      - run: npm install -g npm@latest && npm --version
       - name: Resolve channel (stable vs beta)
         id: channel
         run: |
@@ -177,11 +190,11 @@ jobs:
           if npm view "@igorjpimenta/winch-opencode@$V" version >/dev/null 2>&1; then
             echo "::notice::$V is already published; skipping (tag kept for provenance)"
           else
-            npm publish --tag ${{ steps.channel.outputs.tag }}
+            npm publish --tag ${{ steps.channel.outputs.tag }} --provenance --loglevel silly
           fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ""
       - if: steps.channel.outputs.tag == 'beta'
         run: npm dist-tag add @igorjpimenta/winch-opencode@$(node -p "require('./package.json').version") latest
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ""
