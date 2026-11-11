@@ -39,6 +39,14 @@ function parseInt(raw) {
   return Number(s);
 }
 
+function parseBool(raw) {
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "yes" || s === "on") return true;
+  if (s === "false" || s === "0" || s === "no" || s === "off") return false;
+  return null;
+}
+
 // key -> { env, parse, check }. parse normalizes (string|number|array) to the
 // stored shape; check rejects out-of-range values. Stored shapes are plain
 // JSON: a resolved config survives a round-trip through JSON by construction.
@@ -63,6 +71,7 @@ const SPEC = {
   claimWebhookUrl:     { env: "WINCH_CLAIM_WEBHOOK_URL",     parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookBearer:  { env: "WINCH_CLAIM_WEBHOOK_BEARER",  parse: (raw) => String(raw ?? ""), check: () => true },
   claimWebhookTimeoutMs: { env: "WINCH_CLAIM_WEBHOOK_TIMEOUT_MS", parse: parseInt, check: (v) => v > 0 },
+  costTracking:          { env: "WINCH_COST_TRACKING",          parse: parseBool, check: (v) => typeof v === "boolean" },
   // Per-harness routing table: { <harness>: { url, bearer?, timeoutMs? } }.
   // JSON in env (`WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…"}}'`), object
   // in explicit config. A harness with no entry falls back to the single
@@ -108,6 +117,7 @@ export const CONFIG_DEFAULTS = {
   claimWebhookBearer: "",
   claimWebhookTimeoutMs: 3000,
   claimWebhooks: {},
+  costTracking: true,
 };
 
 export const CONFIG_ENV = Object.fromEntries(

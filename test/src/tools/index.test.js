@@ -8,7 +8,7 @@ beforeEach(() => { h = makeHarness("winch-index-"); });
 afterEach(() => h.teardown());
 
 test("createToolHandlers exposes the same surface the definitions declare", () => {
-  assert.equal(h.TOOL_DEFS.length, 11);
+  assert.equal(h.TOOL_DEFS.length, 12);
   for (const def of h.TOOL_DEFS) {
     const handler = h.call(def.name, {}, ATLAS);
     assert.ok(handler instanceof Promise, `${def.name} did not dispatch`);

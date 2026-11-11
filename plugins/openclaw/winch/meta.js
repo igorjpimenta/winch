@@ -23,12 +23,20 @@ export function buildWinchMeta(event, ctx) {
   const session = ctx?.sessionKey ?? ctx?.sessionId ?? ctx?.runId ?? event?.sessionId ?? event?.runId ?? null;
   if (agent === null && session === null) return undefined;
   const params = event?.params ?? {};
+  // Optional cost tracking: forward any usage/cost payload the host exposes
+  // on the tool context or event. Absent => no usage stamped (winch records
+  // nothing), so this stays strictly opt-in.
+  const rawUsage = ctx?.usage ?? ctx?.tokens ?? ctx?.cost ??
+    event?.usage ?? event?.tokens ?? event?.cost ??
+    ctx?.response?.usage ?? event?.response?.usage ?? null;
+  const winch = { harness: "openclaw", agent, session };
+  if (rawUsage && typeof rawUsage === "object") winch.usage = rawUsage;
   return {
     params: {
       ...params,
       _meta: {
         ...(params._meta ?? {}),
-        winch: { harness: "openclaw", agent, session },
+        winch,
       },
     },
   };

@@ -591,6 +591,54 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     },
   };
 
+  // ──────────────────────────────────────────────────── USAGE / COST
+  const usageApi = {
+    record({ harness, agent, session, taskId = null, usage, source = "meta", at = now() }) {
+      if (!usage) return null;
+      const u = usage;
+      const r = db.prepare(`
+        INSERT INTO usage_events(harness, agent, session, task_id, model, tokens_in, tokens_out, cache_read, cost_usd, tool_calls, source, at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        harness, agent, session, taskId ?? null,
+        u.model ?? null, u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null,
+        u.costUsd ?? null, u.toolCalls ?? null, source ?? null, at
+      );
+      return Number(r.lastInsertRowid);
+    },
+    list({ harness, agent, session, taskId, since, limit } = {}) {
+      const where = [];
+      const args = [];
+      if (harness) { where.push("harness=?"); args.push(harness); }
+      if (agent)   { where.push("agent=?");   args.push(agent); }
+      if (session) { where.push("session=?"); args.push(session); }
+      if (taskId)  { where.push("task_id=?"); args.push(taskId); }
+      if (since)   { where.push("at>=?");     args.push(since); }
+      const lim = Number.isInteger(limit) && limit > 0 ? limit : 100;
+      const sql = `SELECT * FROM usage_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY at DESC LIMIT ?`;
+      args.push(lim);
+      return db.prepare(sql).all(...args);
+    },
+    summary({ harness, agent, session, taskId, since } = {}) {
+      const where = [];
+      const args = [];
+      if (harness) { where.push("harness=?"); args.push(harness); }
+      if (agent)   { where.push("agent=?");   args.push(agent); }
+      if (session) { where.push("session=?"); args.push(session); }
+      if (taskId)  { where.push("task_id=?"); args.push(taskId); }
+      if (since)   { where.push("at>=?");     args.push(since); }
+      const sql = `SELECT
+        COUNT(*) AS calls,
+        COALESCE(SUM(tokens_in),0) AS tokens_in,
+        COALESCE(SUM(tokens_out),0) AS tokens_out,
+        COALESCE(SUM(cache_read),0) AS cache_read,
+        COALESCE(SUM(cost_usd),0) AS cost_usd,
+        COALESCE(SUM(tool_calls),0) AS tool_calls
+        FROM usage_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+      return db.prepare(sql).get(...args);
+    },
+  };
+
   // ──────────────────────────────────────────────────── EXISTENCE / KIND
   function itemKindOf(id) {
     const cls = classifyId(id);
@@ -609,6 +657,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     task:  taskApi,
     dep:   depApi,
     webhook: webhookApi,
+    usage: usageApi,
     itemKindOf,
     close() { db.close(); },
   };

@@ -10,7 +10,10 @@ import {
   index,
   check,
   primaryKey,
+  real,
 } from "drizzle-orm/sqlite-core";
+
+export const USAGE_SOURCES = ["meta", "tool", "cli", "plugin"];
 
 export const EPIC_STATUSES = ["idea", "planned", "in_progress", "done", "cancelled"];
 export const STORY_STATUSES = ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
@@ -120,6 +123,26 @@ export const webhookTargets = sqliteTable("webhook_targets", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
+
+export const usageEvents = sqliteTable("usage_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  harness: text("harness").notNull(),
+  agent: text("agent").notNull(),
+  session: text("session").notNull(),
+  taskId: text("task_id"),
+  model: text("model"),
+  tokensIn: integer("tokens_in"),
+  tokensOut: integer("tokens_out"),
+  cacheRead: integer("cache_read"),
+  costUsd: real("cost_usd"),
+  toolCalls: integer("tool_calls"),
+  source: text("source"),
+  at: integer("at").notNull(),
+}, (table) => [
+  index("idx_usage_events_identity").on(table.harness, table.agent, table.session),
+  index("idx_usage_events_task").on(table.taskId),
+  index("idx_usage_events_at").on(table.at),
+]);
 
 export const deps = sqliteTable("deps", {
   fromId: text("from_id").notNull(),

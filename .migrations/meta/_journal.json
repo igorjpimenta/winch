@@ -43,6 +43,13 @@
       "when": 1793063101061,
       "tag": "0005_classy_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794428023147,
+      "tag": "0006_damp_vertigo",
+      "breakpoints": true
     }
   ]
 }
