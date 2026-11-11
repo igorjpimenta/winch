@@ -39,16 +39,34 @@ export function createToolHandlers(store, logger) {
     if (cfg.costTracking !== false) {
       try {
         const usage = resolveUsage({ meta, args });
-        if (usage) {
-          store.usage.record({
-            harness: identity.harness,
-            agent: identity.agent,
-            session: identity.session,
-            taskId: (typeof args?.taskId === "string" ? args.taskId : (typeof args?.task_id === "string" ? args.task_id : null)),
-            usage,
-            source: "meta",
-          });
+      if (usage) {
+        // Attribute usage to whatever work item this call touches — not just
+        // tasks. All work (epics, stories, tasks, plans) consumes tokens.
+        const itemId = typeof args?.taskId === "string" ? args.taskId
+          : typeof args?.task_id === "string" ? args.task_id
+          : typeof args?.id === "string" ? args.id
+          : typeof args?.epicId === "string" ? args.epicId
+          : typeof args?.epic_id === "string" ? args.epic_id
+          : typeof args?.storyId === "string" ? args.storyId
+          : typeof args?.story_id === "string" ? args.story_id
+          : null;
+        let itemKind = null;
+        if (itemId) {
+          if (itemId.startsWith("EPIC-")) itemKind = "epic";
+          else if (itemId.startsWith("STORY-")) itemKind = "story";
+          else if (itemId.startsWith("TASK-")) itemKind = "task";
+          else itemKind = "item";
         }
+        store.usage.record({
+          harness: identity.harness,
+          agent: identity.agent,
+          session: identity.session,
+          itemId,
+          itemKind,
+          usage,
+          source: "meta",
+        });
+      }
       } catch (e) {
         logger?.warn?.(`winch: usage record failed: ${e?.message}`);
       }

@@ -304,7 +304,11 @@ export const TOOL_DEFS = [
         type: "object",
         additionalProperties: false,
         properties: {
-          taskId: { type: "string", description: "Optional TASK-… to attribute this usage to." },
+          itemId: { type: "string", description: "Optional EPIC-…/STORY-…/TASK-… (or any item id) to attribute this usage to." },
+          item_id: { type: "string", description: "Alias for itemId." },
+          itemKind: { type: "string", description: "Kind of itemId: epic|story|task (inferred from prefix if omitted)." },
+          item_kind: { type: "string", description: "Alias for itemKind." },
+          taskId: { type: "string", description: "Optional TASK-… to attribute this usage to (alias for itemId with kind task)." },
           task_id: { type: "string", description: "Alias for taskId." },
           model: { type: "string", description: "Model name." },
           tokensIn: { type: "integer", description: "Input tokens." },

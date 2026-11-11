@@ -129,6 +129,10 @@ export const usageEvents = sqliteTable("usage_events", {
   harness: text("harness").notNull(),
   agent: text("agent").notNull(),
   session: text("session").notNull(),
+  // Generalized attribution: any backlog item (epic/story/task) or plan can
+  // own a usage event — not just tasks, since all work consumes tokens.
+  itemId: text("item_id"),
+  itemKind: text("item_kind"),
   taskId: text("task_id"),
   model: text("model"),
   tokensIn: integer("tokens_in"),

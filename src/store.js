@@ -593,25 +593,30 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
 
   // ──────────────────────────────────────────────────── USAGE / COST
   const usageApi = {
-    record({ harness, agent, session, taskId = null, usage, source = "meta", at = now() }) {
+    record({ harness, agent, session, itemId = null, itemKind = null, taskId = null, usage, source = "meta", at = now() }) {
       if (!usage) return null;
       const u = usage;
+      const resolvedItemId = itemId ?? taskId ?? null;
+      const resolvedKind = itemKind ?? (taskId ? "task" : null);
+      const resolvedTaskId = (resolvedKind === "task" ? (resolvedItemId ?? taskId) : (taskId ?? null));
       const r = db.prepare(`
-        INSERT INTO usage_events(harness, agent, session, task_id, model, tokens_in, tokens_out, cache_read, cost_usd, tool_calls, source, at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO usage_events(harness, agent, session, item_id, item_kind, task_id, model, tokens_in, tokens_out, cache_read, cost_usd, tool_calls, source, at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        harness, agent, session, taskId ?? null,
+        harness, agent, session, resolvedItemId, resolvedKind, resolvedTaskId,
         u.model ?? null, u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null,
         u.costUsd ?? null, u.toolCalls ?? null, source ?? null, at
       );
       return Number(r.lastInsertRowid);
     },
-    list({ harness, agent, session, taskId, since, limit } = {}) {
+    list({ harness, agent, session, itemId, itemKind, taskId, since, limit } = {}) {
       const where = [];
       const args = [];
       if (harness) { where.push("harness=?"); args.push(harness); }
       if (agent)   { where.push("agent=?");   args.push(agent); }
       if (session) { where.push("session=?"); args.push(session); }
+      if (itemId)  { where.push("item_id=?"); args.push(itemId); }
+      if (itemKind){ where.push("item_kind=?"); args.push(itemKind); }
       if (taskId)  { where.push("task_id=?"); args.push(taskId); }
       if (since)   { where.push("at>=?");     args.push(since); }
       const lim = Number.isInteger(limit) && limit > 0 ? limit : 100;
@@ -619,12 +624,14 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       args.push(lim);
       return db.prepare(sql).all(...args);
     },
-    summary({ harness, agent, session, taskId, since } = {}) {
+    summary({ harness, agent, session, itemId, itemKind, taskId, since } = {}) {
       const where = [];
       const args = [];
       if (harness) { where.push("harness=?"); args.push(harness); }
       if (agent)   { where.push("agent=?");   args.push(agent); }
       if (session) { where.push("session=?"); args.push(session); }
+      if (itemId)  { where.push("item_id=?"); args.push(itemId); }
+      if (itemKind){ where.push("item_kind=?"); args.push(itemKind); }
       if (taskId)  { where.push("task_id=?"); args.push(taskId); }
       if (since)   { where.push("at>=?");     args.push(since); }
       const sql = `SELECT
