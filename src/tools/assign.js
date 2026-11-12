@@ -9,13 +9,16 @@ export function createAssignTools({ store, logger }) {
       const qualified = `${identity.harness}:${identity.agent}`;
       const target = args?.id ?? args?.taskId;
       if (target && target.startsWith("STORY-")) {
-        const story = store.story.get(target);
-        if (!story) return err(`backlog_assign: not found: ${target}`, "not_found", { id: target });
-        if (story.status === "done" || story.status === "cancelled") {
-          return err(`${story.id} is ${story.status}; only live stories can be assigned.`, "rejected", { id: story.id });
-        }
-        try {
-          const assigned = args?.agent === undefined ? story.assigned ?? null : (args.agent || null);
+      const story = store.story.get(target);
+      if (!story) return err(`backlog_assign: not found: ${target}`, "not_found", { id: target });
+      if (story.status === "done" || story.status === "cancelled") {
+        return err(`${story.id} is ${story.status}; only live stories can be assigned.`, "rejected", { id: story.id });
+      }
+      if (args?.agent === null || args?.agent === "") {
+        return err(`${story.id}: agent is required; null/unassigned is not allowed.`, "rejected", { id: story.id });
+      }
+      try {
+        const assigned = args?.agent === undefined ? story.assigned ?? null : (args.agent || null);
           const updated = store.story.update(story.id, {
             assigned,
             capabilities: args?.capabilities !== undefined ? args.capabilities : story.capabilities ?? undefined,
@@ -37,6 +40,9 @@ export function createAssignTools({ store, logger }) {
       }
       const task = store.task.get(target);
       if (!task) return err(`backlog_assign: not found: ${target}`, "not_found", { taskId: target ?? null });
+      if (args?.agent === null || args?.agent === "" || args?.agent === undefined) {
+        return err(`${task.id}: agent is required; null/unassigned is not allowed.`, "rejected", { taskId: task.id });
+      }
       try {
         const updated = store.task.assign({
           id: task.id,

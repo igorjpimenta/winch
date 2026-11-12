@@ -57,17 +57,14 @@ test("any caller may assign — identity is attribution, not a gate", async () =
   );
 });
 
-test("null clears the assignee; capabilities survive when omitted", async () => {
+test("null is rejected; capabilities survive when omitted", async () => {
   const task = seed();
   await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
-  await handle("backlog_assign", { taskId: task.id, agent: null }, PLANNER);
+  const r = await handle("backlog_assign", { taskId: task.id, agent: null }, PLANNER);
+  assert.equal(r.details.reason, "rejected");
   const fresh = store.task.get(task.id);
-  assert.equal(fresh.assigned, null);
+  assert.equal(fresh.assigned, "tester");
   assert.deepEqual(fresh.capabilities, ["qa"]);
-  assert.equal(
-    store.db.prepare("SELECT note FROM events WHERE kind='task.assigned' ORDER BY id DESC LIMIT 1").get().note,
-    "assign nobody"
-  );
 });
 
 test("unknown task is refused without writing anything", async () => {
@@ -106,13 +103,13 @@ test("a story can be assigned, and its owner is the one woken", async () => {
   assert.equal(ev[0].item_kind, "story");
 });
 
-test("clearing a story assignee works and closed stories refuse assignment", async () => {
+test("clearing a story assignee is rejected and closed stories refuse assignment", async () => {
   const epic = store.epic.create({ title: "E-story2", status: "planned" });
   const story = store.story.create({ epicId: epic.id, title: "S-story2", status: "ready" });
   await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
   const cleared = await handle("backlog_assign", { id: story.id, agent: null }, PLANNER);
-  assert.equal(cleared.details.status, "ok");
-  assert.equal(store.story.get(story.id).assigned, null);
+  assert.equal(cleared.details.reason, "rejected");
+  assert.equal(store.story.get(story.id).assigned, "tester");
   store.story.update(story.id, { status: "done" });
   const refused = await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
   assert.equal(refused.details.reason, "rejected");
