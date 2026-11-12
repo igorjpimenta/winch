@@ -101,11 +101,19 @@ export function createRouter({ wake, planner = null, now = Date.now, statePath =
       if (ev?.id != null && seenRows.has(ev.id)) return null;
       let acted = false;
       for (const u of ev?.unblocked ?? []) {
-        if (!u?.assigned || !u?.id || u.assigned === planner) continue;
+        if (!u?.id) continue;
+        if (!u?.assigned) { logger?.warn?.(`winch: unblocked task ${u.id} has no assignee; cannot wake`); continue; }
+        if (u.assigned === planner) continue;
         inflight.delete(`task:${u.id}`);
         if (send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" })) acted = true;
       }
       const route = wakeFor(ev, { planner });
+      if (route === null && ev?.item?.id && (ev.kind === "task.assigned" || ev.kind === "story.assigned" || ev.kind === "task.restored" || ev.kind === "task.appended" || ev.kind === "epic.completed")) {
+        const hasAgent = ev.kind === "task.appended" || ev.kind === "epic.completed"
+          ? (ev.epicCreatedBy ?? planner)
+          : (ev.item?.assigned ?? ev.task?.assignee);
+        if (!hasAgent) logger?.warn?.(`winch: ${ev.kind} for ${ev.item.id} has no assignee/creator; cannot wake`);
+      }
       if (route && send(route)) acted = true;
       if (acted && ev?.id != null) {
         seenRows.add(ev.id);
