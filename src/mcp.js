@@ -45,9 +45,10 @@ function shapeFromJson(schema) {
   // The _meta passthrough below is load-bearing, not laxity: without a
   // declared slot the SDK strips the twin's stamp before the handler runs,
   // and the args._meta channel silently never fires.
-  shape.winch_agent = z.optional(z.string());
-  shape.winch_session = z.optional(z.string());
-  shape._meta = z.optional(z.unknown());
+   shape.winch_agent = z.optional(z.string());
+   shape.winch_session = z.optional(z.string());
+   shape.winch_usage = z.optional(z.string());
+   shape._meta = z.optional(z.unknown());
   return shape;
 }
 

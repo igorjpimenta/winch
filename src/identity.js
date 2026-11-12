@@ -122,3 +122,38 @@ export function identitySessionKey(id) {
   const clean = assertCleanTriple(id, "session key");
   return `${clean.harness}:${clean.agent}:${clean.session}`;
 }
+
+// Normalize a usage/cost payload from any trusted channel. Returns null when
+// no usable usage data is present, so callers can treat absence as "not
+// reported" rather than recording a zero row.
+const USAGE_NUM = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+export function resolveUsage({ meta, args } = {}) {
+  const candidates = [
+    meta?.winch?.usage,
+    meta?.winch?.cost,
+    args?._meta?.winch?.usage,
+    args?._meta?.winch?.cost,
+  ];
+  // opencode args channel: a JSON string under winch_usage.
+  if (typeof args?.winch_usage === "string" && args.winch_usage.trim() !== "") {
+    try { candidates.push(JSON.parse(args.winch_usage)); } catch { /* ignore malformed */ }
+  }
+  let raw = null;
+  for (const c of candidates) {
+    if (c && typeof c === "object") { raw = c; break; }
+  }
+  if (!raw) return null;
+  const out = {
+    model: typeof raw.model === "string" && raw.model.trim() !== "" ? raw.model.trim() : null,
+    tokensIn: USAGE_NUM(raw.tokensIn ?? raw.tokens_in ?? raw.inputTokens ?? raw.input_tokens),
+    tokensOut: USAGE_NUM(raw.tokensOut ?? raw.tokens_out ?? raw.outputTokens ?? raw.output_tokens),
+    cacheRead: USAGE_NUM(raw.cacheRead ?? raw.cache_read ?? raw.cachedTokens ?? raw.cached_tokens),
+    costUsd: USAGE_NUM(raw.costUsd ?? raw.cost_usd ?? raw.cost),
+    toolCalls: USAGE_NUM(raw.toolCalls ?? raw.tool_calls),
+  };
+  if (out.model === null && out.tokensIn === null && out.tokensOut === null &&
+      out.cacheRead === null && out.costUsd === null && out.toolCalls === null) {
+    return null;
+  }
+  return out;
+}

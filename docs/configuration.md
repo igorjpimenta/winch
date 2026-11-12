@@ -21,3 +21,4 @@ the old hardcoded one.
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
 | Note caps | `WINCH_NOTE_{PROGRESS,RESULT,REASON,ARTIFACT}_LIMIT` | 2000 / 4000 / 1000 / 500 |
 | Artifacts per done | `WINCH_MAX_ARTIFACTS` | 50 |
+| Optional LLM cost tracking | `WINCH_COST_TRACKING` | true (set false to disable recording of stamped usage) |
