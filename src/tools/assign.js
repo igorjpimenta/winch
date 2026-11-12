@@ -23,7 +23,7 @@ export function createAssignTools({ store, logger }) {
           // Story-scoped audit row: task_id carries the item id, item_kind
           // says which level, so a dispatcher can wake the owner to break the
           // story into tasks.
-          store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+          store.db.prepare("INSERT INTO events(item_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
             .run(story.id, "story", story.status, updated.status, "story.assigned", qualified,
               `assign ${assigned ?? "nobody"}`, Date.now());
           logger?.info?.(`backlog: ${qualified} assigned ${story.id} -> ${assigned ?? "nobody"}`);

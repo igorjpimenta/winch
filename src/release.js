@@ -25,14 +25,14 @@ export function renderReleaseNotes(store, epicId) {
     }
   }
   const gated = store.db.prepare(
-    "SELECT id, title, gate_type FROM tasks WHERE status='blocked' AND gate_type IS NOT NULL AND story_id IN (SELECT id FROM stories WHERE epic_id=?)"
+    "SELECT id, title, gate_type FROM items WHERE kind='task' AND status='blocked' AND gate_type IS NOT NULL AND parent_id IN (SELECT id FROM items WHERE kind='story' AND parent_id=?)"
   ).all(epicId);
   if (gated.length) {
     lines.push("", "## Open gates");
     for (const g of gated) lines.push(`- ${g.gate_type}: ${g.id} ${g.title}`);
   }
   const events = store.db.prepare(
-    "SELECT COUNT(*) AS n FROM events WHERE task_id IN (SELECT id FROM tasks WHERE story_id IN (SELECT id FROM stories WHERE epic_id=?))"
+    "SELECT COUNT(*) AS n FROM events WHERE item_id IN (SELECT id FROM items WHERE kind='task' AND parent_id IN (SELECT id FROM items WHERE kind='story' AND parent_id=?))"
   ).get(epicId);
   lines.push("", `## Audit`, `- ${events.n} recorded events across this epic's tasks`, "");
   return lines.filter((l) => l !== null && l !== undefined).join("\n");

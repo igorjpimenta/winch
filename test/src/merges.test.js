@@ -112,7 +112,7 @@ test("closed-unmerged PR on a gated task dissolves the gate with its own note an
   const t = store.task.get(task.id);
   assert.equal(t.status, "todo");
   assert.equal(t.gate_type, null, "gate metadata cleared");
-  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const ev = store.db.prepare("SELECT * FROM events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.match(ev.note, /^gate dissolved: closed unmerged PR #10/);
   assert.equal(ev.kind, "gate.dissolved", "dissolution declared at write");
 });
@@ -121,7 +121,7 @@ test("closed-unmerged PR on a plain task keeps the generic note", () => {
   const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
   store.task.update(task.id, { status: "in_progress", assigned: "builder" });
   applyMergeOutcomes(store, [{ number: 11, state: "CLOSED", title: "x", body }]);
-  const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const ev = store.db.prepare("SELECT note FROM events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.match(ev.note, /^closed unmerged: PR #11/);
 });
 
@@ -136,7 +136,7 @@ test("epic close with version writes one kind-stamped release event on the relea
   const first = applyMergeOutcomes(store, [{ number: 11, state: "MERGED", title: "ship", body }], { exec });
   assert.deepEqual(first.closedEpics, [epic2.id]);
   assert.deepEqual(first.tagged, ["v2.0.0"], "tag lands before the event");
-  const rows = store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'release shipped:%'").all(rel.id);
+  const rows = store.db.prepare("SELECT * FROM events WHERE item_id=? AND note LIKE 'release shipped:%'").all(rel.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].note, "release shipped: v2.0.0");
   assert.equal(rows[0].kind, "release.shipped", "declared at write, not inferred");
@@ -173,7 +173,7 @@ test("merge completing a held task names the displaced holder in the note", () =
   const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
   const out = applyMergeOutcomes(store, [{ number: 22, state: "MERGED", title: "feat: landed", body }]);
   assert.deepEqual(out.doneTasks, [task.id]);
-  const ev = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'merged: PR%'").all(task.id);
+  const ev = store.db.prepare("SELECT note FROM events WHERE item_id=? AND note LIKE 'merged: PR%'").all(task.id);
   assert.equal(ev.length, 1);
   assert.match(ev[0].note, /merged: PR #22 \(displaced builder\)/);
 });

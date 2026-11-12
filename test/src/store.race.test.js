@@ -55,7 +55,7 @@ test("four processes race one claim: exactly one winner, exactly one claim event
 
   const check = createStore({ dbPath });
   const claimEvents = check.db
-    .prepare("SELECT * FROM events WHERE task_id=? AND note='claim'")
+    .prepare("SELECT * FROM events WHERE item_id=? AND note='claim'")
     .all(task.id);
   assert.equal(claimEvents.length, 1, "the claim event row is transactional — one per race");
   assert.equal(check.task.get(task.id).status, "in_progress");

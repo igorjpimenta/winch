@@ -23,7 +23,7 @@ export function createReportTools({ store, logger }) {
           // current status so the event stream stays append-only without
           // fabricating a transition.
           store.db.prepare(
-            "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO events(item_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
           ).run(task.id, task.status, task.status, agentId, noteParts.join(" | "), Date.now());
         }
         const fresh = store.task.get(task.id);
@@ -53,11 +53,11 @@ export function createReportTools({ store, logger }) {
         let storyClosed = false;
         if (story && story.status !== "done" && story.status !== "cancelled") {
           const openTasks = store.db.prepare(
-            "SELECT COUNT(*) AS n FROM tasks WHERE story_id=? AND status NOT IN ('done','cancelled')"
+            "SELECT COUNT(*) AS n FROM items WHERE parent_id=? AND kind='task' AND status NOT IN ('done','cancelled')"
           ).get(story.id).n;
           if (openTasks === 0) {
             store.story.update(story.id, { status: "done" });
-            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+            store.db.prepare("INSERT INTO events(item_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
               .run(story.id, "story", story.status, "done", "story.completed", actor, story.id, Date.now());
             storyClosed = true;
           }
@@ -65,17 +65,18 @@ export function createReportTools({ store, logger }) {
         const epicId = story?.epic_id;
         if (storyClosed && epicId) {
           const openStories = store.db.prepare(
-            "SELECT COUNT(*) AS n FROM stories WHERE epic_id=? AND status NOT IN ('done','cancelled')"
+            "SELECT COUNT(*) AS n FROM items WHERE parent_id=? AND kind='story' AND status NOT IN ('done','cancelled')"
           ).get(epicId).n;
           // One marker per close cycle, not per epic: a review that appends
           // work reopens the epic, and its second close must wake the planner
           // again or the fix is never confirmed.
           if (openStories === 0) {
             store.epic.update(epicId, { status: "done" });
-            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
+            store.db.prepare("INSERT INTO events(item_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
               .run(epicId, "epic", "in_progress", "done", "epic.completed", actor, epicId, Date.now());
           }
         }
+        store.session?.release?.(sessionKey);
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
         return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, result_summary: updated.result_summary } }), { status: "ok", taskId: task.id, agentId });
       } catch (e) {
@@ -107,7 +108,7 @@ export function createReportTools({ store, logger }) {
           depResult = r.ok ? "added" : `failed:${r.code}`;
           if (r.ok) {
             store.db.prepare(
-              "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
+              "INSERT INTO events(item_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
             ).run(task.id, "blocked", "blocked", agentId, `dep: ${task.id} depends on ${args.blockedBy.id}`, Date.now());
           }
         }
@@ -137,7 +138,7 @@ export function createReportTools({ store, logger }) {
         // opened-but-never-resolved gate dissolves.
         const current = args?.taskId ? store.task.get(args.taskId) : null;
         const lastGate = current && store.db.prepare(
-          "SELECT note FROM events WHERE task_id=? AND (note LIKE 'gate open:%' OR note='gate resume') ORDER BY id DESC LIMIT 1"
+          "SELECT note FROM events WHERE item_id=? AND (note LIKE 'gate open:%' OR note='gate resume') ORDER BY id DESC LIMIT 1"
         ).get(current.id);
         if (lastGate && lastGate.note.startsWith("gate open:")) return err(`backlog_resume: ${current.id} was gated but the gate has dissolved (status ${current.status}) — nothing to resume; re-gate with backlog_block if approval is still needed.`, "gate_dissolved", { taskId: current.id, taskStatus: current.status });
         return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });

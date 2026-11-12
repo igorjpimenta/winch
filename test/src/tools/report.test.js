@@ -12,7 +12,7 @@ test("update heartbeats and appends a progress event", async () => {
   const res = await h.call("backlog_update", { taskId: task.id, progressSummary: "half way" });
   assert.equal(res.details.status, "ok");
   assert.ok(h.store.task.get(task.id).last_heartbeat > 0);
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'progress:%'").get(task.id);
+  const ev = h.store.db.prepare("SELECT * FROM events WHERE item_id=? AND note LIKE 'progress:%'").get(task.id);
   assert.match(ev.note, /half way/);
 });
 
@@ -37,7 +37,7 @@ test("done records the result, artifacts and the session", async () => {
   const t = h.store.task.get(task.id);
   assert.equal(t.status, "done");
   assert.match(t.result_summary, /artifacts: pr:1/);
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='task.completed'").get(task.id);
+  const ev = h.store.db.prepare("SELECT * FROM events WHERE item_id=? AND kind='task.completed'").get(task.id);
   assert.equal(ev.actor, "atlas");
   assert.equal(ev.session_ref, "test:atlas:sess-atlas");
 });
@@ -69,7 +69,7 @@ test("a story closes with its last task and records the transition", async () =>
   await h.call("backlog_claim", { taskId: b.id });
   await h.call("backlog_done", { taskId: b.id, resultSummary: "b done" });
   assert.equal(h.store.story.get(story.id).status, "done");
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.completed'").all(story.id);
+  const ev = h.store.db.prepare("SELECT * FROM events WHERE item_id=? AND kind='story.completed'").all(story.id);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].item_kind, "story");
 });
@@ -95,7 +95,7 @@ test("block records a reason and an optional dependency", async () => {
   assert.equal(res.details.status, "ok");
   assert.equal(h.store.task.get(task.id).status, "blocked");
   assert.equal(res.details.dep, "added");
-  assert.equal(h.store.dep.listOutgoing(task.id)[0].to_id, blocker.id);
+  assert.equal(h.store.dep.listOutgoing(task.id)[0].to_item_id, blocker.id);
 });
 
 test("block refuses a task assigned to another agent", async () => {
@@ -108,7 +108,7 @@ test("gate type opens through openGate and resume accepts only the caller", asyn
   const opened = await h.call("backlog_block", { taskId: task.id, reason: "approve", gateType: "release" });
   assert.equal(opened.details.status, "ok");
   assert.equal(h.store.task.get(task.id).gate_type, "release");
-  const ev = h.store.db.prepare("SELECT kind FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const ev = h.store.db.prepare("SELECT kind FROM events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.equal(ev.kind, "gate.opened");
   const mismatch = await h.call("backlog_resume", { taskId: task.id, actor: "someone-else" });
   assert.equal(mismatch.details.reason, "actor_mismatch");
