@@ -378,6 +378,20 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
         INSERT INTO usage_events(harness, agent, session, item_id, item_kind, model, tokens_in, tokens_out, cache_read, cost_usd, tool_calls, source, at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(harness, agent, session, itemId, itemKind, u.model ?? null, u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null, u.costUsd ?? null, u.toolCalls ?? null, source ?? null, at);
+      // Mirror to the events table so the WebSocket pipe can stream cost
+      // data to subscribers. Only when an item is bound — session-only usage
+      // stays in usage_events. Best-effort: a failure here must not break
+      // the recording of the usage row itself.
+      if (itemId) {
+        try {
+          db.prepare(`
+            INSERT INTO events(item_id, item_kind, from_status, to_status, kind, actor, note, session_ref, at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(itemId, itemKind ?? "item", null, "usage", "usage.recorded",
+                `${harness}:${agent}`, u.model ? `${u.model} ${u.costUsd ?? ""}`.trim() : "usage",
+                session, at);
+        } catch (e) { /* swallow */ }
+      }
       return Number(r.lastInsertRowid);
     },
     list({ harness, agent, session, itemId, itemKind, since, limit } = {}) {
