@@ -22,7 +22,7 @@ export const DEFAULT_WS_URL = "ws://127.0.0.1:38291";
 // its own lease, this only avoids duplicate turns for one assignment row.
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
 
-export function wakeFor(ev, { planner = "build" } = {}) {
+export function wakeFor(ev, { planner = null } = {}) {
   const id = ev?.item?.id ?? ev?.task?.id ?? null;
   if (!id) return null;
   switch (ev.kind) {
@@ -46,12 +46,14 @@ export function wakeFor(ev, { planner = "build" } = {}) {
     }
     case "task.appended": {
       if (ev.item?.status && ev.item.status !== "todo") return null;
-      const agent = ev.epicCreatedBy ?? planner;
+      const agent = ev.epicCreatedBy ?? planner ?? null;
+      if (!agent) return null;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "append" };
     }
     case "epic.completed": {
       if (!id.startsWith("EPIC-")) return null;
-      const agent = ev.epicCreatedBy ?? planner;
+      const agent = ev.epicCreatedBy ?? planner ?? null;
+      if (!agent) return null;
       return { agent, sessionKey: `winch-epic-${id}`, message: id, kind: "review", eventId: ev.id ?? null };
     }
     default:
@@ -59,7 +61,7 @@ export function wakeFor(ev, { planner = "build" } = {}) {
   }
 }
 
-export function createRouter({ wake, planner = "build", now = Date.now, statePath = null, logger = null }) {
+export function createRouter({ wake, planner = null, now = Date.now, statePath = null, logger = null }) {
   const inflight = new Map();
   const reviewedIds = readReviewed(statePath);
   const seenRows = new Set();
