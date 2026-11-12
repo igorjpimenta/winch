@@ -22,7 +22,7 @@ export const DEFAULT_WS_URL = "ws://127.0.0.1:38291";
 // its own lease, this only avoids duplicate turns for one assignment row.
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
 
-export function wakeFor(ev, { planner = "atlas" } = {}) {
+export function wakeFor(ev, { planner = "build" } = {}) {
   const id = ev?.item?.id ?? ev?.task?.id ?? null;
   if (!id) return null;
   switch (ev.kind) {
@@ -59,7 +59,7 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
   }
 }
 
-export function createRouter({ wake, planner, now = Date.now, statePath = null, logger = null }) {
+export function createRouter({ wake, planner = "build", now = Date.now, statePath = null, logger = null }) {
   const inflight = new Map();
   const reviewedIds = readReviewed(statePath);
   const seenRows = new Set();
