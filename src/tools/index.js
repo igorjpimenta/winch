@@ -5,7 +5,7 @@
 // OR assigned=?)`): a race loser gets `claim === null` and moves on. There is
 // no blocking wait inside a tool call.
 
-import { assertCleanTriple, resolveUsage } from "../identity.js";
+import { assertCleanTriple, resolveUsage, identitySessionKey } from "../identity.js";
 import { resolveRequestConfig } from "../config.js";
 import { TOOL_DEFS } from "./definitions.js";
 import { err } from "./shared.js";
@@ -42,7 +42,7 @@ export function createToolHandlers(store, logger) {
       if (usage) {
         // Attribute usage to whatever work item this call touches — not just
         // tasks. All work (epics, stories, tasks, plans) consumes tokens.
-        const itemId = typeof args?.taskId === "string" ? args.taskId
+        let itemId = typeof args?.taskId === "string" ? args.taskId
           : typeof args?.task_id === "string" ? args.task_id
           : typeof args?.id === "string" ? args.id
           : typeof args?.epicId === "string" ? args.epicId
@@ -50,9 +50,15 @@ export function createToolHandlers(store, logger) {
           : typeof args?.storyId === "string" ? args.storyId
           : typeof args?.story_id === "string" ? args.story_id
           : null;
+        let bound = null;
+        if (!itemId) {
+          try { bound = store.session?.get?.(identitySessionKey(identity)); } catch { bound = null; }
+          if (bound?.itemId) itemId = bound.itemId;
+        }
         let itemKind = null;
         if (itemId) {
-          if (itemId.startsWith("EPIC-")) itemKind = "epic";
+          if (bound?.itemKind) itemKind = bound.itemKind;
+          else if (itemId.startsWith("EPIC-")) itemKind = "epic";
           else if (itemId.startsWith("STORY-")) itemKind = "story";
           else if (itemId.startsWith("TASK-")) itemKind = "task";
           else itemKind = "item";

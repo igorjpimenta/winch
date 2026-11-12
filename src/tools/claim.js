@@ -25,6 +25,7 @@ export function createClaimTools({ store, logger }) {
           for (const c of candidates) {
             const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
             if (!claimed) continue;
+            store.session?.bind?.(sessionKey, claimed.id, "task");
             logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} from the ready queue`);
             const artifacts = collectStoryArtifacts(store, c.story.id);
             const handoff = {
@@ -69,6 +70,7 @@ export function createClaimTools({ store, logger }) {
         }
         const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
         if (!claimed) return ok(JSON.stringify({ empty: true, raced: true }), { status: "empty", reason: "claim_raced", agentId, taskId: task.id });
+        if (claimed) store.session?.bind?.(sessionKey, claimed.id, "task");
         logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} by id`);
         const artifacts = collectStoryArtifacts(store, c.story.id);
         return ok(

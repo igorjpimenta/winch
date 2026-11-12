@@ -120,6 +120,14 @@ export const usageEvents = sqliteTable("usage_events", {
   index("idx_usage_events_at").on(table.at),
 ]);
 
+export const sessionBindings = sqliteTable("session_bindings", {
+  sessionKey: text("session_key").primaryKey(),
+  itemId: text("item_id").notNull(),
+  itemKind: text("item_kind").notNull(),
+  boundAt: integer("bound_at").notNull(),
+  releasedAt: integer("released_at"),
+});
+
 export const deps = sqliteTable("deps", {
   fromItemId: text("from_item_id").notNull(),
   fromKind: text("from_kind").notNull(),

@@ -76,6 +76,7 @@ export function createReportTools({ store, logger }) {
               .run(epicId, "epic", "in_progress", "done", "epic.completed", actor, epicId, Date.now());
           }
         }
+        store.session?.release?.(sessionKey);
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
         return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, result_summary: updated.result_summary } }), { status: "ok", taskId: task.id, agentId });
       } catch (e) {

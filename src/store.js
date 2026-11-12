@@ -408,6 +408,27 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     },
   };
 
+  const sessionApi = {
+    bind(sessionKey, itemId, itemKind) {
+      if (!sessionKey || !itemId) return null;
+      db.prepare(`
+        INSERT INTO session_bindings(session_key, item_id, item_kind, bound_at, released_at)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT(session_key) DO UPDATE SET
+          item_id=excluded.item_id, item_kind=excluded.item_kind,
+          bound_at=excluded.bound_at, released_at=NULL
+      `).run(sessionKey, itemId, itemKind ?? null, now());
+      return true;
+    },
+    get(sessionKey) {
+      const r = db.prepare("SELECT item_id, item_kind FROM session_bindings WHERE session_key=? AND released_at IS NULL").get(sessionKey);
+      return r ? { itemId: r.item_id, itemKind: r.item_kind } : null;
+    },
+    release(sessionKey) {
+      db.prepare("UPDATE session_bindings SET released_at=? WHERE session_key=? AND released_at IS NULL").run(now(), sessionKey);
+    },
+  };
+
   function itemKindOf(id) {
     const cls = classifyId(id);
     if (!cls) return null;
@@ -489,6 +510,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     dep: depApi,
     webhook: webhookApi,
     usage: usageApi,
+    session: sessionApi,
     itemKindOf,
     close() { db.close(); },
   };

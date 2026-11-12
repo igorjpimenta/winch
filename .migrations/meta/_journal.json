@@ -57,6 +57,13 @@
       "when": 1794435000000,
       "tag": "0008_unify_items",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794436000000,
+      "tag": "0009_session_bindings",
+      "breakpoints": true
     }
   ]
 }
