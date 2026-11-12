@@ -51,9 +51,22 @@ export function createToolHandlers(store, logger) {
           : typeof args?.story_id === "string" ? args.story_id
           : null;
         let bound = null;
+        const fromArgs = !!itemId;
         if (!itemId) {
           try { bound = store.session?.get?.(identitySessionKey(identity)); } catch { bound = null; }
           if (bound?.itemId) itemId = bound.itemId;
+        }
+        // Implicit bind (option C): any call that names an item binds the
+        // session to it, so subsequent calls without an item id attribute
+        // to the last-touched item. Only bind when the id came from args,
+        // so a bound fallback does not re-bind to itself.
+        if (fromArgs && itemId) {
+          let ik = null;
+          if (itemId.startsWith("EPIC-")) ik = "epic";
+          else if (itemId.startsWith("STORY-")) ik = "story";
+          else if (itemId.startsWith("TASK-")) ik = "task";
+          else ik = "item";
+          try { store.session?.bind?.(identitySessionKey(identity), itemId, ik); } catch { /* ignore */ }
         }
         let itemKind = null;
         if (itemId) {
