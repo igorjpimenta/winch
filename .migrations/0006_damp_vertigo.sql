@@ -4,6 +4,8 @@ CREATE TABLE `usage_events` (
 	`agent` text NOT NULL,
 	`session` text NOT NULL,
 	`task_id` text,
+	`item_id` text,
+	`item_kind` text,
 	`model` text,
 	`tokens_in` integer,
 	`tokens_out` integer,
