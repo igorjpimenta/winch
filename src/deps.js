@@ -19,10 +19,10 @@ function reachable(store, startId, targetId) {
     if (++visited > cap) return null;
     const out = store.dep.listOutgoing(cur);
     for (const edge of out) {
-      if (seen.has(edge.to_id)) continue;
-      if (edge.to_id === targetId) return [...trail, edge.to_id];
-      seen.add(edge.to_id);
-      stack.push([edge.to_id, [...trail, edge.to_id]]);
+      if (seen.has(edge.to_item_id)) continue;
+      if (edge.to_item_id === targetId) return [...trail, edge.to_item_id];
+      seen.add(edge.to_item_id);
+      stack.push([edge.to_item_id, [...trail, edge.to_item_id]]);
     }
   }
   return null;
@@ -64,7 +64,7 @@ export function removeDep(store, fromId, toId) {
 export function depsResolved(store, id) {
   const out = store.dep.listOutgoing(id);
   for (const edge of out) {
-    const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[edge.to_kind](edge.to_id);
+    const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[edge.to_kind](edge.to_item_id);
     if (!item) return false; // missing dep target = block (safer than ignoring)
     if (item.status !== "done" && item.status !== "cancelled") return false;
   }

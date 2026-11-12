@@ -87,16 +87,17 @@ export function kindForEvent(row) {
 // uses, so both paths agree on what "the artifacts" means.
 export function toEventMessage(store, row) {
   const itemKind = row.item_kind ?? "task";
-  const item = !row.task_id
+  const itemId = row.item_id ?? row.task_id;
+  const item = !itemId
     ? null
     : itemKind === "story"
-      ? store.story.get(row.task_id)
+      ? store.story.get(itemId)
       : itemKind === "epic"
-        ? store.epic.get(row.task_id)
-        : store.task.get(row.task_id);
+        ? store.epic.get(itemId)
+        : store.task.get(itemId);
   const task = itemKind === "task" ? item : null;
-  const story = itemKind === "story" ? item : task ? store.story.get(task.story_id) : null;
-  const epic = itemKind === "epic" ? item : story ? store.epic.get(story.epic_id) : null;
+  const story = itemKind === "story" ? item : task ? store.story.get(task.story_id ?? task.parent_id) : null;
+  const epic = itemKind === "epic" ? item : story ? store.epic.get(story.epic_id ?? story.parent_id) : null;
   return {
     type: "event",
     kind: kindForEvent(row),
@@ -125,21 +126,20 @@ export function toEventMessage(store, row) {
     // A close frees dependents; a requeue (lease lost) makes the task itself
     // claimable again. Both need a wake, so both carry the list.
     unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "todo"
-      ? store.db.prepare(`
-          SELECT t.id, t.assigned FROM tasks t
-            JOIN stories s ON s.id=t.story_id
-            JOIN epics   e ON e.id=s.epic_id
-           WHERE t.status='todo' AND t.assigned IS NOT NULL
-             AND s.status IN ('ready','in_progress') AND e.status IN ('planned','in_progress')
-             AND NOT EXISTS (
-               SELECT 1 FROM deps d
-                 LEFT JOIN tasks   dt ON d.to_kind='task'  AND dt.id=d.to_id
-                 LEFT JOIN stories ds ON d.to_kind='story' AND ds.id=d.to_id
-                 LEFT JOIN epics   de ON d.to_kind='epic'  AND de.id=d.to_id
-                WHERE d.from_id=t.id
-                  AND COALESCE(dt.status, ds.status, de.status, 'missing') NOT IN ('done','cancelled')
-             )
-           ORDER BY t.created_at LIMIT 20
+          ? store.db.prepare(`
+            SELECT t.id, t.assigned FROM items t
+              JOIN items s ON s.id=t.parent_id
+              JOIN items e ON e.id=s.parent_id
+             WHERE t.kind='task' AND t.status='todo' AND t.assigned IS NOT NULL
+               AND s.kind='story' AND s.status IN ('ready','in_progress')
+               AND e.kind='epic' AND e.status IN ('planned','in_progress')
+               AND NOT EXISTS (
+                 SELECT 1 FROM deps d
+                   LEFT JOIN items di ON di.id=d.to_item_id
+                  WHERE d.from_item_id=t.id
+                    AND COALESCE(di.status, 'missing') NOT IN ('done','cancelled')
+               )
+             ORDER BY t.created_at LIMIT 20
         `).all()
       : [],
     task: task

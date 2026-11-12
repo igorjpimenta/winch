@@ -15,7 +15,7 @@ test("claims the named task for the caller and stamps the session", async () => 
   assert.equal(body.task.assigned, "atlas");
   assert.equal(body.handoff.reason, "by-id claim");
   assert.equal(body.handoff.acceptance_criteria, "AC-1");
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id").all(task.id);
+  const ev = h.store.db.prepare("SELECT * FROM events WHERE item_id=? ORDER BY id").all(task.id);
   assert.equal(ev.at(-1).kind, "task.claimed");
   assert.equal(ev.at(-1).session_ref, "test:atlas:sess-atlas");
 });

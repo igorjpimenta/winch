@@ -12,7 +12,7 @@ export function createReadTools({ store, logger }) {
     assigned: t.assigned ?? null,
     capabilities: t.capabilities ?? null,
     result_summary: t.result_summary ?? null,
-    artifacts: store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'artifact:%'").all(t.id)
+    artifacts: store.db.prepare("SELECT note FROM events WHERE item_id=? AND note LIKE 'artifact:%'").all(t.id)
       .map((e) => e.note.slice("artifact: ".length).trim()),
   });
 
@@ -66,8 +66,8 @@ export function createReadTools({ store, logger }) {
           : Array.isArray(story?.capabilities) && story.capabilities.length > 0 ? story.capabilities : [];
         const offered = Array.isArray(args?.capabilities) ? args.capabilities : [];
         const deps = store.dep.listOutgoing(task.id).map((e) => {
-          const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[e.to_kind](e.to_id);
-          return { kind: e.to_kind, id: e.to_id, status: item?.status ?? null };
+          const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[e.to_kind](e.to_item_id);
+          return { kind: e.to_kind, id: e.to_item_id, status: item?.status ?? null };
         });
         // Readiness mirrors ready-queue.js so a worker can tell "not mine" from
         // "not yet" without guessing; the read itself is never filtered.
@@ -91,7 +91,7 @@ export function createReadTools({ store, logger }) {
             artifacts,
             dependencies: deps,
             readiness: { ready: blockers.length === 0, blockers, requiresCapabilities: requiredCaps, assignedTo: task.assigned ?? null },
-            recentEvents: store.db.prepare("SELECT id, kind, actor, note, at FROM events WHERE task_id=? ORDER BY id DESC LIMIT 10").all(task.id),
+            recentEvents: store.db.prepare("SELECT id, kind, actor, note, at FROM events WHERE item_id=? ORDER BY id DESC LIMIT 10").all(task.id),
             brief: story ? renderReceiverPrompt({ task, story, epic, artifacts }) : null,
           }),
           { status: "ok", agentId: identity.agent, level: "task", id: task.id }

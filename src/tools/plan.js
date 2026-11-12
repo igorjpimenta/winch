@@ -85,7 +85,7 @@ export function createPlanTools({ store, logger }) {
       } catch (e) {
         // Creating the epic is the first write; cascade removes anything
         // written under it, so a failure leaves the store as it was.
-        if (epic?.id) store.db.prepare("DELETE FROM epics WHERE id=?").run(epic.id);
+        if (epic?.id) store.db.prepare("DELETE FROM items WHERE id=?").run(epic.id);
         logger?.warn?.(`backlog_plan failed: ${e?.message}`);
         return err(`backlog_plan failed: ${e?.message}`, "error");
       }
@@ -167,7 +167,7 @@ export function createPlanTools({ store, logger }) {
         // task.appended tells a dispatcher this work arrived after the plan;
         // task.created (from plan) stays planner noise.
         for (const t of created.tasks) {
-          store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
+          store.db.prepare("INSERT INTO events(item_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
             .run(t.id, "todo", "todo", "task.appended", `${identity.harness}:${identity.agent}`, t.title.slice(0, 120), at);
         }
         return ok(
@@ -175,8 +175,8 @@ export function createPlanTools({ store, logger }) {
           { status: "ok", agentId: identity.agent, stories: created.stories.length, tasks: created.tasks.length }
         );
       } catch (e) {
-        for (const t of created.tasks) store.db.prepare("DELETE FROM tasks WHERE id=?").run(t.id);
-        for (const st of created.stories) store.db.prepare("DELETE FROM stories WHERE id=?").run(st.id);
+        for (const t of created.tasks) store.db.prepare("DELETE FROM items WHERE id=?").run(t.id);
+        for (const st of created.stories) store.db.prepare("DELETE FROM items WHERE id=?").run(st.id);
         logger?.warn?.(`backlog_append failed: ${e?.message}`);
         return err(`backlog_append failed: ${e?.message}`, "error");
       }
@@ -215,17 +215,17 @@ export function createPlanTools({ store, logger }) {
         try {
           for (const t of tasks) {
             if (t.status === "cancelled") continue;
-            store.db.prepare("UPDATE tasks SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, t.id);
-            store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
+            store.db.prepare("UPDATE items SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, t.id);
+            store.db.prepare("INSERT INTO events(item_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
               .run(t.id, t.status, "cancelled", "task.dropped", actor, note, at);
           }
           for (const sid of storyIds) {
             const row = store.story.get(sid);
             if (row.status === "cancelled") continue;
-            store.db.prepare("UPDATE stories SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, sid);
+            store.db.prepare("UPDATE items SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, sid);
           }
           if (kind === "epic") {
-            store.db.prepare("UPDATE epics SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, id);
+            store.db.prepare("UPDATE items SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, id);
           }
           store.db.exec("COMMIT");
         } catch (e) {
@@ -269,15 +269,15 @@ export function createPlanTools({ store, logger }) {
         store.db.exec("BEGIN IMMEDIATE");
         try {
           for (const t of tasks) {
-            store.db.prepare("UPDATE tasks SET status='todo', updated_at=?, closed_at=NULL WHERE id=?").run(at, t.id);
-            store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
+            store.db.prepare("UPDATE items SET status='todo', updated_at=?, closed_at=NULL WHERE id=?").run(at, t.id);
+            store.db.prepare("INSERT INTO events(item_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
               .run(t.id, "cancelled", "todo", "task.restored", actor, "restored", at);
           }
           for (const sid of storyIds) {
-            store.db.prepare("UPDATE stories SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, sid);
+            store.db.prepare("UPDATE items SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, sid);
           }
           if (kind === "epic") {
-            store.db.prepare("UPDATE epics SET status='planned', updated_at=?, closed_at=NULL WHERE id=?").run(at, id);
+            store.db.prepare("UPDATE items SET status='planned', updated_at=?, closed_at=NULL WHERE id=?").run(at, id);
           }
           store.db.exec("COMMIT");
         } catch (e) {

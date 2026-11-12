@@ -40,7 +40,7 @@ test("assigns and writes the audit event", async () => {
   assert.deepEqual(fresh.capabilities, ["qa"]);
   const ev = store.db.prepare("SELECT * FROM events WHERE kind='task.assigned'").all();
   assert.equal(ev.length, 1);
-  assert.equal(ev[0].task_id, task.id);
+  assert.equal(ev[0].item_id, task.id);
   assert.equal(ev[0].from_status, ev[0].to_status, "assignment never fakes a status transition");
   assert.equal(ev[0].actor, "openclaw:atlas");
   assert.equal(ev[0].note, "assign tester");
@@ -101,7 +101,7 @@ test("a story can be assigned, and its owner is the one woken", async () => {
   assert.equal(res.details.status, "ok");
   assert.equal(res.details.level, "story");
   assert.equal(store.story.get(story.id).assigned, "tester");
-  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.assigned'").all(story.id);
+  const ev = store.db.prepare("SELECT * FROM events WHERE item_id=? AND kind='story.assigned'").all(story.id);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].item_kind, "story");
 });

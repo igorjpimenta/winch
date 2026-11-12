@@ -54,6 +54,6 @@ test("per-call meta config reaches the handler without touching the store config
     { winch: { config: { noteProgressLimit: 10 } } }
   );
   assert.equal(updated.details.status, "ok");
-  const ev = h.store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'progress:%'").get(task.id);
+  const ev = h.store.db.prepare("SELECT note FROM events WHERE item_id=? AND note LIKE 'progress:%'").get(task.id);
   assert.equal(ev.note.length, "progress: ".length + 11);
 });

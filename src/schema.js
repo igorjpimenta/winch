@@ -15,64 +15,33 @@ import {
 
 export const USAGE_SOURCES = ["meta", "tool", "cli", "plugin"];
 
-export const EPIC_STATUSES = ["idea", "planned", "in_progress", "done", "cancelled"];
-export const STORY_STATUSES = ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
-export const TASK_STATUSES = ["todo", "in_progress", "done", "blocked", "cancelled"];
-export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
 export const ITEM_KINDS = ["epic", "story", "task"];
+export const ITEM_STATUSES = ["idea", "planned", "backlog", "ready", "todo", "in_progress", "review", "done", "blocked", "cancelled"];
+export const EPIC_STATUSES = ITEM_STATUSES;
+export const STORY_STATUSES = ITEM_STATUSES;
+export const TASK_STATUSES = ITEM_STATUSES;
+export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
 
 const inList = (values) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
-export const epics = sqliteTable("epics", {
+export const items = sqliteTable("items", {
   id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  description: text("description"),
-  acceptance: text("acceptance"),
-  status: text("status").notNull(),
-  // Agent that planned the epic; the dispatcher wakes it for the review when
-  // the last story closes.
-  createdBy: text("created_by"),
-  ownerTeam: text("owner_team"),
-  priority: integer("priority").notNull().default(50),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-  closedAt: integer("closed_at"),
-}, (table) => [
-  check("epics_status", sql`${table.status} IN (${inList(EPIC_STATUSES)})`),
-]);
-
-export const stories = sqliteTable("stories", {
-  id: text("id").primaryKey(),
-  epicId: text("epic_id").notNull().references(() => epics.id, { onDelete: "cascade" }),
+  // Unified hierarchy: parent_id replaces epic_id/story_id. Root items (epics)
+  // have NULL. Arbitrary depth is allowed (epic -> story -> task -> subtask).
+  parentId: text("parent_id"),
+  kind: text("kind").notNull(),
   title: text("title").notNull(),
   description: text("description"),
   acceptance: text("acceptance"),
   status: text("status").notNull(),
   size: text("size"),
   priority: integer("priority").notNull().default(50),
+  ownerTeam: text("owner_team"),
+  createdBy: text("created_by"),
   assigned: text("assigned"),
   capabilities: text("capabilities"),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-  closedAt: integer("closed_at"),
-}, (table) => [
-  check("stories_status", sql`${table.status} IN (${inList(STORY_STATUSES)})`),
-  index("idx_stories_epic").on(table.epicId),
-  index("idx_stories_status_assigned").on(table.status, table.assigned),
-]);
-
-export const tasks = sqliteTable("tasks", {
-  id: text("id").primaryKey(),
-  storyId: text("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
-  description: text("description"),
-  status: text("status").notNull(),
-  executionKind: text("execution_kind").notNull(),
+  executionKind: text("execution_kind"),
   executionArgs: text("execution_args").notNull().default("{}"),
-  assigned: text("assigned"),
-  capabilities: text("capabilities"),
-  flowId: text("flow_id"),
-  taskRunId: text("task_run_id"),
   claimExpiresAt: integer("claim_expires_at"),
   leaseSeconds: integer("lease_seconds"),
   lastHeartbeat: integer("last_heartbeat"),
@@ -84,19 +53,21 @@ export const tasks = sqliteTable("tasks", {
   updatedAt: integer("updated_at").notNull(),
   claimedAt: integer("claimed_at"),
   closedAt: integer("closed_at"),
+  deletedAt: integer("deleted_at"),
 }, (table) => [
-  check("tasks_status", sql`${table.status} IN (${inList(TASK_STATUSES)})`),
-  check("tasks_execution_kind", sql`${table.executionKind} IN (${inList(EXECUTION_KINDS)})`),
-  index("idx_tasks_story").on(table.storyId),
-  index("idx_tasks_status_assigned").on(table.status, table.assigned),
+  check("items_kind", sql`${table.kind} IN (${inList(ITEM_KINDS)})`),
+  check("items_status", sql`${table.status} IN (${inList(ITEM_STATUSES)})`),
+  index("idx_items_parent").on(table.parentId),
+  index("idx_items_kind_status_assigned").on(table.kind, table.status, table.assigned),
 ]);
+
+// Note: no aliases exported. Consumers use `items` (or store wrappers).
 
 export const events = sqliteTable("events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  // Item-scoped audit log: task_id carries the id of the item the row is
-  // about, and item_kind says which (task for everything task-level; story
-  // for assignment of a story to an agent).
-  taskId: text("task_id").notNull(),
+  // Item-scoped audit log: item_id carries the id of the item the row is
+  // about (epic/story/task); item_kind says which kind.
+  itemId: text("item_id").notNull(),
   itemKind: text("item_kind").notNull().default("task"),
   fromStatus: text("from_status"),
   toStatus: text("to_status").notNull(),
@@ -132,8 +103,9 @@ export const usageEvents = sqliteTable("usage_events", {
   // Generalized attribution: any backlog item (epic/story/task) or plan can
   // own a usage event — not just tasks, since all work consumes tokens.
   itemId: text("item_id"),
+  // item_kind dropped: derivable via items.kind join. Kept nullable for
+  // backward compat with older rows; new rows may leave it null.
   itemKind: text("item_kind"),
-  taskId: text("task_id"),
   model: text("model"),
   tokensIn: integer("tokens_in"),
   tokensOut: integer("tokens_out"),
@@ -144,21 +116,21 @@ export const usageEvents = sqliteTable("usage_events", {
   at: integer("at").notNull(),
 }, (table) => [
   index("idx_usage_events_identity").on(table.harness, table.agent, table.session),
-  index("idx_usage_events_task").on(table.taskId),
+  index("idx_usage_events_task").on(table.itemId),
   index("idx_usage_events_at").on(table.at),
 ]);
 
 export const deps = sqliteTable("deps", {
-  fromId: text("from_id").notNull(),
+  fromItemId: text("from_item_id").notNull(),
   fromKind: text("from_kind").notNull(),
-  toId: text("to_id").notNull(),
+  toItemId: text("to_item_id").notNull(),
   toKind: text("to_kind").notNull(),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.fromId, table.toId] }),
+  primaryKey({ columns: [table.fromItemId, table.toItemId] }),
   check("deps_from_kind", sql`${table.fromKind} IN (${inList(ITEM_KINDS)})`),
   check("deps_to_kind", sql`${table.toKind} IN (${inList(ITEM_KINDS)})`),
-  index("idx_deps_from").on(table.fromId),
-  index("idx_deps_to").on(table.toId),
+  index("idx_deps_from").on(table.fromItemId),
+  index("idx_deps_to").on(table.toItemId),
 ]);
 

@@ -43,7 +43,7 @@ test("a task read explains why it is not ready for this agent", async () => {
 
 test("a story read returns its tasks, parent epic and artifacts", async () => {
   const { epic, story, task } = h.seedReadyTask();
-  h.store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
+  h.store.db.prepare("INSERT INTO events(item_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
     .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/a", Date.now());
   const res = await h.call("backlog_get", { id: story.id });
   assert.equal(res.details.level, "story");

@@ -34,7 +34,7 @@ function seedHierarchy(store) {
 }
 
 function eventsFor(store, taskId) {
-  return store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id").all(taskId);
+  return store.db.prepare("SELECT * FROM events WHERE item_id=? ORDER BY id").all(taskId);
 }
 
 // ───────────────────────────────────────────────────────────── S0.3 CAS
@@ -187,13 +187,22 @@ test("0001 adds events.kind without rewriting history", (t) => {
   {
     const db = new Database(dbPath);
     db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE epics (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
-        acceptance TEXT, status TEXT NOT NULL, owner_team TEXT,
-        priority INTEGER NOT NULL DEFAULT 50, created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL, closed_at INTEGER);
-      CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
-        status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
-        gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+       CREATE TABLE epics (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+         acceptance TEXT, status TEXT NOT NULL, owner_team TEXT,
+         priority INTEGER NOT NULL DEFAULT 50, created_at INTEGER NOT NULL,
+         updated_at INTEGER NOT NULL, closed_at INTEGER);
+       CREATE TABLE stories (id TEXT PRIMARY KEY, epic_id TEXT NOT NULL, title TEXT NOT NULL,
+         description TEXT, acceptance TEXT, status TEXT NOT NULL, size TEXT,
+         priority INTEGER NOT NULL DEFAULT 50, assigned TEXT, capabilities TEXT,
+         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, closed_at INTEGER);
+       CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
+         description TEXT, status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
+         execution_args TEXT DEFAULT '{}' NOT NULL, assigned TEXT, capabilities TEXT,
+         flow_id TEXT, task_run_id TEXT, claim_expires_at INTEGER, lease_seconds INTEGER,
+         last_heartbeat INTEGER, attempt_count INTEGER DEFAULT 0 NOT NULL, gate_type TEXT,
+         blocked_at INTEGER, result_summary TEXT, created_at INTEGER NOT NULL,
+         updated_at INTEGER NOT NULL, claimed_at INTEGER, closed_at INTEGER);
+      CREATE TABLE deps (from_id TEXT NOT NULL, from_kind TEXT NOT NULL, to_id TEXT NOT NULL, to_kind TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (from_id, to_id));
       CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
         from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, at INTEGER NOT NULL);
       CREATE TABLE session_budgets (session_key TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
@@ -228,7 +237,7 @@ test("heartbeat renews the claim lease — a live agent is never swept", (t) => 
   const { task } = seedHierarchy(store);
   store.task.claim({ id: task.id, agentId: "agent-a", watchdogMs: 60 * 1000 });
   // Expire the lease out from under a live agent, then heartbeat.
-  store.db.prepare("UPDATE tasks SET claim_expires_at=? WHERE id=?").run(1, task.id);
+  store.db.prepare("UPDATE items SET claim_expires_at=? WHERE id=?").run(1, task.id);
   const beat = store.task.heartbeat(task.id, "agent-a");
   assert.ok(beat, "heartbeat accepted");
   assert.ok(beat.claim_expires_at > Date.now(), "lease renewed into the future");

@@ -39,7 +39,7 @@ test("clampNote keeps short notes and truncates long ones", () => {
 
 test("collectStoryArtifacts reads artifact events and done summaries, deduped", () => {
   const { epic, story, task } = seed();
-  store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
+  store.db.prepare("INSERT INTO events(item_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
     .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/a", Date.now());
   store.task.update(task.id, { status: "done", result_summary: "done\n\nartifacts: https://example.test/b, https://example.test/a" });
   const artifacts = collectStoryArtifacts(store, story.id).sort();

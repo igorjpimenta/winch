@@ -19,7 +19,7 @@ export function clampNote(s, max = 2000) {
 export function collectStoryArtifacts(store, storyId) {
   const out = new Set();
   for (const t of store.task.list({ storyId })) {
-    const evs = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'artifact:%'").all(t.id);
+    const evs = store.db.prepare("SELECT note FROM events WHERE item_id=? AND note LIKE 'artifact:%'").all(t.id);
     for (const e of evs) out.add(e.note.slice("artifact: ".length).trim());
     const m = t.result_summary ? t.result_summary.match(/\nartifacts: (.+)$/) : null;
     if (m) for (const a of m[1].split(",")) out.add(a.trim());

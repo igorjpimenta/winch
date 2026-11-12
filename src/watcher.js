@@ -44,20 +44,20 @@ export function tick(store, { config: override = null } = {}) {
     epicId: r.epic.id,
   }));
   const blocked = store.db
-    .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM tasks WHERE status='blocked' ORDER BY updated_at DESC LIMIT ?")
+    .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM items WHERE kind='task' AND status='blocked' ORDER BY updated_at DESC LIMIT ?")
     .all(cfg.blockedLimit);
   // Gated tasks are separated from plain blocks for visibility. Who should
   // be told about them is a subscriber decision — the events WebSocket
   // streams every row, and clients track their own seen state.
   const gates = store.db.prepare(`
     SELECT t.id, t.title, t.gate_type, t.blocked_at, t.assigned
-      FROM tasks t
-     WHERE t.status='blocked' AND t.gate_type IS NOT NULL
+       FROM items t
+      WHERE t.kind='task' AND t.status='blocked' AND t.gate_type IS NOT NULL
      ORDER BY t.blocked_at ASC
   `).all();
   const active = new Map();
   for (const r of store.db.prepare(
-    "SELECT assigned, COUNT(*) AS n FROM tasks WHERE status='in_progress' AND assigned IS NOT NULL GROUP BY assigned"
+    "SELECT assigned, COUNT(*) AS n FROM items WHERE kind='task' AND status='in_progress' AND assigned IS NOT NULL GROUP BY assigned"
   ).all()) {
     active.set(r.assigned, r.n);
   }

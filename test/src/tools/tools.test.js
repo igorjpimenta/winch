@@ -10,7 +10,7 @@ afterEach(() => h.teardown());
 
 test("a claim carries the store-only handoff: acceptance, artifacts, receiver prompt", async () => {
   const { story, task } = h.seedReadyTask();
-  h.store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
+  h.store.db.prepare("INSERT INTO events(item_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
     .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/upstream", Date.now());
   const res = await h.call("backlog_claim", { taskId: task.id });
   const body = JSON.parse(res.content[0].text);
