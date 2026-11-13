@@ -108,13 +108,31 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
       // A close can make already-assigned tasks claimable; the envelope names
       // them so no subscriber has to recompute the dependency graph.
       for (const u of ev?.unblocked ?? []) {
-        if (!u?.assigned || !u?.id || u.assigned === planner) continue;
+        if (!u?.id) continue;
+        if (!u?.assigned) { logger?.warn?.(`winch: unblocked task ${u.id} has no assignee; cannot wake`); continue; }
+        if (u.assigned === planner) continue;
         // An earlier wake may have been refused as not-ready; that suppression
         // must not outlive the event that made the task claimable.
         inflight.delete(`task:${u.id}`);
         if (send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" })) acted = true;
       }
       const route = wakeFor(ev, { planner });
+      if (route === null && ev?.item?.id && (ev.kind === "task.assigned" || ev.kind === "story.assigned" || ev.kind === "task.restored" || ev.kind === "task.appended" || ev.kind === "epic.completed")) {
+        const hasAgent = ev.kind === "task.appended" || ev.kind === "epic.completed"
+          ? (ev.epicCreatedBy ?? planner)
+          : (ev.item?.assigned ?? ev.task?.assignee);
+        if (!hasAgent) {
+          logger?.warn?.(`winch: ${ev.kind} for ${ev.item.id} has no assignee/creator; dies (no wake)`);
+          // A null assignee/creator can never become routable on replay; mark
+          // seen so the row does not spam the log. A later assignment emits a
+          // new row that carries the real agent.
+          if (ev?.id != null) {
+            seenRows.add(ev.id);
+            seenOrder.push(ev.id);
+            if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
+          }
+        }
+      }
       if (route && send(route)) acted = true;
       // A row is remembered only once it caused a wake: an unroutable row (an
       // older envelope, a filter hit) must stay retryable on the next replay.
