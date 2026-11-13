@@ -183,7 +183,7 @@ webhook and prompts the claiming session through the OpenCode SDK.
 | `backlog_plan` | create an epic with its stories and tasks in one call; the spec is written into the records |
 | `backlog_append` | add stories to an epic and/or tasks to a story after the plan, unassigned, for the planner to route |
 | `backlog_drop` / `backlog_restore` | disable an epic, story or task that was never claimed, and bring it back; claimed work can only be closed |
-| `backlog_assign` | set or clear an assignee on a task (it claims and delivers) or a story (its owner breaks it into tasks); that row is what wakes the assignee |
+| `backlog_assign` | set an assignee on a task (it claims and delivers) or a story (its owner breaks it into tasks); that row is what wakes the assignee. Null/empty agents are rejected loudly |
 | `backlog_get` | read an epic, story or task by id - acceptance, results, artifacts, dependencies, readiness |
 | `backlog_claim` | claim one task by id, or the highest-priority ready task when the id is omitted; atomic CAS under a lease |
 | `backlog_update` | heartbeat and append progress, comment or artifact to a claimed task |
