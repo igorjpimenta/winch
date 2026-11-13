@@ -160,6 +160,27 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 `ctx.tool.hook("execute.before")`. No SDK dependency: a plain
 `{ id, setup, server }` export satisfies both loaders.
 
+### Auto-wake dispatch (opencode)
+
+The opencode companion ships the same event-driven dispatcher as openclaw
+(`dispatch.js`): it follows `winch serve --ws` (default
+`ws://127.0.0.1:38291`), replays history on connect, and routes each row by
+kind:
+
+- `task.assigned` → assignee (if todo)
+- `story.assigned` → story owner (break down)
+- `task.appended` → epic creator (route new work)
+- `task.restored` → existing assignee
+- `task.completed` / `task.cancelled` → unblocked dependents
+- `epic.completed` → epic creator (once per marker)
+
+Routing is the record alone: a wake carries nothing but the item id, and the
+agent reads it with `backlog_get`. In-flight wakes are suppressed for 35
+minutes, reviewed epics are remembered in `~/.opencode/state/winch-plugin-dispatch.json`,
+and a null assignee/creator dies loudly on the dispatch layer (no wake, no
+retry) — a later assignment emits a new row. No planner agent is hardcoded;
+the fallback planner is supplied by the caller when needed.
+
 ### Local (stdio) — the strong shape
 
 ```jsonc
