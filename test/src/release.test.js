@@ -27,8 +27,8 @@ test("renderReleaseNotes projects the epic: statuses, acceptance, results, audit
   const md = renderReleaseNotes(store, epic.id);
   assert.match(md, /# Release notes — Ship v1/);
   assert.match(md, /All gates passed/);
-  assert.match(md, /\[review\] STORY-.* Core flow — Works end-to-end/);
-  assert.match(md, /\[x\] TASK-.* Build it — done/);
+  assert.match(md, /\[review\] ITM-.* Core flow — Works end-to-end/);
+  assert.match(md, /\[x\] ITM-.* Build it — done/);
   assert.match(md, /## Audit/);
   assert.match(md, /\d+ recorded events/);
 });
@@ -38,7 +38,7 @@ test("renderReleaseNotes surfaces open gates", () => {
   store.task.openGate({ id: t2.id, gateType: "release", actor: "herald" });
   const md = renderReleaseNotes(store, epic.id);
   assert.match(md, /## Open gates/);
-  assert.match(md, /release: TASK-.* Approve/);
+  assert.match(md, /release: ITM-.* Approve/);
 });
 
 test("shipRelease: Angular commit, backlog markers in PR body, branch per epic", () => {

@@ -54,8 +54,8 @@ Inside your harness agent:
 
     backlog_plan   { epic: { title: "my first epic" },
                      stories: [{ title: "S1", tasks: [{ title: "do the thing" }] }] }
-    backlog_claim  { taskId: "TASK-..." }     # identity stamped by the plugin
-    backlog_done   { taskId: "TASK-...", resultSummary: "done" }
+    backlog_claim  { taskId: "<item-id>" }    # identity stamped by the plugin
+    backlog_done   { taskId: "<item-id>", resultSummary: "done" }
 
 Verify from the operator side - no transcript reading:
 
@@ -266,14 +266,14 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
 ## Events stream
 
 `winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
-unless `--host` says otherwise) tails the events table and broadcasts every
+unless `--host` says otherwise) tails the `item_events` ledger and broadcasts every
 new row to all connected clients as JSON text frames:
 
 - `{"type":"welcome","lastEventId":N}` on connect, then
   `{"type":"history","events":[...]}` (newest 200), then
-- `{"type":"event","kind":"task.completed","id":N,"at":T,"task":{id,title,
-  story,epic,acceptance,artifacts,assignee},"actor":"...","note":"..."}` per
-  insert, in id order.
+- `{"type":"event","kind":"task.completed","id":N,"at":T,"item":{id,kind,
+  title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
+  assignee},"actor":"...","note":"..."}` per insert, in id order.
 
 Kinds on the wire come in three families - `task.*` for task lifecycle,
 `gate.*` for gate lifecycle, `release.*` for shipment - each declared by its
@@ -290,11 +290,11 @@ Delivery-dynamics notes the wire will not tell you: heartbeats renew the claim
 lease (only silence gets swept); an unmerged close dissolves its gate (late
 approvals answer `gate_dissolved`); starvation lives in the watcher manifest
 (`deferred` list, per-task `idleMs`), not the stream; a disputed completion is
-a new ticket linked by dep edge with a `supersedes: TASK-x` note, never a
+a new ticket linked by dep edge with a `supersedes: ITM-x` note, never a
 rewrite of history.
 
-Typed kinds and embedded task context land in follow-up work; this surface
-streams rows verbatim.
+Rows carry their stored `kind` and the recursive `item` envelope; the legacy
+`task`/`story`/`epic` blocks stay for subscribers that predate v8.
 
 The server never interprets a row - a gate opening is just another event, and
 reminders, digests and dashboards are subscriber code. Reconnect replays
@@ -307,7 +307,12 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` -> `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
-Schema lives in `src/schema.js` as Drizzle tables. `npm run db:generate`
+Schema lives in `src/schema.js` as Drizzle tables. v8 is one recursive
+`items` tree (`kind` = epic/story/task, `parent_id` + `child_key` + `visit_seq`
+for fan-out), with `item_state`, `item_tags`, `item_edges`, `attempts`,
+`work_sessions`, `artifacts`, `item_events`, `admission_queue` and
+`harness_webhooks`. Item ids are opaque; `kind` is the discriminator, never an
+id prefix. `npm run db:generate`
 turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
 migrations on open, and `npm run db:migrate` does the same explicitly for a
 deploy. The files are plain SQL and may be edited before they are applied for

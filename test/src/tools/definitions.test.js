@@ -28,9 +28,9 @@ test("every schema is closed, documented and object-shaped", () => {
 
 test("ids are always described so a caller knows the prefix", () => {
   for (const name of ["backlog_get", "backlog_drop", "backlog_restore", "backlog_assign"]) {
-    assert.match(byName.get(name).inputSchema.properties.id.description, /EPIC|STORY|TASK/);
+    assert.match(byName.get(name).inputSchema.properties.id.description, /item id/i);
   }
-  assert.match(byName.get("backlog_claim").inputSchema.properties.taskId.description, /TASK/);
+  assert.match(byName.get("backlog_claim").inputSchema.properties.taskId.description, /item id/i);
 });
 
 test("required fields are declared for the tools that cannot work without one", () => {

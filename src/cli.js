@@ -110,7 +110,7 @@ export async function runCli(argv) {
       try {
         const rows = readyTasks(store, { limit: 20 });
         console.log(JSON.stringify(
-          rows.map((r) => ({ taskId: r.task.id, title: r.task.title, assigned: r.task.assigned, story: r.story.id, epic: r.epic.id })),
+          rows.map((r) => ({ taskId: r.task.id, title: r.task.title, assigned: r.task.assignee_agent, story: r.story.id, epic: r.epic.id })),
           null, 2
         ));
       } finally {

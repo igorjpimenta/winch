@@ -15,6 +15,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
+import { readyTasks } from "./ready-queue.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -46,15 +47,15 @@ function encodeFrame(text) {
 }
 
 export function lastEventId(store) {
-  return store.db.prepare("SELECT COALESCE(MAX(id),0) AS m FROM events").get().m;
+  return store.event.lastEventId();
 }
 
 export function eventsSince(store, id, limit = HISTORY_LIMIT) {
-  return store.db.prepare("SELECT * FROM events WHERE id > ? ORDER BY id LIMIT ?").all(id, limit);
+  return store.event.since(id, limit);
 }
 
 export function eventsLatest(store, limit = HISTORY_LIMIT) {
-  return store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT ?").all(limit).reverse();
+  return store.event.latest(limit);
 }
 
 // Stable kind for a stored transition. The closed catalog lives here, in
@@ -86,22 +87,16 @@ export function kindForEvent(row) {
 // once per row. Artifacts come from the same collector the claim handoff
 // uses, so both paths agree on what "the artifacts" means.
 export function toEventMessage(store, row) {
-  const itemKind = row.item_kind ?? "task";
-  const item = !row.task_id
-    ? null
-    : itemKind === "story"
-      ? store.story.get(row.task_id)
-      : itemKind === "epic"
-        ? store.epic.get(row.task_id)
-        : store.task.get(row.task_id);
+  const item = !row.item_id ? null : store.item.get(row.item_id);
+  const itemKind = item?.kind ?? null;
   const task = itemKind === "task" ? item : null;
-  const story = itemKind === "story" ? item : task ? store.story.get(task.story_id) : null;
-  const epic = itemKind === "epic" ? item : story ? store.epic.get(story.epic_id) : null;
+  const story = itemKind === "story" ? item : task?.story_id ? store.story.get(task.story_id) : null;
+  const epic = itemKind === "epic" ? item : story?.epic_id ? store.epic.get(story.epic_id) : item?.epic_id ? store.epic.get(item.epic_id) : null;
   return {
     type: "event",
     kind: kindForEvent(row),
     id: row.id,
-    at: row.at,
+    at: row.created_at,
     // Normalised item: a dispatcher routes assignment and review wakes without
     // knowing which level the row is about.
     item: item
@@ -110,37 +105,20 @@ export function toEventMessage(store, row) {
           kind: itemKind,
           title: item.title,
           status: item.status,
-          assigned: item.assigned ?? null,
+          assigned: item.assignee_agent ?? null,
           createdBy: item.created_by ?? null,
         }
       : null,
     epicId: epic?.id ?? null,
     epicCreatedBy: epic?.created_by ?? null,
     storyId: story?.id ?? null,
-    storyAssigned: story?.assigned ?? null,
+    storyAssigned: story?.assignee_agent ?? null,
     // Work that a close just made claimable: a dispatcher wakes these without
-    // recomputing the dependency graph.
-    // Structural readiness only: capability tags are the claimant's business,
-    // so a tagged task must still appear here or it never gets woken.
-    // A close frees dependents; a requeue (lease lost) makes the task itself
-    // claimable again. Both need a wake, so both carry the list.
+    // recomputing the dependency graph. Structural readiness only: capability
+    // tags are the claimant's business, so a tagged task must still appear.
     unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "todo"
-      ? store.db.prepare(`
-          SELECT t.id, t.assigned FROM tasks t
-            JOIN stories s ON s.id=t.story_id
-            JOIN epics   e ON e.id=s.epic_id
-           WHERE t.status='todo' AND t.assigned IS NOT NULL
-             AND s.status IN ('ready','in_progress') AND e.status IN ('planned','in_progress')
-             AND NOT EXISTS (
-               SELECT 1 FROM deps d
-                 LEFT JOIN tasks   dt ON d.to_kind='task'  AND dt.id=d.to_id
-                 LEFT JOIN stories ds ON d.to_kind='story' AND ds.id=d.to_id
-                 LEFT JOIN epics   de ON d.to_kind='epic'  AND de.id=d.to_id
-                WHERE d.from_id=t.id
-                  AND COALESCE(dt.status, ds.status, de.status, 'missing') NOT IN ('done','cancelled')
-             )
-           ORDER BY t.created_at LIMIT 20
-        `).all()
+      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent).slice(0, 20)
+          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent }))
       : [],
     task: task
       ? {
@@ -150,7 +128,7 @@ export function toEventMessage(store, row) {
           epic: epic ? epic.title : null,
           acceptance: story ? story.acceptance : null,
           artifacts: story ? collectStoryArtifacts(store, story.id) : [],
-          assignee: task.assigned,
+          assignee: task.assignee_agent,
         }
       : null,
     actor: row.actor,

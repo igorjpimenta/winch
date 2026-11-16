@@ -38,28 +38,28 @@ export function tick(store, { config: override = null } = {}) {
     title: r.task.title,
     executionKind: r.task.execution_kind,
     executionArgs: r.task.execution_args,
-    assigned: r.task.assigned,
+    assigned: r.task.assignee_agent,
+    assignedHarness: r.task.assignee_harness,
     capabilities: r.task.capabilities,
     storyId: r.story.id,
     epicId: r.epic.id,
   }));
-  const blocked = store.db
-    .prepare("SELECT id, title, assigned, gate_type, blocked_at FROM tasks WHERE status='blocked' ORDER BY updated_at DESC LIMIT ?")
-    .all(cfg.blockedLimit);
+  const blocked = store.item
+    .list({ kind: "task", status: "blocked" })
+    .slice(0, cfg.blockedLimit)
+    .map((t) => ({ id: t.id, title: t.title, assigned: t.assignee_agent, gate_type: t.gate_type, blocked_at: t.blocked_at }));
   // Gated tasks are separated from plain blocks for visibility. Who should
   // be told about them is a subscriber decision — the events WebSocket
   // streams every row, and clients track their own seen state.
-  const gates = store.db.prepare(`
-    SELECT t.id, t.title, t.gate_type, t.blocked_at, t.assigned
-      FROM tasks t
-     WHERE t.status='blocked' AND t.gate_type IS NOT NULL
-     ORDER BY t.blocked_at ASC
-  `).all();
+  const gates = store.item
+    .list({ kind: "task", status: "blocked" })
+    .filter((t) => t.gate_type)
+    .sort((a, b) => (a.blocked_at ?? 0) - (b.blocked_at ?? 0))
+    .map((t) => ({ id: t.id, title: t.title, gate_type: t.gate_type, blocked_at: t.blocked_at, assigned: t.assignee_agent }));
   const active = new Map();
-  for (const r of store.db.prepare(
-    "SELECT assigned, COUNT(*) AS n FROM tasks WHERE status='in_progress' AND assigned IS NOT NULL GROUP BY assigned"
-  ).all()) {
-    active.set(r.assigned, r.n);
+  for (const t of store.item.list({ kind: "task", status: "in_progress" })) {
+    if (!t.assignee_agent) continue;
+    active.set(t.assignee_agent, (active.get(t.assignee_agent) ?? 0) + 1);
   }
   const routed = claimable.filter(
     (c) => c.assigned && (active.get(c.assigned) ?? 0) < cfg.maxActivePerAgent

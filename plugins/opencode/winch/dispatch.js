@@ -1,7 +1,7 @@
 // dispatch.js — turn winch events into agent wakes, for the opencode companion.
 //
 // Port of the openclaw dispatcher: the record is the brief. A wake carries
-// nothing but the item id (TASK-…, STORY-…, EPIC-…); the agent reads it with
+// nothing but the item id (an opaque item id); the agent reads it with
 // backlog_get. Routing is decided by the row itself:
 //
 //   task.assigned    → the assignee, to claim and deliver
@@ -51,7 +51,7 @@ export function wakeFor(ev, { planner = null } = {}) {
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "append" };
     }
     case "epic.completed": {
-      if (!id.startsWith("EPIC-")) return null;
+      if (ev.item?.kind !== "epic") return null;
       const agent = ev.epicCreatedBy ?? planner ?? null;
       if (!agent) return null;
       return { agent, sessionKey: `winch-epic-${id}`, message: id, kind: "review", eventId: ev.id ?? null };

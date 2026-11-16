@@ -53,8 +53,9 @@ test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it
 });
 
 test("expired lease is swept back to todo and reported", () => {
-  const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
-  store.db.prepare("UPDATE tasks SET claim_expires_at=? WHERE id=?").run(Date.now() - 1000, task.id);
+  const { task } = seed({ assigned: "lens", taskStatus: "todo" });
+  store.task.claim({ id: task.id, agentId: "lens" });
+  store.db.prepare("UPDATE attempts SET claimed_at=1, heartbeat_at=1 WHERE item_id=? AND ended_at IS NULL").run(task.id);
   const m = tick(store);
   assert.deepEqual(m.swept, [task.id]);
   assert.equal(store.task.get(task.id).status, "todo");
@@ -102,7 +103,7 @@ test("agent under the cap still routes", () => {
 test("tick writes gate-waiting rows for stale gates and reports waiting age", () => {
   const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "lens" });
-  store.db.prepare("UPDATE tasks SET blocked_at=? WHERE id=?").run(Date.now() - 25 * 3600 * 1000, task.id);
+  store.db.prepare("UPDATE attempts SET gate_record_json=json_set(COALESCE(gate_record_json, '{}'), '$.openedAt', ?) WHERE item_id=? AND gate_record_json IS NOT NULL").run(Date.now() - 25 * 3600 * 1000, task.id);
   const u = seed({ assigned: null });
   const m = tick(store);
   assert.equal(m.waits.length, 1);
