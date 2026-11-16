@@ -1,6 +1,6 @@
 // ws.test.js — the event pipe: welcome, history replay, live broadcast to
 // every connected client. Uses the real server and real sockets on an
-// ephemeral port; rows stream verbatim, typed kinds land in a follow-up.
+// ephemeral port; rows stream as typed envelopes.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

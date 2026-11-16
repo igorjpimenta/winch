@@ -1,4 +1,4 @@
-// store.race.test.js — the S0.3 acceptance criterion taken literally: N real
+// store.race.test.js — the claim race taken literally: N real
 // OS processes racing one claim. In-process sequential calls prove the CAS
 // predicate; only parallel processes with independent sqlite handles prove the
 // transaction boundary under WAL contention.

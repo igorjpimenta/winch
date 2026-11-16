@@ -1,7 +1,7 @@
 // dispatch.js — turn winch events into agent wakes, inside the gateway.
 //
-// One rule: the record is the brief. A wake carries nothing but the item id
-// (an opaque item id); the agent reads it with backlog_get. Routing is
+// One rule: the record is the brief. A wake carries nothing but the opaque
+// item id; the agent reads it with backlog_get. Routing is
 // decided by the row itself:
 //
 //   task.assigned    → the assignee, to claim and deliver

@@ -1,5 +1,5 @@
-// Edges between items. Only `depends_on` is used today, but the kind is part
-// of the primary key so other edge kinds can be added without a migration.
+// Edges between items. The primary key includes `kind`, so another edge kind
+// needs no migration.
 
 export function createDepApi({ core }) {
   const { db, now } = core;

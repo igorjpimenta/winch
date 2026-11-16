@@ -37,7 +37,7 @@ function eventsFor(store, taskId) {
   return store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id").all(taskId);
 }
 
-// ───────────────────────────────────────────────────────────── S0.3 CAS
+// ─────────────────────────────────────────────────────────── CLAIM CAS
 
 test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release wins", (t) => {
   const store = makeStore(t);
@@ -76,7 +76,7 @@ test("S0.3 atomicity: claim event `at` equals the claim's `claimed_at`", (t) => 
   assert.equal(claimed.lastEvent.note, "claim");
 });
 
-// ───────────────────────────────────────────────────────── S0.4 SWEEPER
+// ───────────────────────────────────────────────────────────── SWEEPER
 
 test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) => {
   const store = makeStore(t);
@@ -186,8 +186,7 @@ test("v6 data is copied into the v8 tree without losing ids or event order", (t)
   {
     const db = new Database(dbPath);
     // Build a complete v6 store by replaying the pre-v8 migrations, then
-    // write one row at each level. This is the shape a live install has on
-    // the day 0006 runs.
+    // write one row at each level: the shape 0006 must accept.
     for (const name of ["0000_next_katie_power", "0001_add-events-kind", "0003_pink_siren", "0004_salty_trauma", "0005_classy_havok"]) {
       const sql = readFileSync(new URL(`../../.migrations/${name}.sql`, import.meta.url), "utf8");
       for (const stmt of sql.split("--> statement-breakpoint")) if (stmt.trim()) db.exec(stmt);

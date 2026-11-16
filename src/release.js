@@ -1,7 +1,6 @@
-// release.js — Herald's delivery surface: render release notes from the
-// store, then open a branch + PR that carries the backlog markers S2.6's
-// merge detector keys on (`Backlog: <item-id>`, optional
-// `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`).
+// release.js — render release notes from the store, then open a branch + PR
+// that carries the backlog markers the merge detector keys on (`Backlog:
+// <item-id>`, optional `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`).
 
 import { execFileSync } from "node:child_process";
 

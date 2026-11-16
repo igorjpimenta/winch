@@ -1,4 +1,4 @@
-// release.test.js — S2.5: notes rendering from the store + the git/gh
+// release.test.js — notes rendering from the store + the git/gh
 // command contract (via injected exec; real gh is the post-merge smoke).
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";

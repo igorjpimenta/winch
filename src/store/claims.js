@@ -86,9 +86,9 @@ export function createClaimMethods({ core, apis }) {
            AND session_id IN (SELECT id FROM work_sessions WHERE agent_id=?)
       `).run(t, id, agentId);
       if (r.changes === 0) {
-        // A row can be in_progress without an attempt only when it predates
-        // this schema or was seeded directly. Heal it rather than refusing a
-        // heartbeat the old store accepted.
+        // A live item_state row can exist without an attempt when seeded
+        // directly; heal it rather than refusing a heartbeat the row's status
+        // allows.
         const row = apis.item.get(id);
         if (!row || row.status !== "in_progress" || row.assignee_agent !== agentId) return null;
         const session = ensureSession({

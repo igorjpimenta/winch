@@ -1,4 +1,4 @@
-// events-ws.js — dumb event pipe over WebSocket. Tails the events table and
+// events-ws.js — dumb event pipe over WebSocket. Tails the item_events ledger and
 // broadcasts every new row to all connected clients, verbatim. No
 // interpretation, no filtering, no notify logic: a gate opening is just
 // another row, and what it means — ping, dashboard card, digest line — is the
@@ -6,8 +6,8 @@
 //
 // Wire protocol (JSON text frames, server → client only):
 //   {"type":"welcome","lastEventId":N}    on connect (current max row id)
-//   {"type":"history","events":[...]}     backlog, oldest-first, capped
-//   {"type":"event","event":{...row...}}  one per new row, in id order
+//   {"type":"history","events":[...]}     backlog of envelopes, oldest-first
+//   {"type":"event","event":{...}}        one envelope per new row, in id order
 // Clients track their own seen state: reconnecting replays history, so a
 // missed frame costs a re-read, never a lost event. No auth in-process —
 // bind localhost, or put a bearer-checked reverse proxy in front.
@@ -61,13 +61,10 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
 // Stable kind for a stored transition. The closed catalog lives here, in
 // one place — task.*: created, claimed, progressed, completed, released,
 // blocked, cancelled, updated; gate.*: opened, resolved, dissolved — and
-// the README names it by family only so the two cannot drift. The stored
-// `kind` wins — producers declare it at write time (see insertEvent callers and kindForUpdate) and
-// the emitter feeds it straight through. Otherwise the row maps by
-// transition structure alone: notes are free text and can change, so no
-// branch here may read note content — a renamed note must never reclassify
-// history. Pre-kind rows therefore keep exactly the meanings they streamed
-// with before the column existed: an append-only log keeps its history.
+// the README names it by family only so the two cannot drift. A stored
+// `kind` wins; otherwise the row maps by transition structure alone. Notes
+// are free text and can change, so no branch here may read note content —
+// a renamed note must never reclassify history.
 export function kindForEvent(row) {
   if (row.kind) return row.kind;
   const from = row.from_status;

@@ -1,5 +1,5 @@
-// merges.js — close the loop S2.5 opens: read PR states, apply what a merge
-// (or an unmerged close) means to backlog rows, idempotently.
+// merges.js — read PR states and apply what a merge (or an unmerged close)
+// means to backlog rows, idempotently.
 //
 // Markers come from release PR bodies: `Backlog: <item-id>`, optional
 // `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`. gh reports state as

@@ -1,4 +1,4 @@
-// merges.test.js — S2.6: marker parsing, merge/close outcomes, idempotence,
+// merges.test.js — marker parsing, merge/close outcomes, idempotence,
 // tag command contract.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";

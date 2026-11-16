@@ -71,7 +71,7 @@ test("blocked tasks appear in blocked, never in claimable sets", () => {
   assert.equal(m.blocked[0].id, task.id);
 });
 
-// ───────────────────────────────────────────────── S3.4 load-aware routing
+// ───────────────────────────────────────────────────── load-aware routing
 test("busy assignee's claimable work defers; free assignee still routes", () => {
   seed({ assigned: "scout" }); // free agent's claimable task
   // builder: two in_progress tasks (at the cap) + one claimable

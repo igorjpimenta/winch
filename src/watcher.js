@@ -15,9 +15,8 @@ import { createStore } from "./store.js";
 import { readyTasks } from "./ready-queue.js";
 
 // An agent this busy should finish before it hears about more work. Keeps the
-// wake queue from stacking claims on an already-loaded assignee — the
-// deferred list is the starvation metric S3.5's burn-in reads (deferred must
-// stay near zero over a healthy week).
+// wake queue from stacking claims on an already-loaded assignee; the deferred
+// list is the starvation signal.
 export const MAX_ACTIVE_PER_AGENT = 2;
 
 /**

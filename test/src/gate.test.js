@@ -1,4 +1,4 @@
-// gate.test.js — S2.2: openGate/resumeGate CAS, gate metadata invariants,
+// gate.test.js — openGate/resumeGate CAS, gate metadata invariants,
 // tool + watcher surfaces.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";

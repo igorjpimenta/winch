@@ -3,7 +3,7 @@
 //
 // Drizzle owns the table/column types, constraints, indexes, generated
 // columns and relations; drizzle-kit generates the SQL in .migrations/ from
-// this file. store.js queries these tables directly.
+// this file. The src/store modules query these tables directly.
 //
 // The tree is `parent_id`: a task can split into subtasks without a schema
 // change. `id` is opaque — nothing may parse it; `kind` is the discriminator.

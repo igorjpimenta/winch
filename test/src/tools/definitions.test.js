@@ -26,7 +26,7 @@ test("every schema is closed, documented and object-shaped", () => {
   }
 });
 
-test("ids are always described so a caller knows the prefix", () => {
+test("ids are described as opaque item ids", () => {
   for (const name of ["backlog_get", "backlog_drop", "backlog_restore", "backlog_assign"]) {
     assert.match(byName.get(name).inputSchema.properties.id.description, /item id/i);
   }
