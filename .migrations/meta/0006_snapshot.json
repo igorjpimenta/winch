@@ -4,95 +4,6 @@
   "id": "6dc75a39-deba-47b9-ad27-0a7f2e3d20a1",
   "prevId": "14c19cec-2359-4a25-8b87-7fb4c77f890f",
   "tables": {
-    "admission_queue": {
-      "name": "admission_queue",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "admitted_at": {
-          "name": "admitted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_admission_status": {
-          "name": "idx_admission_status",
-          "columns": [
-            "status",
-            "created_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "admission_queue_item_id_items_id_fk": {
-          "name": "admission_queue_item_id_items_id_fk",
-          "tableFrom": "admission_queue",
-          "tableTo": "items",
-          "columnsFrom": [
-            "item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "artifacts": {
       "name": "artifacts",
       "columns": {
@@ -739,17 +650,6 @@
             "type": "virtual"
           }
         },
-        "current_child_key": {
-          "name": "current_child_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "generated": {
-            "as": "(json_extract(\"state_json\", '$.currentChildKey'))",
-            "type": "virtual"
-          }
-        },
         "assignee_harness": {
           "name": "assignee_harness",
           "type": "text",
@@ -931,21 +831,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "child_key": {
-          "name": "child_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "visit_seq": {
-          "name": "visit_seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -1021,16 +906,6 @@
         }
       },
       "indexes": {
-        "uq_items_child": {
-          "name": "uq_items_child",
-          "columns": [
-            "parent_id",
-            "child_key",
-            "visit_seq"
-          ],
-          "isUnique": true,
-          "where": "\"items\".\"child_key\" IS NOT NULL"
-        },
         "idx_items_parent": {
           "name": "idx_items_parent",
           "columns": [
@@ -1136,13 +1011,6 @@
           "autoincrement": false,
           "default": "'claim'"
         },
-        "parent_session_id": {
-          "name": "parent_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -1181,13 +1049,6 @@
             "item_id"
           ],
           "isUnique": false
-        },
-        "idx_sessions_parent": {
-          "name": "idx_sessions_parent",
-          "columns": [
-            "parent_session_id"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -1203,19 +1064,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "work_sessions_parent_session_id_work_sessions_id_fk": {
-          "name": "work_sessions_parent_session_id_work_sessions_id_fk",
-          "tableFrom": "work_sessions",
-          "tableTo": "work_sessions",
-          "columnsFrom": [
-            "parent_session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1223,7 +1071,7 @@
       "checkConstraints": {
         "work_sessions_kind": {
           "name": "work_sessions_kind",
-          "value": "\"work_sessions\".\"kind\" IN ('claim', 'fanout', 'review', 'system')"
+          "value": "\"work_sessions\".\"kind\" IN ('claim', 'review', 'system')"
         }
       }
     }

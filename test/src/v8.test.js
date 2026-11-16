@@ -66,8 +66,7 @@ test("generated columns project the JSON and lease without a second write", (t) 
   assert.ok(attempt.expires_at > attempt.claimed_at);
   const session = store.session.get(attempt.session_id);
   assert.equal(session.session_key, "test:a:s1");
-  store.item.update(epic.id, { state: { wait: { kind: "review" }, currentChildKey: "s1" } });
-  const state = store.db.prepare("SELECT wait_kind, current_child_key FROM item_state WHERE item_id=?").get(epic.id);
+  store.item.update(epic.id, { state: { wait: { kind: "review" } } });
+  const state = store.db.prepare("SELECT wait_kind FROM item_state WHERE item_id=?").get(epic.id);
   assert.equal(state.wait_kind, "review");
-  assert.equal(state.current_child_key, "s1");
 });

@@ -5,8 +5,6 @@ CREATE TABLE `items` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
 	`parent_id` text,
-	`child_key` text,
-	`visit_seq` integer DEFAULT 0 NOT NULL,
 	`title` text NOT NULL,
 	`description` text,
 	`acceptance` text,
@@ -23,7 +21,6 @@ CREATE TABLE `items` (
 	CONSTRAINT "items_root" CHECK(("items"."kind" = 'epic' AND "items"."parent_id" IS NULL) OR ("items"."kind" <> 'epic' AND "items"."parent_id" IS NOT NULL))
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uq_items_child` ON `items` (`parent_id`,`child_key`,`visit_seq`) WHERE "items"."child_key" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `idx_items_parent` ON `items` (`parent_id`);--> statement-breakpoint
 CREATE INDEX `idx_items_kind_created` ON `items` (`kind`,`created_at`);--> statement-breakpoint
 CREATE TABLE `item_state` (
@@ -32,7 +29,6 @@ CREATE TABLE `item_state` (
 	`status` text NOT NULL,
 	`state_json` text DEFAULT '{}' NOT NULL,
 	`wait_kind` text GENERATED ALWAYS AS (json_extract("state_json", '$.wait.kind')) VIRTUAL,
-	`current_child_key` text GENERATED ALWAYS AS (json_extract("state_json", '$.currentChildKey')) VIRTUAL,
 	`assignee_harness` text,
 	`assignee_agent` text,
 	`updated_at` integer NOT NULL,
@@ -64,18 +60,15 @@ CREATE TABLE `work_sessions` (
 	`external_session_id` text NOT NULL,
 	`session_key` text GENERATED ALWAYS AS ("harness" || ':' || "agent_id" || ':' || "external_session_id") VIRTUAL,
 	`kind` text DEFAULT 'claim' NOT NULL,
-	`parent_session_id` text,
 	`created_at` integer NOT NULL,
 	`ended_at` integer,
 	`deleted_at` integer,
 	FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`parent_session_id`) REFERENCES `work_sessions`(`id`) ON UPDATE no action ON DELETE set null,
-	CONSTRAINT "work_sessions_kind" CHECK("work_sessions"."kind" IN ('claim', 'fanout', 'review', 'system'))
+	CONSTRAINT "work_sessions_kind" CHECK("work_sessions"."kind" IN ('claim', 'review', 'system'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uq_sessions_identity` ON `work_sessions` (`harness`,`agent_id`,`external_session_id`);--> statement-breakpoint
 CREATE INDEX `idx_sessions_item` ON `work_sessions` (`item_id`);--> statement-breakpoint
-CREATE INDEX `idx_sessions_parent` ON `work_sessions` (`parent_session_id`);--> statement-breakpoint
 CREATE TABLE `attempts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`item_id` text NOT NULL,
@@ -150,19 +143,6 @@ CREATE TABLE `item_edges` (
 --> statement-breakpoint
 CREATE INDEX `idx_edges_from` ON `item_edges` (`from_item_id`);--> statement-breakpoint
 CREATE INDEX `idx_edges_to` ON `item_edges` (`to_item_id`);--> statement-breakpoint
-CREATE TABLE `admission_queue` (
-	`id` text PRIMARY KEY NOT NULL,
-	`kind` text NOT NULL,
-	`item_id` text,
-	`agent_id` text,
-	`status` text NOT NULL,
-	`created_at` integer NOT NULL,
-	`admitted_at` integer,
-	`ended_at` integer,
-	FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `idx_admission_status` ON `admission_queue` (`status`,`created_at`);--> statement-breakpoint
 CREATE TABLE `harness_webhooks` (
 	`harness` text PRIMARY KEY NOT NULL,
 	`url` text NOT NULL,
@@ -173,21 +153,21 @@ CREATE TABLE `harness_webhooks` (
 );
 --> statement-breakpoint
 -- ── copy v6 rows into the recursive tree ─────────────────────────────────
-INSERT INTO items (id, kind, parent_id, child_key, visit_seq, title, description, acceptance,
+INSERT INTO items (id, kind, parent_id, title, description, acceptance,
                    priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
-SELECT id, 'epic', NULL, NULL, 0, title, description, acceptance,
+SELECT id, 'epic', NULL, title, description, acceptance,
        priority, NULL, owner_team, created_by, 'manual', '{}', created_at
   FROM epics;
 --> statement-breakpoint
-INSERT INTO items (id, kind, parent_id, child_key, visit_seq, title, description, acceptance,
+INSERT INTO items (id, kind, parent_id, title, description, acceptance,
                    priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
-SELECT id, 'story', epic_id, id, 0, title, description, acceptance,
+SELECT id, 'story', epic_id, title, description, acceptance,
        priority, size, NULL, NULL, 'manual', '{}', created_at
   FROM stories;
 --> statement-breakpoint
-INSERT INTO items (id, kind, parent_id, child_key, visit_seq, title, description, acceptance,
+INSERT INTO items (id, kind, parent_id, title, description, acceptance,
                    priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
-SELECT id, 'task', story_id, id, 0, title, description, NULL,
+SELECT id, 'task', story_id, title, description, NULL,
        50, NULL, NULL, NULL, execution_kind, COALESCE(execution_args, '{}'), created_at
   FROM tasks;
 --> statement-breakpoint

@@ -5,9 +5,8 @@
 // columns and relations; drizzle-kit generates the SQL in .migrations/ from
 // this file. store.js queries these tables directly.
 //
-// Identity is (parent_id, child_key, visit_seq): a story can fan out per
-// item, a task can split into subtasks, and the schema does not change.
-// `id` is opaque — nothing may parse it; `kind` is the discriminator.
+// The tree is `parent_id`: a task can split into subtasks without a schema
+// change. `id` is opaque — nothing may parse it; `kind` is the discriminator.
 
 import { sql } from "drizzle-orm";
 import {
@@ -27,7 +26,7 @@ export const ALL_STATUSES = [...new Set([...EPIC_STATUSES, ...STORY_STATUSES, ..
 export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
 export const ITEM_KINDS = ["epic", "story", "task"];
 export const ATTEMPT_STATUSES = ["claimed", "running", "gated", "done", "failed", "released", "cancelled"];
-export const SESSION_KINDS = ["claim", "fanout", "review", "system"];
+export const SESSION_KINDS = ["claim", "review", "system"];
 export const EDGE_KINDS = ["depends_on"];
 
 const inList = (values) => sql.raw(values.map((v) => `'${v}'`).join(", "));
@@ -36,8 +35,6 @@ export const items = sqliteTable("items", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),
   parentId: text("parent_id").references(() => items.id, { onDelete: "cascade" }),
-  childKey: text("child_key"),
-  visitSeq: integer("visit_seq").notNull().default(0),
   title: text("title").notNull(),
   description: text("description"),
   acceptance: text("acceptance"),
@@ -53,7 +50,6 @@ export const items = sqliteTable("items", {
   check("items_kind", sql`${table.kind} IN (${inList(ITEM_KINDS)})`),
   check("items_execution_kind", sql`${table.executionKind} IN (${inList(EXECUTION_KINDS)})`),
   check("items_root", sql`(${table.kind} = 'epic' AND ${table.parentId} IS NULL) OR (${table.kind} <> 'epic' AND ${table.parentId} IS NOT NULL)`),
-  uniqueIndex("uq_items_child").on(table.parentId, table.childKey, table.visitSeq).where(sql`${table.childKey} IS NOT NULL`),
   index("idx_items_parent").on(table.parentId),
   index("idx_items_kind_created").on(table.kind, table.createdAt),
 ]);
@@ -64,7 +60,6 @@ export const itemState = sqliteTable("item_state", {
   status: text("status").notNull(),
   stateJson: text("state_json").notNull().default("{}"),
   waitKind: text("wait_kind").generatedAlwaysAs(sql`json_extract(${sql.identifier("state_json")}, '$.wait.kind')`, { mode: "virtual" }),
-  currentChildKey: text("current_child_key").generatedAlwaysAs(sql`json_extract(${sql.identifier("state_json")}, '$.currentChildKey')`, { mode: "virtual" }),
   assigneeHarness: text("assignee_harness"),
   assigneeAgent: text("assignee_agent"),
   updatedAt: integer("updated_at").notNull(),
@@ -99,7 +94,6 @@ export const workSessions = sqliteTable("work_sessions", {
     { mode: "virtual" },
   ),
   kind: text("kind").notNull().default("claim"),
-  parentSessionId: text("parent_session_id").references(() => workSessions.id, { onDelete: "set null" }),
   createdAt: integer("created_at").notNull(),
   endedAt: integer("ended_at"),
   deletedAt: integer("deleted_at"),
@@ -107,7 +101,6 @@ export const workSessions = sqliteTable("work_sessions", {
   check("work_sessions_kind", sql`${table.kind} IN (${inList(SESSION_KINDS)})`),
   uniqueIndex("uq_sessions_identity").on(table.harness, table.agentId, table.externalSessionId),
   index("idx_sessions_item").on(table.itemId),
-  index("idx_sessions_parent").on(table.parentSessionId),
 ]);
 
 export const attempts = sqliteTable("attempts", {
@@ -180,19 +173,6 @@ export const itemEdges = sqliteTable("item_edges", {
   check("item_edges_kind", sql`${table.kind} IN (${inList(EDGE_KINDS)})`),
   index("idx_edges_from").on(table.fromItemId),
   index("idx_edges_to").on(table.toItemId),
-]);
-
-export const admissionQueue = sqliteTable("admission_queue", {
-  id: text("id").primaryKey(),
-  kind: text("kind").notNull(),
-  itemId: text("item_id").references(() => items.id, { onDelete: "cascade" }),
-  agentId: text("agent_id"),
-  status: text("status").notNull(),
-  createdAt: integer("created_at").notNull(),
-  admittedAt: integer("admitted_at"),
-  endedAt: integer("ended_at"),
-}, (table) => [
-  index("idx_admission_status").on(table.status, table.createdAt),
 ]);
 
 export const harnessWebhooks = sqliteTable("harness_webhooks", {

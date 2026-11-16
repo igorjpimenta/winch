@@ -49,7 +49,7 @@ function splitSessionKey(key) {
 }
 
 const ITEM_SELECT = `
-  SELECT i.id, i.kind, i.parent_id, i.child_key, i.visit_seq, i.title, i.description,
+  SELECT i.id, i.kind, i.parent_id, i.title, i.description,
          i.acceptance, i.priority, i.size, i.owner_team, i.created_by,
          i.execution_kind, i.execution_args, i.created_at,
          s.revision, s.status, s.state_json, s.assignee_harness, s.assignee_agent,
@@ -174,8 +174,8 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     }
     const id = newSessionId();
     db.prepare(`
-      INSERT INTO work_sessions(id, item_id, harness, agent_id, external_session_id, kind, parent_session_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+      INSERT INTO work_sessions(id, item_id, harness, agent_id, external_session_id, kind, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, itemId, harness, agentId, externalSessionId, kind, now());
     return db.prepare("SELECT * FROM work_sessions WHERE id=?").get(id);
   }
@@ -203,15 +203,14 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
         if (kind === "task" && parent.kind !== "story" && parent.kind !== "task") throw new Error(`task parent must be a story or task: ${parentId}`);
       }
       const t = input.createdAt ?? now();
-      const visitSeq = input.visitSeq ?? 0;
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(`
-          INSERT INTO items(id, kind, parent_id, child_key, visit_seq, title, description, acceptance,
+          INSERT INTO items(id, kind, parent_id, title, description, acceptance,
                             priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          id, kind, parentId, input.childKey ?? null, visitSeq, input.title,
+          id, kind, parentId, input.title,
           input.description ?? null, input.acceptance ?? null,
           input.priority ?? 50, input.size ?? null, input.ownerTeam ?? null,
           input.createdBy ?? null, executionKind, JSON.stringify(input.executionArgs ?? {}), t,
@@ -252,7 +251,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     list(opts = {}) { return listRows(opts); },
 
     children(id) {
-      return db.prepare(`${ITEM_SELECT} WHERE i.parent_id=? AND s.deleted_at IS NULL ORDER BY i.visit_seq ASC, i.created_at ASC`)
+      return db.prepare(`${ITEM_SELECT} WHERE i.parent_id=? AND s.deleted_at IS NULL ORDER BY i.created_at ASC`)
         .all(id).map((r) => decorate(r));
     },
 
