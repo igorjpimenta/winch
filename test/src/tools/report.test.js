@@ -12,7 +12,7 @@ test("update heartbeats and appends a progress event", async () => {
   const res = await h.call("backlog_update", { taskId: task.id, progressSummary: "half way" });
   assert.equal(res.details.status, "ok");
   assert.ok(h.store.task.get(task.id).last_heartbeat > 0);
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND note LIKE 'progress:%'").get(task.id);
+  const ev = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND note LIKE 'progress:%'").get(task.id);
   assert.match(ev.note, /half way/);
 });
 
@@ -37,9 +37,9 @@ test("done records the result, artifacts and the session", async () => {
   const t = h.store.task.get(task.id);
   assert.equal(t.status, "done");
   assert.match(t.result_summary, /artifacts: pr:1/);
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='task.completed'").get(task.id);
+  const ev = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='task.completed'").get(task.id);
   assert.equal(ev.actor, "atlas");
-  assert.equal(ev.session_ref, "test:atlas:sess-atlas");
+  assert.equal(h.store.session.get(ev.session_id).session_key, "test:atlas:sess-atlas");
 });
 
 test("reopening and closing the epic again writes a second marker", async () => {
@@ -48,15 +48,15 @@ test("reopening and closing the epic again writes a second marker", async () => 
   const t1 = h.store.task.create({ storyId: story.id, title: "one", status: "in_progress", executionKind: "manual", assigned: "atlas" });
   const t2 = h.store.task.create({ storyId: story.id, title: "two", status: "in_progress", executionKind: "manual", assigned: "atlas" });
   await h.call("backlog_done", { taskId: t1.id, resultSummary: "one done" });
-  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 0);
+  assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 0);
   await h.call("backlog_done", { taskId: t2.id, resultSummary: "two done" });
-  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
+  assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
   // A review finding reopens the epic; the next close is a new cycle.
   const t3 = h.store.task.create({ storyId: story.id, title: "three", status: "in_progress", executionKind: "manual", assigned: "atlas" });
   h.store.epic.update(epic.id, { status: "in_progress" });
   h.store.story.update(story.id, { status: "ready" });
   await h.call("backlog_done", { taskId: t3.id, resultSummary: "fix" });
-  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 2);
+  assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 2);
 });
 
 test("a story closes with its last task and records the transition", async () => {
@@ -69,9 +69,9 @@ test("a story closes with its last task and records the transition", async () =>
   await h.call("backlog_claim", { taskId: b.id });
   await h.call("backlog_done", { taskId: b.id, resultSummary: "b done" });
   assert.equal(h.store.story.get(story.id).status, "done");
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.completed'").all(story.id);
+  const ev = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='story.completed'").all(story.id);
   assert.equal(ev.length, 1);
-  assert.equal(ev[0].item_kind, "story");
+  assert.equal(h.store.itemKindOf(ev[0].item_id), "story");
 });
 
 test("the epic closes only when its last story does", async () => {
@@ -85,7 +85,7 @@ test("the epic closes only when its last story does", async () => {
     await h.call("backlog_done", { taskId: t.id, resultSummary: "done" });
   }
   assert.equal(h.store.epic.get(epic.id).status, "done");
-  assert.equal(h.store.db.prepare("SELECT * FROM events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
+  assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
 });
 
 test("block records a reason and an optional dependency", async () => {
@@ -108,7 +108,7 @@ test("gate type opens through openGate and resume accepts only the caller", asyn
   const opened = await h.call("backlog_block", { taskId: task.id, reason: "approve", gateType: "release" });
   assert.equal(opened.details.status, "ok");
   assert.equal(h.store.task.get(task.id).gate_type, "release");
-  const ev = h.store.db.prepare("SELECT kind FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const ev = h.store.db.prepare("SELECT kind FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.equal(ev.kind, "gate.opened");
   const mismatch = await h.call("backlog_resume", { taskId: task.id, actor: "someone-else" });
   assert.equal(mismatch.details.reason, "actor_mismatch");

@@ -10,7 +10,7 @@ export function createReportTools({ store, logger }) {
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_update: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress — claim it with backlog_claim first.`, "not_claimed", { taskId: task.id });
-      if (task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assigned });
+      if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
       try {
         const wantHeartbeat = args?.heartbeat !== false;
         if (wantHeartbeat) store.task.heartbeat(task.id, agentId);
@@ -19,12 +19,14 @@ export function createReportTools({ store, logger }) {
         if (args?.comment) noteParts.push(`comment: ${clampNote(args.comment, cfg.noteProgressLimit)}`);
         if (args?.addArtifact) noteParts.push(`artifact: ${clampNote(args.addArtifact, cfg.noteArtifactLimit)}`);
         if (noteParts.length) {
-          // to_status is required by schema; progress events mirror the
-          // current status so the event stream stays append-only without
-          // fabricating a transition.
-          store.db.prepare(
-            "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
-          ).run(task.id, task.status, task.status, agentId, noteParts.join(" | "), Date.now());
+          store.event.append({
+            itemId: task.id,
+            sessionId: task.session_id,
+            fromStatus: task.status,
+            toStatus: task.status,
+            actor: agentId,
+            note: noteParts.join(" | "),
+          });
         }
         const fresh = store.task.get(task.id);
         return ok(JSON.stringify({ ok: true, task: { id: fresh.id, status: fresh.status, last_heartbeat: fresh.last_heartbeat, attempt_count: fresh.attempt_count } }), { status: "ok", taskId: task.id, agentId });
@@ -39,41 +41,38 @@ export function createReportTools({ store, logger }) {
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
-      if (task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
+      if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
       try {
         const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
         const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
-        const updated = store.task.update(task.id, { status: "done", result_summary: resultSummary, actor: agentId, note: "done", sessionKey });
+        const updated = store.task.update(task.id, {
+          status: "done", result_summary: resultSummary, actor: agentId, note: "done",
+          sessionKey, harness: identity.harness, session: identity.session, agentId,
+        });
+        for (const uri of artifacts) store.artifact.add({ itemId: task.id, attemptId: updated.attempt_id, kind: "link", uri });
         // Close upward, one level at a time: a story closes when its last task
         // does, and the epic closes only when its last story does. The epic
         // row is what wakes its creator to review the delivery.
         const actor = `${identity.harness}:${identity.agent}`;
-        const story = store.story.get(task.story_id);
+        const story = task.story_id ? store.story.get(task.story_id) : null;
         let storyClosed = false;
         if (story && story.status !== "done" && story.status !== "cancelled") {
-          const openTasks = store.db.prepare(
-            "SELECT COUNT(*) AS n FROM tasks WHERE story_id=? AND status NOT IN ('done','cancelled')"
-          ).get(story.id).n;
+          const openTasks = store.item.tree(story.id).filter((r) => r.kind === "task" && r.status !== "done" && r.status !== "cancelled").length;
           if (openTasks === 0) {
-            store.story.update(story.id, { status: "done" });
-            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
-              .run(story.id, "story", story.status, "done", "story.completed", actor, story.id, Date.now());
+            store.story.update(story.id, { status: "done", actor, note: story.id });
             storyClosed = true;
           }
         }
-        const epicId = story?.epic_id;
+        const epicId = task.epic_id;
         if (storyClosed && epicId) {
-          const openStories = store.db.prepare(
-            "SELECT COUNT(*) AS n FROM stories WHERE epic_id=? AND status NOT IN ('done','cancelled')"
-          ).get(epicId).n;
+          const epic = store.epic.get(epicId);
+          const openStories = store.item.tree(epicId).filter((r) => r.kind === "story" && r.status !== "done" && r.status !== "cancelled").length;
           // One marker per close cycle, not per epic: a review that appends
           // work reopens the epic, and its second close must wake the planner
           // again or the fix is never confirmed.
           if (openStories === 0) {
-            store.epic.update(epicId, { status: "done" });
-            store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
-              .run(epicId, "epic", "in_progress", "done", "epic.completed", actor, epicId, Date.now());
+            store.epic.update(epicId, { status: "done", actor, note: epicId });
           }
         }
         logger?.info?.(`backlog: ${agentId} completed ${task.id}`);
@@ -87,28 +86,34 @@ export function createReportTools({ store, logger }) {
       const agentId = identity.agent;
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
-      if (task.assigned && task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
+      if (task.assignee_agent && task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id });
       if (task.status !== "in_progress" && task.status !== "todo") return err(`${task.id} is ${task.status}; blocking applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
       try {
         const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;
         if (args?.gateType) {
           // Human gates open through openGate — the one path that stamps
-          // gate.opened rows — never the generic update. Plain blocks keep
-          // the generic path and its task.blocked kind.
-          updated = store.task.openGate({ id: task.id, gateType: args.gateType, reason, actor: agentId });
+          // gate.opened rows — never the generic update.
+          updated = store.task.openGate({
+            id: task.id, gateType: args.gateType, reason, actor: agentId,
+            harness: identity.harness, session: identity.session,
+          });
           if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
         } else {
-          updated = store.task.update(task.id, { status: "blocked", actor: agentId, note: `blocked: ${reason}` });
+          updated = store.task.update(task.id, {
+            status: "blocked", actor: agentId, note: `blocked: ${reason}`,
+            sessionKey: identitySessionKey(identity), harness: identity.harness, session: identity.session, agentId,
+          });
         }
         let depResult = null;
         if (args?.blockedBy) {
           const r = addDep(store, task.id, args.blockedBy.id);
           depResult = r.ok ? "added" : `failed:${r.code}`;
           if (r.ok) {
-            store.db.prepare(
-              "INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES (?, ?, ?, ?, ?, ?)"
-            ).run(task.id, "blocked", "blocked", agentId, `dep: ${task.id} depends on ${args.blockedBy.id}`, Date.now());
+            store.event.append({
+              itemId: task.id, fromStatus: "blocked", toStatus: "blocked",
+              actor: agentId, note: `dep: ${task.id} depends on ${args.blockedBy.id}`,
+            });
           }
         }
         logger?.warn?.(`backlog: ${agentId} blocked ${task.id} (${reason})`);
@@ -120,30 +125,28 @@ export function createReportTools({ store, logger }) {
 
     async backlog_resume(args, identity, cfg) {
       // The actor is the caller, never the caller's claim about who acts: a
-      // mismatched actor would mint another key's approval on the trail, so
-      // the call fails instead. Humans approve through `winch resume --actor`
-      // on stdin trust; over MCP there is no speaking for another key.
+      // mismatched actor would mint another key's approval on the trail.
       if (args?.actor != null && args.actor !== identity.agent) {
         return err(`backlog_resume: refused actor ${JSON.stringify(args.actor)} — approvals record the caller (${identity.agent}).`, "actor_mismatch", { taskId: args?.taskId ?? null });
       }
       const actor = identity.agent;
-      const task = store.task.resumeGate({ id: args?.taskId, actor });
+      const task = store.task.resumeGate({
+        id: args?.taskId, actor, harness: identity.harness, session: identity.session,
+      });
       if (!task) {
-        // Name the common false alarm: the task was gated before (a gate
-        // note sits in its trail) but the gate has since dissolved — e.g. an
-        // unmerged close requeued it. The operator approved something real;
-        // "not resumable" alone would read as operator error. A trailing
-        // 'gate resume' is the opposite case (already resolved), so only an
-        // opened-but-never-resolved gate dissolves.
+        // Name the common false alarm: the task was gated before but the gate
+        // has since dissolved (e.g. an unmerged close requeued it).
         const current = args?.taskId ? store.task.get(args.taskId) : null;
-        const lastGate = current && store.db.prepare(
-          "SELECT note FROM events WHERE task_id=? AND (note LIKE 'gate open:%' OR note='gate resume') ORDER BY id DESC LIMIT 1"
-        ).get(current.id);
-        if (lastGate && lastGate.note.startsWith("gate open:")) return err(`backlog_resume: ${current.id} was gated but the gate has dissolved (status ${current.status}) — nothing to resume; re-gate with backlog_block if approval is still needed.`, "gate_dissolved", { taskId: current.id, taskStatus: current.status });
+        const lastGate = current && store.event.listFor(current.id).slice().reverse().find(
+          (e) => typeof e.note === "string" && (e.note.startsWith("gate open:") || e.note === "gate resume")
+        );
+        if (lastGate && lastGate.note.startsWith("gate open:")) {
+          return err(`backlog_resume: ${current.id} was gated but the gate has dissolved (status ${current.status}) — nothing to resume; re-gate with backlog_block if approval is still needed.`, "gate_dissolved", { taskId: current.id, taskStatus: current.status });
+        }
         return err(`backlog_resume: not resumable: ${args?.taskId}`, "not_resumable", { taskId: args?.taskId ?? null });
       }
       logger?.info?.(`backlog: ${actor} resumed ${task.id}`);
-      return ok(JSON.stringify({ ok: true, task: { id: task.id, status: task.status, gate_type: task.gate_type, assigned: task.assigned } }), { status: "ok", taskId: task.id, actor });
+      return ok(JSON.stringify({ ok: true, task: { id: task.id, status: task.status, gate_type: task.gate_type, assigned: task.assignee_agent } }), { status: "ok", taskId: task.id, actor });
     },
   };
 }

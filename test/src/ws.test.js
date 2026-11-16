@@ -1,13 +1,13 @@
 // ws.test.js — the event pipe: welcome, history replay, live broadcast to
 // every connected client. Uses the real server and real sockets on an
-// ephemeral port; rows stream verbatim, typed kinds land in a follow-up.
+// ephemeral port; rows stream as typed envelopes.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../src/store/index.js";
 import { startEventServer, kindForEvent } from "../../src/events-ws.js";
 
 let dir, store, srv, sockets;
@@ -142,7 +142,7 @@ test("a requeue lists the task so its owner can be woken again", async () => {
   const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1 });
   store.task.sweepExpired({ now: Date.now() + 10 });
-  const row = store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.equal(msg.kind, "task.released");
@@ -152,9 +152,9 @@ test("a requeue lists the task so its owner can be woken again", async () => {
 test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
   const epic = store.epic.create({ title: "E", status: "planned", createdBy: "atlas" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
-  store.db.prepare("INSERT INTO events(task_id,item_kind,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?,?)")
-    .run(story.id, "story", "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
-  const row = store.db.prepare("SELECT * FROM events ORDER BY id DESC LIMIT 1").get();
+  store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,kind,actor,note,created_at) VALUES(?,?,?,?,?,?,?)")
+    .run(story.id, "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
+  const row = store.db.prepare("SELECT * FROM item_events ORDER BY id DESC LIMIT 1").get();
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.equal(msg.kind, "story.assigned");
@@ -173,7 +173,7 @@ test("a close carries the work it just made claimable", async () => {
   const next = store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual", assigned: "builder", capabilities: ["verify"] });
   const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
-  const row = store.db.prepare("SELECT * FROM events WHERE task_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder" }]);

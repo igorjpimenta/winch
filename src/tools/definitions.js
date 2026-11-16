@@ -13,7 +13,7 @@ export const TOOL_DEFS = [
         type: "object",
         additionalProperties: false,
         properties: {
-          taskId: { type: "string", description: "Task id (TASK-…). Omit to claim the highest-priority ready task." },
+          taskId: { type: "string", description: "Task item id (opaque). Omit to claim the highest-priority ready task." },
           capabilities: {
             type: "array",
             items: { type: "string" },
@@ -38,7 +38,7 @@ export const TOOL_DEFS = [
         type: "object",
         additionalProperties: false,
         properties: {
-          id: { type: "string", description: "TASK-… or STORY-…." },
+          id: { type: "string", description: "Item id (opaque) for a task or a story." },
           taskId: { type: "string", description: "Deprecated alias for `id` when assigning a task." },
           agent: { type: ["string", "null"], description: "Target agent id, or null/\"\" to unassign." },
           capabilities: {
@@ -118,13 +118,13 @@ export const TOOL_DEFS = [
         "Append to an existing plan: add stories to an epic, and/or tasks to a story, after work has started. Use it for a gap a worker " +
         "found, a follow-up from review, or a story split discovered late. Both kinds are written with the same self-sufficient record a " +
         "planned item carries; tasks land `todo` unless `assigned` is given, and a `task.appended` row is written so a dispatcher can " +
-        "route them. `dependsOn` accepts a key from this call or an existing TASK-/STORY-/EPIC- id. All-or-nothing.",
+        "route them. `dependsOn` accepts a key from this call or an existing item id. All-or-nothing.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          epicId: { type: "string", description: "Epic to add stories to (EPIC-…)." },
-          storyId: { type: "string", description: "Story to add tasks to (STORY-…)." },
+          epicId: { type: "string", description: "Epic item id (opaque)." },
+          storyId: { type: "string", description: "Story item id (opaque)." },
           stories: {
             type: "array",
             description: "Stories to append to epicId.",
@@ -195,7 +195,7 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         required: ["id"],
         properties: {
-          id: { type: "string", description: "EPIC-…, STORY-… or TASK-…." },
+          id: { type: "string", description: "Item id (opaque): epic, story or task." },
           reason: { type: "string", description: "Why it is being dropped; recorded on each audit row." },
         },
       },
@@ -209,21 +209,21 @@ export const TOOL_DEFS = [
         type: "object",
         additionalProperties: false,
         required: ["id"],
-        properties: { id: { type: "string", description: "EPIC-…, STORY-… or TASK-…." } },
+        properties: { id: { type: "string", description: "Item id (opaque): epic, story or task." } },
       },
     },
     {
       name: "backlog_get",
       description:
-        "Read the backlog at any level with one call: pass an EPIC-… id for the whole tree (stories, acceptance, every task, results, " +
-        "artifacts, counts), a STORY-… id for the story with its tasks and parent epic, or a TASK-… id for the task with its story " +
+        "Read the backlog at any level with one call: pass an epic item id for the whole tree (stories, acceptance, every task, results, " +
+        "artifacts, counts), a story item id for the story with its tasks and parent epic, or a task item id for the task with its story " +
         "acceptance, epic, artifacts, dependencies and readiness. Read-only; never claims.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         required: ["id"],
         properties: {
-          id: { type: "string", description: "EPIC-…, STORY-… or TASK-…." },
+          id: { type: "string", description: "Item id (opaque): epic, story or task." },
           capabilities: {
             type: "array",
             items: { type: "string" },
@@ -243,7 +243,7 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         required: ["taskId"],
         properties: {
-          taskId: { type: "string", description: "Task id (TASK-…)." },
+          taskId: { type: "string", description: "Task item id (opaque)." },
           heartbeat: { type: "boolean", description: "Refresh liveness (default true)." },
           progressSummary: { type: "string", description: "One-line progress note for the audit trail." },
           comment: { type: "string", description: "Freeform note appended as an audit event." },
@@ -261,7 +261,7 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         required: ["taskId", "resultSummary"],
         properties: {
-          taskId: { type: "string", description: "Task id (TASK-…)." },
+          taskId: { type: "string", description: "Task item id (opaque)." },
           resultSummary: { type: "string", description: "One-paragraph outcome (success or failure)." },
           artifacts: { type: "array", items: { type: "string" }, description: "Paths/URLs of produced artifacts (diff, doc, PR)." },
         },
@@ -278,7 +278,7 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         required: ["taskId", "reason"],
         properties: {
-          taskId: { type: "string", description: "Task id (TASK-…)." },
+          taskId: { type: "string", description: "Task item id (opaque)." },
           reason: { type: "string", description: "Why the task cannot proceed." },
           gateType: { type: "string", description: "Human gate being opened (roadmap|architecture|release|custom) — stamps gate_type; resume clears it." },
           blockedBy: {
@@ -305,7 +305,7 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         required: ["taskId"],
         properties: {
-          taskId: { type: "string", description: "Task id (TASK-…)." },
+          taskId: { type: "string", description: "Task item id (opaque)." },
           actor: { type: "string", description: "Must equal the caller's agent when given; anyone else's name is rejected as actor_mismatch. Defaults to the caller." },
         },
       },

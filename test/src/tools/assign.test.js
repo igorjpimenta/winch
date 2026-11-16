@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../../src/store.js";
+import { createStore } from "../../../src/store/index.js";
 import { createToolHandlers } from "../../../src/tools/index.js";
 
 let dir, store, handle;
@@ -38,9 +38,9 @@ test("assigns and writes the audit event", async () => {
   const fresh = store.task.get(task.id);
   assert.equal(fresh.assigned, "tester");
   assert.deepEqual(fresh.capabilities, ["qa"]);
-  const ev = store.db.prepare("SELECT * FROM events WHERE kind='task.assigned'").all();
+  const ev = store.db.prepare("SELECT * FROM item_events WHERE kind='task.assigned'").all();
   assert.equal(ev.length, 1);
-  assert.equal(ev[0].task_id, task.id);
+  assert.equal(ev[0].item_id, task.id);
   assert.equal(ev[0].from_status, ev[0].to_status, "assignment never fakes a status transition");
   assert.equal(ev[0].actor, "openclaw:atlas");
   assert.equal(ev[0].note, "assign tester");
@@ -52,7 +52,7 @@ test("any caller may assign — identity is attribution, not a gate", async () =
   assert.equal(r.details.status, "ok");
   assert.equal(store.task.get(task.id).assigned, "scorer");
   assert.equal(
-    store.db.prepare("SELECT actor FROM events WHERE kind='task.assigned'").get().actor,
+    store.db.prepare("SELECT actor FROM item_events WHERE kind='task.assigned'").get().actor,
     "openclaw:tester"
   );
 });
@@ -70,7 +70,7 @@ test("null is rejected; capabilities survive when omitted", async () => {
 test("unknown task is refused without writing anything", async () => {
   const r = await handle("backlog_assign", { taskId: "TASK-nope", agent: "tester" }, PLANNER);
   assert.equal(r.details.reason, "not_found");
-  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE kind='task.assigned'").get().n, 0);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM item_events WHERE kind='task.assigned'").get().n, 0);
 });
 
 test("a live claim cannot be reassigned out from under its worker", async () => {
@@ -98,9 +98,9 @@ test("a story can be assigned, and its owner is the one woken", async () => {
   assert.equal(res.details.status, "ok");
   assert.equal(res.details.level, "story");
   assert.equal(store.story.get(story.id).assigned, "tester");
-  const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='story.assigned'").all(story.id);
+  const ev = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='story.assigned'").all(story.id);
   assert.equal(ev.length, 1);
-  assert.equal(ev[0].item_kind, "story");
+  assert.equal(store.itemKindOf(ev[0].item_id), "story");
 });
 
 test("clearing a story assignee is rejected and closed stories refuse assignment", async () => {

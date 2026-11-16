@@ -1,8 +1,8 @@
-// merges.js — close the loop S2.5 opens: read PR states, apply what a merge
-// (or an unmerged close) means to backlog rows, idempotently.
+// merges.js — read PR states and apply what a merge (or an unmerged close)
+// means to backlog rows, idempotently.
 //
-// Markers come from release PR bodies: `Backlog: EPIC-x`, optional
-// `Backlog-Task: TASK-y`, optional `Release: vX.Y.Z`. gh reports state as
+// Markers come from release PR bodies: `Backlog: <item-id>`, optional
+// `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`. gh reports state as
 // MERGED / CLOSED / OPEN — normalized here, callers pass raw values.
 
 export function parseMarkers(body = "") {
@@ -37,7 +37,7 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
           // a task out from under a working agent, the note names the
           // displacement — the agent's next tool call would otherwise fail
           // with no account of why its task completed itself.
-          const displaced = task.status === "in_progress" && task.assigned ? ` (displaced ${task.assigned})` : "";
+          const displaced = task.status === "in_progress" && task.assignee_agent ? ` (displaced ${task.assignee_agent})` : "";
           if (!dryRun) {
             store.task.update(task.id, {
               status: "done",
@@ -52,23 +52,21 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
       if (markers.epicId && markers.version) {
         const epic = store.epic.get(markers.epicId);
         if (epic && epic.status !== "done") {
-          if (!dryRun) store.epic.update(epic.id, { status: "done" });
+          if (!dryRun) store.epic.update(epic.id, { status: "done", actor: "merge-detector", note: `release ${markers.version}` });
           out.closedEpics.push(epic.id);
         }
         // The shipped marker hangs off the release task: events are
-        // task-scoped, so a version without a task anchor has nowhere honest
-        // to live. The missing anchor reports before the tag attempt, so a
-        // tag failure still surfaces both skips instead of hiding one.
+        // item-scoped, so a version without a task anchor has nowhere honest
+        // to live.
         const releaseTask = markers.taskId ? store.task.get(markers.taskId) : null;
         const releaseNote = `release shipped: ${markers.version}`;
         const already = releaseTask
-          ? store.db.prepare("SELECT 1 FROM events WHERE task_id=? AND note=?").get(releaseTask.id, releaseNote)
+          ? store.event.listFor(releaseTask.id).some((e) => e.note === releaseNote)
           : null;
         if (!releaseTask && !already) out.skipped.push(`release:${markers.version} (no release task)`);
         // Tag before the event: the shipped row asserts a tag exists, so a
         // failed tag records a skip and writes nothing — the wire never
-        // claims an untagged shipment. No tag backend (library use without
-        // exec) means nothing to verify, and the write stands.
+        // claims an untagged shipment.
         if (exec && !out.tagged.includes(markers.version)) {
           if (!dryRun) {
             try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
@@ -78,9 +76,10 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
         if (releaseTask && !already) {
           if (!dryRun) {
             const cur = store.task.get(releaseTask.id);
-            store.db.prepare(
-              "INSERT INTO events(task_id, from_status, to_status, kind, actor, note, at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            ).run(releaseTask.id, cur.status, cur.status, "release.shipped", "merge-detector", releaseNote, Date.now());
+            store.event.append({
+              itemId: releaseTask.id, fromStatus: cur.status, toStatus: cur.status,
+              kind: "release.shipped", actor: "merge-detector", note: releaseNote,
+            });
           }
         }
       }
@@ -93,8 +92,6 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
         if (task && ["in_progress", "review", "blocked"].includes(task.status)) {
           // A gate dissolved this way is not a resolution — nobody approved —
           // but it must still stream as a gate ending, not a plain release.
-          // Otherwise kind-filtering subscribers count opened gates that can
-          // never resolve and their pending set leaks.
           const dissolved = task.status === "blocked" && task.gate_type;
           if (!dryRun) {
             store.task.update(task.id, {
@@ -128,7 +125,7 @@ export function collectPRs({ exec, cwd = process.cwd(), limit = 100 } = {}) {
 const invokedDirectly = process.argv[1]?.endsWith("merges.js");
 if (invokedDirectly) {
   const { execFileSync } = await import("node:child_process");
-  const { createStore } = await import("./store.js");
+  const { createStore } = await import("./store/index.js");
   const dryRun = process.argv.includes("--dry-run");
   const store = createStore();
   try {
