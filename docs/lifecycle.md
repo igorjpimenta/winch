@@ -1,19 +1,26 @@
 # Lifecycle
 
-A task moves from `ready` through a claim to `done`. A block parks it until an
-operator resumes it; closing the last task closes its story, and the last story
-closes the epic.
+A task starts in `backlog`. Assignment moves it to `ready`, a claim moves it to
+`in_progress`, and closing it moves it to `done`. A plain block parks it until
+an operator resumes it; a dependency wait returns to `ready` on its own.
+Closing the last task closes its story, and the last story closes the epic.
 
 ## Task lifecycle
 
 ```mermaid
 flowchart LR
-  A[ready] -->|claim by id or next| B[in_progress]
+  Z[backlog] -->|assign| A[ready]
+  A -->|unassign| Z
+  A -->|claim by id or next| B[in_progress]
   B -->|heartbeat / update| B
   B -->|lease expires| A
   B -->|done| C[done]
   B -->|block| D[blocked]
-  D -->|resume| A
+  A -->|delegate| G[child task for worker]
+  B -->|delegate| G
+  G -->|parent waits| D
+  D -->|manual resume| A
+  D -->|deps resolve| A
   C -->|last task| E[story done]
   E -->|last story| F[epic done]
 ```
@@ -24,7 +31,17 @@ only the status returns to `ready`.
 Delegation keeps the accountable on the parent: a child task carries the
 worker, the parent depends on it and waits in `blocked`, and the watcher
 returns the parent to `ready` for the accountable when every child is
-terminal.
+terminal. `backlog_block` with `blockedBy` enters the same wait; a plain block
+requires `backlog_resume`.
+
+```mermaid
+flowchart LR
+  P[parent: ready or in_progress] -->|backlog_delegate| C[child: ready for worker]
+  P -->|same call| D[parent: blocked on child]
+  C -->|claim / work| W[child: in_progress]
+  W -->|done, cancelled or dropped| R[all deps resolved]
+  R -->|watcher resume| P2[parent: ready for accountable]
+```
 
 ## Attempt lifecycle
 
@@ -54,8 +71,8 @@ flowchart LR
 Claim leases, attempt caps, and gate checks:
 
 - **Claim**: atomic CAS under a lease. Highest-priority ready task selected when no id given. Human work uses the reserved `human` / `human_in_the_loop` pair: it keeps `ready`/`in_progress` but is never claimable by an agent.
-- **Dependencies**: forward-only, cycle-checked. Cancelled deps count as resolved.
-- **Gates**: `backlog_block` opens a gate when `gateType` is given; `backlog_resume` returns it to `ready` and clears the assignment. A caller that names another actor is refused.
+- **Dependencies**: forward-only, cycle-checked. Cancelled and dropped deps count as resolved; a dependency-wait parent returns to `ready` when every dep is terminal.
+- **Gates**: `backlog_block` opens a gate when `gateType` is given; `backlog_resume` returns it to `ready` and clears the assignment. A caller that names another actor is refused. A block with `blockedBy` and no `gateType` is a dependency wait, not a gate.
 - **Close**: closing the last task closes its story; closing the last story closes the epic and wakes the planner.
 - **Starvation**: lives in the watcher manifest (deferred list, per-task idleMs).
 - **Lease sweeper**: claims self-heal on next tick when the lease expires without heartbeats.

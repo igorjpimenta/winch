@@ -197,6 +197,8 @@ A task starts in `backlog`. Assignment moves it to `ready`; clearing the
 assignment returns it to `backlog`, so only an assigned task can be claimed.
 Delegating creates a child task for the worker, parks the parent in `blocked`
 on that dependency, and returns the parent to `ready` when the child closes.
+`backlog_block` with `blockedBy` uses the same dependency wait; a plain block
+still needs `backlog_resume`.
 Assigning the reserved agent `human` stamps the reserved harness
 `human_in_the_loop`: the pair keeps `ready`/`in_progress` semantics for human
 work, but neither value is a caller identity, and agent dispatchers never wake
@@ -212,7 +214,11 @@ flowchart LR
   B -->|lease expires| A
   B -->|done| C[done]
   B -->|block| D[blocked]
-  D -->|resume| A
+  A -->|delegate| G[child task for worker]
+  B -->|delegate| G
+  G -->|parent waits| D
+  D -->|manual resume| A
+  D -->|deps resolve| A
   C -->|last task| E[story done]
   E -->|last story| F[epic done]
 ```
