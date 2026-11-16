@@ -24,6 +24,9 @@ test("plan writes a whole demand into records and wires dependencies", async () 
   assert.equal(body.stories.length, 1);
   assert.equal(body.dependencies, 1);
   const [build, verify] = body.stories[0].tasks;
+  assert.equal(h.store.epic.get(body.epic.id).status, "backlog");
+  assert.equal(h.store.story.get(body.stories[0].id).status, "backlog");
+  assert.equal(h.store.task.get(build.id).status, "backlog");
   assert.equal(h.store.task.get(build.id).description, "stdlib only, CLI");
   assert.deepEqual(h.store.task.get(build.id).capabilities, ["build"]);
   const got = JSON.parse((await h.call("backlog_get", { id: verify.id })).content[0].text);

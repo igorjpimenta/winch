@@ -39,7 +39,7 @@ export function createPlanTools({ store, logger }) {
           title: epicIn.title,
           description: epicIn.description,
           acceptance: epicIn.acceptance,
-          status: "in_progress",
+          status: "backlog",
           priority: epicIn.priority ?? 50,
           createdBy: identity.agent,
         });
@@ -51,7 +51,7 @@ export function createPlanTools({ store, logger }) {
             title: s.title,
             description: s.description,
             acceptance: s.acceptance,
-            status: "in_progress",
+            status: "backlog",
             priority: s.priority ?? epic.priority,
             capabilities: s.capabilities,
           });
@@ -113,7 +113,7 @@ export function createPlanTools({ store, logger }) {
         store.epic.update(epic.id, { status: "in_progress" });
       }
       if (story && (story.status === "done" || story.status === "cancelled")) {
-        store.story.update(story.id, { status: "in_progress" });
+        store.story.update(story.id, { status: story.assignee_agent ? "ready" : "backlog" });
       }
       const created = { stories: [], tasks: [] };
       const idByKey = new Map();
@@ -126,7 +126,7 @@ export function createPlanTools({ store, logger }) {
             title: st.title,
             description: st.description,
             acceptance: st.acceptance,
-            status: "in_progress",
+            status: "backlog",
             priority: st.priority ?? epic.priority,
             capabilities: st.capabilities,
           });
@@ -153,7 +153,7 @@ export function createPlanTools({ store, logger }) {
             storyId,
             title: t.title,
             description: t.description,
-            status: t.assigned ? "ready" : "backlog",
+            status: "backlog",
             executionKind: t.executionKind ?? "manual",
             executionArgs: t.executionArgs,
             capabilities: t.capabilities ?? parent?.capabilities,

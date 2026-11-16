@@ -84,3 +84,25 @@ test("only the assigned harness:agent pair may claim", (t) => {
   assert.ok(claimed);
   assert.equal(claimed.status, "in_progress");
 });
+
+test("birth is backlog; an assignee on create transitions the item to ready", (t) => {
+  const store = makeStore(t);
+  const epic = store.epic.create({ title: "E" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+
+  const unassigned = store.task.create({ storyId: story.id, title: "plain" });
+  assert.equal(unassigned.status, "backlog");
+  assert.equal(eventsFor(store, unassigned.id).length, 1);
+
+  const assigned = store.task.create({
+    storyId: story.id, title: "routed",
+    assigned: "agent-a", assigneeHarness: "test",
+  });
+  assert.equal(assigned.status, "ready");
+  const evs = eventsFor(store, assigned.id);
+  assert.equal(evs.length, 2);
+  assert.equal(evs[0].to_status, "backlog", "born backlog");
+  assert.equal(evs[1].from_status, "backlog");
+  assert.equal(evs[1].to_status, "ready");
+  assert.equal(evs[1].kind, "task.assigned");
+});

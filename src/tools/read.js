@@ -75,7 +75,6 @@ export function createReadTools({ store, logger }) {
         if (!story) blockers.push("story missing");
         else if (story.status !== "ready" && story.status !== "in_progress") blockers.push(`story is ${story.status}`);
         if (!epic) blockers.push("epic missing");
-        else if (epic.status !== "ready" && epic.status !== "in_progress") blockers.push(`epic is ${epic.status}`);
         if (!depsResolved(store, task.id)) blockers.push("task dependencies unresolved");
         if (task.assignee_agent !== identity.agent) blockers.push(`assigned to ${task.assignee_agent ?? "nobody"}`);
         if (offered.length > 0 && requiredCaps.length > 0 && !offered.some((c) => requiredCaps.includes(c))) {

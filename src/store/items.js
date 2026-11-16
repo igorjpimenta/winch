@@ -21,7 +21,7 @@ export function createItemApi({ core }) {
         throw new Error(`assignment is a pair: ${id}`);
       }
       const assigned = assigneeHarness != null && assigneeAgent != null;
-      const status = input.status ?? (assigned ? "ready" : DEFAULT_STATUS[kind]);
+      const status = input.status ?? DEFAULT_STATUS[kind];
       if (!STATUSES_BY_KIND[kind].includes(status)) throw new Error(`invalid ${kind} status: ${status}`);
       if (status === "ready" && !assigned) throw new Error(`ready item requires an assignment: ${id}`);
       const executionKind = input.executionKind ?? "manual";
@@ -69,6 +69,22 @@ export function createItemApi({ core }) {
             note: input.note ?? `${kind} created`,
             at: t,
           });
+        }
+        // Birth is always the default (backlog); an assignee on the create
+        // call is an assignment, so it moves the item to ready immediately.
+        if (assigned && status === "backlog") {
+          db.prepare("UPDATE item_state SET revision=revision+1, status='ready', updated_at=? WHERE item_id=?").run(t, id);
+          if (input.emit !== false) {
+            appendEvent({
+              itemId: id,
+              fromStatus: "backlog",
+              toStatus: "ready",
+              kind: `${kind}.assigned`,
+              actor: input.actor ?? null,
+              note: `assign ${assigneeAgent}`,
+              at: t,
+            });
+          }
         }
         db.exec("COMMIT");
       } catch (err) {

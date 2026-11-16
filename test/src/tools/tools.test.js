@@ -45,6 +45,7 @@ test("plan → claim → done makes the dependent task claimable by its own work
   });
   const body = JSON.parse(planned.content[0].text);
   const [build, verify] = body.stories[0].tasks;
+  await h.call("backlog_assign", { id: body.stories[0].id, agent: "worker" });
   await h.call("backlog_assign", { id: build.id, agent: "worker" });
   await h.call("backlog_assign", { id: verify.id, agent: "worker" });
   const beforeVerify = await h.call("backlog_claim", { taskId: verify.id }, WORKER);

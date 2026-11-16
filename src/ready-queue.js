@@ -4,7 +4,6 @@
 //   - status = 'ready' (which the store only permits for an assigned pair)
 //   - all of its outgoing deps resolve to status in {done, cancelled}
 //   - nearest story status in {ready, in_progress}
-//   - nearest epic  status in {ready, in_progress}
 //   - (when agentId is supplied) assigned to the same harness:agent pair
 //   - (when capabilities supplied) intersection with task/story tags is non-empty
 //
@@ -40,7 +39,6 @@ export function readyTasks(store, opts = {}) {
     if (story.status !== "ready" && story.status !== "in_progress") continue;
     const epic = task.epic_id ? store.item.get(task.epic_id) : null;
     if (!epic) continue;
-    if (epic.status !== "ready" && epic.status !== "in_progress") continue;
     if (agentId) {
       if (task.assignee_agent !== agentId) continue;
       // Legacy assignments carry the wildcard harness; new ones name it.
