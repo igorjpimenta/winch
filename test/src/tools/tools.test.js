@@ -11,7 +11,7 @@ afterEach(() => h.teardown());
 test("a claim carries the store-only handoff: acceptance, artifacts, receiver prompt", async () => {
   const { story, task } = h.seedReadyTask();
   h.store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,actor,note,created_at) VALUES(?,?,?,?,?,?)")
-    .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/upstream", Date.now());
+    .run(task.id, "ready", "ready", "atlas", "artifact: https://example.test/upstream", Date.now());
   const res = await h.call("backlog_claim", { taskId: task.id });
   const body = JSON.parse(res.content[0].text);
   assert.equal(body.handoff.acceptance_criteria, "AC-1");
@@ -22,7 +22,7 @@ test("a claim carries the store-only handoff: acceptance, artifacts, receiver pr
 
 test("an artifact added mid-flight reaches the next claim on the story", async () => {
   const { story, task } = h.seedReadyTask();
-  const next = h.store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual" });
+  const next = h.store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   await h.call("backlog_claim", { taskId: task.id });
   await h.call("backlog_update", { taskId: task.id, addArtifact: "https://example.test/mid" });
   await h.call("backlog_done", { taskId: task.id, resultSummary: "done" });
@@ -45,6 +45,7 @@ test("plan → claim → done makes the dependent task claimable by its own work
   });
   const body = JSON.parse(planned.content[0].text);
   const [build, verify] = body.stories[0].tasks;
+  await h.call("backlog_assign", { id: body.stories[0].id, agent: "worker" });
   await h.call("backlog_assign", { id: build.id, agent: "worker" });
   await h.call("backlog_assign", { id: verify.id, agent: "worker" });
   const beforeVerify = await h.call("backlog_claim", { taskId: verify.id }, WORKER);
@@ -57,8 +58,8 @@ test("plan → claim → done makes the dependent task claimable by its own work
 });
 
 test("a ready-queue claim never takes a task assigned to someone else", async () => {
-  const mine = h.seedReadyTask({ assigned: "atlas" });
-  const theirs = h.seedReadyTask({ assigned: "worker" });
+  const mine = h.seedReadyTask({ assigned: "atlas", assigneeHarness: "test" });
+  const theirs = h.seedReadyTask({ assigned: "worker", assigneeHarness: "test" });
   const claimed = await h.call("backlog_claim", {});
   assert.equal(claimed.details.taskId, mine.task.id);
   const second = await h.call("backlog_claim", {});
@@ -67,7 +68,7 @@ test("a ready-queue claim never takes a task assigned to someone else", async ()
 });
 
 test("a task read by the assignee shows the same brief the claim would hand off", async () => {
-  const { task } = h.seedReadyTask({ assigned: "atlas" });
+  const { task } = h.seedReadyTask({ assigned: "atlas", assigneeHarness: "test" });
   const read = JSON.parse((await h.call("backlog_get", { id: task.id })).content[0].text);
   const claimed = JSON.parse((await h.call("backlog_claim", { taskId: task.id })).content[0].text);
   assert.equal(read.brief, claimed.handoff.receiverPrompt);

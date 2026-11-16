@@ -14,7 +14,7 @@ import {
 export const MAX_ATTEMPTS = 3;
 
 export const STATUSES_BY_KIND = { epic: EPIC_STATUSES, story: STORY_STATUSES, task: TASK_STATUSES };
-export const DEFAULT_STATUS = { epic: "idea", story: "backlog", task: "todo" };
+export const DEFAULT_STATUS = { epic: "backlog", story: "backlog", task: "backlog" };
 export const ITEM_TERMINAL = new Set(["done", "cancelled"]);
 
 export const ITEM_SELECT = `
@@ -131,11 +131,11 @@ export function createCore({ db, cfg }) {
   function kindForTransition(kind, fromStatus, toStatus, gateType) {
     if (fromStatus == null) return `${kind}.created`;
     if (toStatus === "blocked") return gateType ? "gate.opened" : `${kind}.blocked`;
-    if (fromStatus === "blocked" && toStatus === "todo") return gateType ? "gate.dissolved" : `${kind}.released`;
+    if (fromStatus === "blocked" && toStatus === "ready") return gateType ? "gate.dissolved" : `${kind}.released`;
     if (toStatus === "done") return `${kind}.completed`;
     if (toStatus === "cancelled") return `${kind}.cancelled`;
-    if (kind === "task" && fromStatus === "todo" && toStatus === "in_progress") return "task.claimed";
-    if (toStatus === "todo") return `${kind}.released`;
+    if (kind === "task" && fromStatus === "ready" && toStatus === "in_progress") return "task.claimed";
+    if (toStatus === "ready") return `${kind}.released`;
     return `${kind}.updated`;
   }
 

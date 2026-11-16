@@ -16,6 +16,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
 import { readyTasks } from "./ready-queue.js";
+import { HUMAN_AGENT } from "./reserved.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -65,17 +66,20 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
 // `kind` wins; otherwise the row maps by transition structure alone. Notes
 // are free text and can change, so no branch here may read note content —
 // a renamed note must never reclassify history.
+//
+// Pre-standardization rows still carry `todo` as a task status; map it with
+// `ready` so the append-only history keeps the meaning it streamed with.
 export function kindForEvent(row) {
   if (row.kind) return row.kind;
   const from = row.from_status;
   const to = row.to_status;
   if (from == null) return "task.created";
-  if (from === "todo" && to === "in_progress") return "task.claimed";
+  if ((from === "ready" || from === "todo") && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";
   if (to === "cancelled") return "task.cancelled";
   if (to === "blocked") return "task.blocked";
-  if (to === "todo") return "task.released";
+  if (to === "ready" || to === "todo") return "task.released";
   return "task.updated";
 }
 
@@ -113,9 +117,10 @@ export function toEventMessage(store, row) {
     // Work that a close just made claimable: a dispatcher wakes these without
     // recomputing the dependency graph. Structural readiness only: capability
     // tags are the claimant's business, so a tagged task must still appear.
-    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "todo"
-      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent).slice(0, 20)
-          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent }))
+    // `todo` remains here for pre-standardization rows.
+    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "ready" || row.to_status === "todo"
+      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent && r.task.assignee_agent !== HUMAN_AGENT).slice(0, 20)
+          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent, assigneeHarness: r.task.assignee_harness }))
       : [],
     task: task
       ? {

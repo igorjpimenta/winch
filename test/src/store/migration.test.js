@@ -45,11 +45,15 @@ test("legacy data is copied into the recursive tree without losing ids or event 
   const story = store.item.get("STORY-1", { includeDeleted: true });
   const task = store.item.get("TASK-1", { includeDeleted: true });
   assert.equal(epic.kind, "epic");
+  assert.equal(epic.status, "backlog", "legacy planned without an assignment maps to backlog");
   assert.equal(story.kind, "story");
+  assert.equal(story.status, "backlog", "legacy harness is dropped, so the story backs off to backlog");
+  assert.equal(story.assignee_agent, null);
   assert.equal(story.epic_id, "EPIC-1");
   assert.equal(task.kind, "task");
   assert.equal(task.story_id, "STORY-1");
   assert.equal(task.status, "done");
+  assert.equal(task.assignee_agent, null, "legacy assignment is dropped");
   assert.equal(task.attempt_count, 1);
   assert.deepEqual(story.capabilities, ["verify"]);
   assert.deepEqual(task.capabilities, ["build"]);

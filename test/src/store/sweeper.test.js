@@ -18,7 +18,7 @@ test("sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) => {
     assert.equal(swept.length, 1);
     const after = store.task.get(task.id);
     if (attempt < MAX_ATTEMPTS) {
-      assert.equal(after.status, "todo");
+      assert.equal(after.status, "ready");
       assert.equal(after.attempt_count, attempt);
     } else {
       assert.equal(after.status, "blocked");
@@ -33,11 +33,11 @@ test("sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) => {
   assert.equal(sweeps.length, MAX_ATTEMPTS);
   for (const e of sweeps) {
     assert.equal(e.from_status, "in_progress");
-    assert.equal(e.to_status, "todo");
+    assert.equal(e.to_status, "ready");
   }
   const last = evs[evs.length - 1];
   assert.equal(last.note, "blocked: max attempts");
-  assert.equal(last.from_status, "todo");
+  assert.equal(last.from_status, "ready");
   assert.equal(last.to_status, "blocked");
 });
 

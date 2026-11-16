@@ -18,11 +18,12 @@ export function createSweepMethods({ core, apis }) {
         if (e.attempt_no >= cfg.maxAttempts) {
           db.exec("BEGIN IMMEDIATE");
           try {
-            const r = db.prepare("UPDATE item_state SET status='blocked', updated_at=? WHERE item_id=? AND status='todo'")
+            const fromStatus = apis.task.get(e.item_id)?.status ?? "ready";
+            const r = db.prepare("UPDATE item_state SET status='blocked', updated_at=? WHERE item_id=? AND status IN ('ready','backlog')")
               .run(at, e.item_id);
             if (r.changes > 0) {
               appendEvent({
-                itemId: e.item_id, fromStatus: "todo", toStatus: "blocked", kind: "task.blocked",
+                itemId: e.item_id, fromStatus, toStatus: "blocked", kind: "task.blocked",
                 actor: "sweeper", note: "blocked: max attempts", at,
               });
             }

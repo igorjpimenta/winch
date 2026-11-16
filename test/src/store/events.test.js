@@ -16,7 +16,7 @@ test("task.update: status change writes an event; other patches do not", (t) => 
   assert.equal(done.status, "done");
   const evs = eventsFor(store, task.id);
   assert.equal(evs.length, 2);
-  assert.equal(evs[1].from_status, "todo");
+  assert.equal(evs[1].from_status, "ready");
   assert.equal(evs[1].to_status, "done");
   assert.equal(evs[1].actor, "agent-a");
   assert.equal(evs[1].note, "finished");

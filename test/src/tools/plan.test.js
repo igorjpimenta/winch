@@ -24,6 +24,9 @@ test("plan writes a whole demand into records and wires dependencies", async () 
   assert.equal(body.stories.length, 1);
   assert.equal(body.dependencies, 1);
   const [build, verify] = body.stories[0].tasks;
+  assert.equal(h.store.epic.get(body.epic.id).status, "backlog");
+  assert.equal(h.store.story.get(body.stories[0].id).status, "backlog");
+  assert.equal(h.store.task.get(build.id).status, "backlog");
   assert.equal(h.store.task.get(build.id).description, "stdlib only, CLI");
   assert.deepEqual(h.store.task.get(build.id).capabilities, ["build"]);
   const got = JSON.parse((await h.call("backlog_get", { id: verify.id })).content[0].text);
@@ -79,11 +82,11 @@ test("append adds tasks to a story, unassigned, with an appended row", async () 
   const appended = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='task.appended'").all(first.id);
   assert.equal(appended.length, 1);
   assert.equal(appended[0].actor, "test:tester");
-  assert.equal(h.store.task.get(second.id).status, "todo");
+  assert.equal(h.store.task.get(second.id).status, "backlog");
 });
 
 test("append adds a story to an epic and rejects unknown references atomically", async () => {
-  const epic = h.store.epic.create({ title: "E-append", status: "planned" });
+  const epic = h.store.epic.create({ title: "E-append", status: "in_progress" });
   const res = await h.call("backlog_append", {
     epicId: epic.id,
     stories: [{ title: "Late story", acceptance: "AC-late", tasks: [{ title: "work", description: "do it" }] }],
@@ -120,7 +123,7 @@ test("drop refuses claimed work and keeps it untouched", async () => {
 
 test("drop cascades to a story's tasks and restore brings them back", async () => {
   const { story, task } = h.seedReadyTask();
-  const second = h.store.task.create({ storyId: story.id, title: "dep", status: "todo", executionKind: "manual" });
+  const second = h.store.task.create({ storyId: story.id, title: "dep", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   const { addDep } = await import("../../../src/deps.js");
   assert.ok(addDep(h.store, second.id, task.id).ok);
   assert.equal((await h.call("backlog_drop", { id: story.id })).details.status, "ok");
@@ -129,9 +132,9 @@ test("drop cascades to a story's tasks and restore brings them back", async () =
   assert.equal(h.store.dep.listOutgoing(second.id).length, 1);
   const restored = await h.call("backlog_restore", { id: story.id });
   assert.equal(restored.details.status, "ok");
-  assert.equal(h.store.story.get(story.id).status, "ready");
-  assert.equal(h.store.task.get(task.id).status, "todo");
-  assert.equal(h.store.task.get(second.id).status, "todo");
+  assert.equal(h.store.story.get(story.id).status, "in_progress");
+  assert.equal(h.store.task.get(task.id).status, "ready");
+  assert.equal(h.store.task.get(second.id).status, "ready");
   assert.equal((await h.call("backlog_restore", { id: story.id })).details.reason, "not_dropped");
 });
 

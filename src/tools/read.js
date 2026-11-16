@@ -37,7 +37,7 @@ export function createReadTools({ store, logger }) {
               level: "epic",
               epic: { id: epic.id, title: epic.title, description: epic.description, acceptance: epic.acceptance, status: epic.status, priority: epic.priority },
               stories,
-              summary: { tasks: all.length, done: count("done"), todo: count("todo"), in_progress: count("in_progress"), blocked: count("blocked"), cancelled: count("cancelled") },
+              summary: { tasks: all.length, backlog: count("backlog"), ready: count("ready"), in_progress: count("in_progress"), blocked: count("blocked"), review: count("review"), done: count("done"), cancelled: count("cancelled") },
             }),
             { status: "ok", agentId: identity.agent, level: "epic", id: epic.id }
           );
@@ -71,13 +71,12 @@ export function createReadTools({ store, logger }) {
           return { kind: e.to_kind, id: e.to_id, status: item?.status ?? null };
         });
         const blockers = [];
-        if (task.status !== "todo") blockers.push(`task is ${task.status}`);
+        if (task.status !== "ready") blockers.push(`task is ${task.status}`);
         if (!story) blockers.push("story missing");
         else if (story.status !== "ready" && story.status !== "in_progress") blockers.push(`story is ${story.status}`);
         if (!epic) blockers.push("epic missing");
-        else if (epic.status !== "planned" && epic.status !== "in_progress") blockers.push(`epic is ${epic.status}`);
         if (!depsResolved(store, task.id)) blockers.push("task dependencies unresolved");
-        if (task.assignee_agent && task.assignee_agent !== identity.agent) blockers.push(`assigned to ${task.assignee_agent}`);
+        if (task.assignee_agent !== identity.agent) blockers.push(`assigned to ${task.assignee_agent ?? "nobody"}`);
         if (offered.length > 0 && requiredCaps.length > 0 && !offered.some((c) => requiredCaps.includes(c))) {
           blockers.push(`requires [${requiredCaps.join(", ")}]`);
         }

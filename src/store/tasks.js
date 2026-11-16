@@ -1,12 +1,13 @@
 // Task facade: the tool-facing task methods plus the state transition that
 // ends/creates an attempt and then writes the item event.
 
+import { depsResolved } from "../deps.js";
 import { TASK_STATUSES } from "../schema.js";
 
 export function createTaskApi({ core, apis }) {
   const {
     db, cfg, now, splitSessionKey, ensureSession, systemSession,
-    liveAttempt, endAttempt, createAttempt, ITEM_TERMINAL,
+    liveAttempt, endAttempt, createAttempt, appendEvent, ITEM_TERMINAL,
   } = core;
 
   const taskApi = {
@@ -16,10 +17,10 @@ export function createTaskApi({ core, apis }) {
       if (parent.kind !== "story" && parent.kind !== "task") throw new Error(`task parent must be a story or task: ${storyId}`);
       return apis.item.create({
         id, kind: "task", parentId: storyId, title, description,
-        status: status ?? "todo", executionKind: executionKind ?? "manual",
+        status, executionKind: executionKind ?? "manual",
         executionArgs, capabilities,
         assigneeAgent: assigned ?? null,
-        assigneeHarness: assigned ? (assigneeHarness ?? "legacy") : null,
+        assigneeHarness: assigned ? assigneeHarness : null,
         emit: true, note: "task created",
       });
     },
@@ -63,7 +64,7 @@ export function createTaskApi({ core, apis }) {
             const session = sessionId ? { id: sessionId } : systemSession(id);
             createAttempt({ itemId: id, sessionId: session.id, status: "gated", claimedAt: t, endedAt: t, leaseSeconds: cfg.leaseSeconds, gateRecord });
           }
-        } else if (live && (ITEM_TERMINAL.has(nextStatus) || nextStatus === "todo" || leavingBlocked)) {
+        } else if (live && (ITEM_TERMINAL.has(nextStatus) || nextStatus === "ready" || leavingBlocked)) {
           const status = ITEM_TERMINAL.has(nextStatus) ? nextStatus : "released";
           const result = resultSummary !== undefined ? { summary: resultSummary } : null;
           endAttempt(live.id, { status, endedAt: t, result });
@@ -86,6 +87,12 @@ export function createTaskApi({ core, apis }) {
         db.exec("ROLLBACK");
         throw err;
       }
+      let assigneeHarness = patch.assignee_harness;
+      if (patch.assigned !== undefined && patch.assignee_harness === undefined) {
+        assigneeHarness = patch.assigned == null
+          ? null
+          : (patch.harness ?? parsed?.harness ?? existing.assignee_harness);
+      }
       const row = apis.item.update(id, {
         status: patch.status,
         title: patch.title,
@@ -96,8 +103,8 @@ export function createTaskApi({ core, apis }) {
         ownerTeam: patch.ownerTeam,
         executionKind: patch.execution_kind ?? patch.executionKind,
         executionArgs: patch.execution_args ?? patch.executionArgs,
-        assigneeHarness: patch.assignee_harness !== undefined ? patch.assignee_harness : (leavingBlocked && patch.assigned === null ? null : undefined),
-        assigneeAgent: patch.assigned !== undefined ? patch.assigned : (leavingBlocked && patch.assigned === null ? null : undefined),
+        assigneeHarness,
+        assigneeAgent: patch.assigned,
         capabilities: patch.capabilities,
         actor: patch.actor ?? null,
         note: patch.note ?? null,
@@ -106,15 +113,72 @@ export function createTaskApi({ core, apis }) {
         event: patch.event,
         updatedAt: t,
       });
-      if (patch.assigned !== undefined && patch.assignee_harness === undefined) {
-        const harness = patch.harness ?? parsed?.harness ?? "legacy";
-        if (patch.assigned == null) {
-          db.prepare("UPDATE item_state SET assignee_harness=NULL, assignee_agent=NULL WHERE item_id=?").run(id);
-        } else {
-          db.prepare("UPDATE item_state SET assignee_harness=?, assignee_agent=? WHERE item_id=?").run(harness, patch.assigned, id);
-        }
+      return row;
+    },
+    blockOnDeps({ id, note = null, childId = null, actor = "system", at = null }) {
+      const existing = taskApi.get(id);
+      if (!existing) throw new Error(`task not found: ${id}`);
+      if (!["backlog", "ready", "in_progress"].includes(existing.status)) {
+        throw new Error(`${existing.id} is ${existing.status}; cannot wait on dependencies`);
+      }
+      const t = at ?? now();
+      const state = { ...(existing.state_json ?? {}) };
+      state.wait = {
+        kind: "deps",
+        since: t,
+        ...(childId ? { childId } : {}),
+        ...(note ? { reason: note } : {}),
+      };
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const live = liveAttempt(id);
+        if (live) endAttempt(live.id, { status: "released", endedAt: t });
+        db.prepare("UPDATE item_state SET revision=revision+1, status='blocked', state_json=?, updated_at=? WHERE item_id=?")
+          .run(JSON.stringify(state), t, id);
+        appendEvent({
+          itemId: id, fromStatus: existing.status, toStatus: "blocked",
+          kind: "deps.waiting", actor,
+          note: note ?? (childId ? `waiting on ${childId}` : "waiting on dependencies"), at: t,
+        });
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
       }
       return taskApi.get(id);
+    },
+    resumeDependencyWaits({ at = null } = {}) {
+      const rows = db.prepare(`
+        SELECT s.item_id, s.assignee_harness, s.assignee_agent, s.state_json
+          FROM item_state s JOIN items i ON i.id = s.item_id
+         WHERE i.kind = 'task' AND s.status = 'blocked' AND s.deleted_at IS NULL
+           AND s.wait_kind = 'deps'
+      `).all();
+      const resolved = [];
+      if (rows.length === 0) return resolved;
+      const t = at ?? now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const dependencyView = { dep: apis.dep, item: apis.item, config: cfg };
+        for (const row of rows) {
+          if (!depsResolved(dependencyView, row.item_id)) continue;
+          const status = row.assignee_harness && row.assignee_agent ? "ready" : "backlog";
+          const state = JSON.parse(row.state_json || "{}");
+          delete state.wait;
+          db.prepare("UPDATE item_state SET revision=revision+1, status=?, state_json=?, updated_at=? WHERE item_id=?")
+            .run(status, JSON.stringify(state), t, row.item_id);
+          appendEvent({
+            itemId: row.item_id, fromStatus: "blocked", toStatus: status,
+            kind: "deps.resolved", actor: "system", note: "dependencies resolved", at: t,
+          });
+          resolved.push(row.item_id);
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return resolved;
     },
     delete(id) {
       const r = db.prepare("DELETE FROM items WHERE id=? AND kind='task'").run(id);

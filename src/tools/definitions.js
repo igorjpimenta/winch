@@ -6,7 +6,7 @@ export const TOOL_DEFS = [
       name: "backlog_claim",
       description:
         "Atomically claim work for THIS agent (identity resolved from request meta / environment). With `taskId`, claims that one task: " +
-        "it must be todo AND currently ready (deps done, caps intersect) — otherwise refused as not_claimed / not_ready, never queued. " +
+        "it must be ready AND currently claimable (deps done, caps intersect) — otherwise refused as not_claimed / not_ready, never queued. " +
         "Without `taskId`, claims the highest-priority ready task for this agent and silently tries the next candidate on a race. " +
         "Same CAS semantics under a per-identity lease either way; a targeted race gives back `raced`, never a partial claim.",
       inputSchema: {
@@ -30,9 +30,11 @@ export const TOOL_DEFS = [
       name: "backlog_assign",
       description:
         "Set (or clear) the assignee of a task or a story; that row is what wakes the assignee. " +
+        "Assigning moves a backlog item to ready; clearing it returns the item to backlog. " +
         "A task assignee claims and delivers it. A story assignee breaks it down first: it reads the story and appends the tasks with " +
         "`backlog_append`, unassigned, so the planner can route them — use story assignment when the breakdown is not known at plan time. " +
         "Refuses to reassign a task already in progress by someone else. Passing `agent: null` or \"\" clears it. " +
+        "The reserved agent `human` assigns human work with the reserved harness `human_in_the_loop`. " +
         "Optional `capabilities` replaces the item's capability tags.",
       inputSchema: {
         type: "object",
@@ -50,11 +52,42 @@ export const TOOL_DEFS = [
       },
     },
     {
+      name: "backlog_delegate",
+      description:
+        "Hand part of a task to another worker without changing the parent's accountable assignee. Creates a child task under the parent, " +
+        "assigns it to `agent`, makes the parent depend on the child, and parks the parent in `blocked`. When the child closes, the parent " +
+        "returns to `ready` for the accountable assignee. Use `agent: \"human\"` for human work; the child carries the reserved human pair.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId", "agent", "title"],
+        properties: {
+          taskId: { type: "string", description: "Parent task item id (opaque). The caller must be its accountable assignee or it must be unassigned." },
+          agent: { type: "string", description: "Worker agent that claims and delivers the child. Use `human` for human work." },
+          title: { type: "string", description: "Child task title." },
+          description: { type: "string", description: "Child task description." },
+          acceptance: { type: "string", description: "What done means for the child. Defaults to the parent acceptance." },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Capability tags the child requires. Defaults to the parent tags.",
+          },
+          executionKind: {
+            type: "string",
+            enum: ["pipeclaw", "subagent", "cli", "gate", "manual"],
+            description: "How the child is executed; default manual.",
+          },
+          executionArgs: { type: "object", description: "Execution arguments for the child." },
+          reason: { type: "string", description: "Why the work is delegated; recorded on the parent wait." },
+        },
+      },
+    },
+    {
       name: "backlog_plan",
       description:
         "Create a whole plan in one call: an epic, its stories, and their tasks, wired with dependencies. This is how a planner " +
         "protocols a demand — the spec goes INTO the records (task description, story acceptance, capability tags), because a " +
-        "worker receives only a task id and reads the record itself. Tasks are created `todo` and unassigned; assign them with " +
+        "worker receives only a task id and reads the record itself. Tasks land `backlog`; assigning one moves it to `ready`. Use " +
         "`backlog_assign`. `dependsOn` references other tasks in the same plan by key (default `s<story>t<task>`, zero-based) " +
         "and may only point backward, so the plan is acyclic by construction. All-or-nothing: an invalid key rolls back the plan.",
       inputSchema: {
@@ -117,7 +150,7 @@ export const TOOL_DEFS = [
       description:
         "Append to an existing plan: add stories to an epic, and/or tasks to a story, after work has started. Use it for a gap a worker " +
         "found, a follow-up from review, or a story split discovered late. Both kinds are written with the same self-sufficient record a " +
-        "planned item carries; tasks land `todo` unless `assigned` is given, and a `task.appended` row is written so a dispatcher can " +
+        "planned item carries; tasks land `backlog` unless `assigned` is given (then `ready`), and a `task.appended` row is written so a dispatcher can " +
         "route them. `dependsOn` accepts a key from this call or an existing item id. All-or-nothing.",
       inputSchema: {
         type: "object",
@@ -189,7 +222,7 @@ export const TOOL_DEFS = [
         "Disable an epic, story or task that was never claimed — a plan correction, a duplicate, or a story that no longer applies. " +
         "Nothing is deleted: the item and everything under it move to `cancelled`, dependencies are left in place (a cancelled dependency " +
         "counts as resolved), and each task leaves a `task.dropped` row. Refused if anything under it has been claimed (claimed_at set, " +
-        "or any status other than todo): closing real work is `backlog_done`'s job. `backlog_restore` undoes this.",
+        "or any status other than backlog/ready): closing real work is `backlog_done`'s job. `backlog_restore` undoes this.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -203,8 +236,8 @@ export const TOOL_DEFS = [
     {
       name: "backlog_restore",
       description:
-        "Undo `backlog_drop`: return a dropped epic, story or task, and everything dropped with it, to the queue (epic planned, " +
-        "story ready, task todo), writing a `task.restored` row for each. Dependencies were never removed, so ordering comes back intact.",
+        "Undo `backlog_drop`: return a dropped epic, story or task, and everything dropped with it, to the queue (epic ready, " +
+        "story ready, task ready), writing a `task.restored` row for each. Dependencies were never removed, so ordering comes back intact.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -297,7 +330,7 @@ export const TOOL_DEFS = [
     {
       name: "backlog_resume",
       description:
-        "Operator resolution of a human gate: blocked → todo with claim fields and gate metadata cleared, " +
+        "Operator resolution of a human gate: blocked → ready with claim fields and gate metadata cleared, " +
         "so the task re-enters the queue for a fresh claim. One resume per gate — a second call is rejected " +
         "as not_resumable.",
       inputSchema: {

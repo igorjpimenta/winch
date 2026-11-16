@@ -7,7 +7,7 @@ export function createEpicApi({ core, apis }) {
     create({ title, description, acceptance, status, ownerTeam, priority, id, createdBy }) {
       return apis.item.create({
         id, kind: "epic", title, description, acceptance,
-        status: status ?? "idea", ownerTeam, priority,
+        status: status ?? "backlog", ownerTeam, priority,
         createdBy, emit: false,
       });
     },

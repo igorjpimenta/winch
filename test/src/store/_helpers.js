@@ -23,8 +23,8 @@ export function makeStore(t) {
 
 export function seedHierarchy(store) {
   const epic = store.epic.create({ title: "epic" });
-  const story = store.story.create({ epicId: epic.id, title: "story", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "task" });
+  const story = store.story.create({ epicId: epic.id, title: "story", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "task", status: "ready", assigned: "agent-a", assigneeHarness: "system" });
   return { epic, story, task };
 }
 

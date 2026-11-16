@@ -28,8 +28,8 @@ afterEach(async () => {
 });
 
 function seedEvent() {
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
   // a status transition writes exactly one event row
   store.task.update(task.id, { status: "done", actor: "seed", note: "seeded" });
@@ -137,21 +137,21 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
 });
 
 test("a requeue lists the task so its owner can be woken again", async () => {
-  const epic = store.epic.create({ title: "E-req", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
-  store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1 });
+  const epic = store.epic.create({ title: "E-req", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker", assigneeHarness: "test" });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", sessionKey: "s", watchdogMs: 1 });
   store.task.sweepExpired({ now: Date.now() + 10 });
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.equal(msg.kind, "task.released");
-  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker" }]);
+  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker", assigneeHarness: "test" }]);
 });
 
 test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
-  const epic = store.epic.create({ title: "E", status: "planned", createdBy: "atlas" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
+  const epic = store.epic.create({ title: "E", status: "in_progress", createdBy: "atlas" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester", assigneeHarness: "test" });
   store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,kind,actor,note,created_at) VALUES(?,?,?,?,?,?,?)")
     .run(story.id, "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
   const row = store.db.prepare("SELECT * FROM item_events ORDER BY id DESC LIMIT 1").get();
@@ -167,16 +167,18 @@ test("a story-scoped row carries the item, its assignee and the epic creator", a
 });
 
 test("a close carries the work it just made claimable", async () => {
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
-  const next = store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual", assigned: "builder", capabilities: ["verify"] });
+  const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", assigneeHarness: "test", capabilities: ["verify"] });
+  const human = store.task.create({ storyId: story.id, title: "human", status: "ready", executionKind: "manual", assigned: "human" });
   const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
-  assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder" }]);
+  assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder", assigneeHarness: "test" }]);
+  assert.ok(!msg.unblocked.some((r) => r.id === human.id), "human work is not an agent wake");
 });
 
 test("history and live rows share one envelope", async () => {
@@ -195,18 +197,18 @@ test("history and live rows share one envelope", async () => {
 
 test("kindForEvent: stored kind wins; kind-less rows map by structure, notes inert", () => {
   const cases = [
-    [{ from_status: null, to_status: "todo", note: "task created" }, "task.created"],
-    [{ from_status: "todo", to_status: "in_progress", note: "claim" }, "task.claimed"],
+    [{ from_status: null, to_status: "ready", note: "task created" }, "task.created"],
+    [{ from_status: "ready", to_status: "in_progress", note: "claim" }, "task.claimed"],
     [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, "task.progressed"],
-    [{ from_status: "todo", to_status: "done", note: "done" }, "task.completed"],
-    [{ from_status: "in_progress", to_status: "todo", note: "sweeper" }, "task.released"],
+    [{ from_status: "ready", to_status: "done", note: "done" }, "task.completed"],
+    [{ from_status: "in_progress", to_status: "ready", note: "sweeper" }, "task.released"],
     [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, "task.blocked"],
-    [{ from_status: "todo", to_status: "blocked", note: "gate open: architecture" }, "task.blocked"],
-    [{ from_status: "blocked", to_status: "todo", note: "gate resume" }, "task.released"],
-    [{ from_status: "blocked", to_status: "todo", note: "gate dissolved: closed unmerged PR #9" }, "task.released"],
-    [{ from_status: "blocked", to_status: "todo", kind: "gate.dissolved", note: "whatever the note says" }, "gate.dissolved"],
-    [{ from_status: "todo", to_status: "blocked", kind: "task.blocked", note: "gate open: architecture" }, "task.blocked"],
-    [{ from_status: "todo", to_status: "cancelled", note: "cut" }, "task.cancelled"],
+    [{ from_status: "ready", to_status: "blocked", note: "gate open: architecture" }, "task.blocked"],
+    [{ from_status: "blocked", to_status: "ready", note: "gate resume" }, "task.released"],
+    [{ from_status: "blocked", to_status: "ready", note: "gate dissolved: closed unmerged PR #9" }, "task.released"],
+    [{ from_status: "blocked", to_status: "ready", kind: "gate.dissolved", note: "whatever the note says" }, "gate.dissolved"],
+    [{ from_status: "ready", to_status: "blocked", kind: "task.blocked", note: "gate open: architecture" }, "task.blocked"],
+    [{ from_status: "ready", to_status: "cancelled", note: "cut" }, "task.cancelled"],
   ];
   for (const [row, want] of cases) {
     assert.equal(kindForEvent(row), want, JSON.stringify(row));
@@ -217,8 +219,8 @@ test("task.create writes a birth row the stream picks up", async () => {
   srv = await startEventServer({ store, port: 0, intervalMs: 50 });
   const ws = await connect(srv.port);
   await collect(ws, 2); // welcome + empty history
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   store.task.create({ storyId: story.id, title: "born", executionKind: "manual" });
   const [live] = await collect(ws, 1);
   assert.equal(live.kind, "task.created");

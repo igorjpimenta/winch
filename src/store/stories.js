@@ -8,9 +8,9 @@ export function createStoryApi({ core, apis }) {
       if (!apis.epic.get(epicId)) throw new Error(`epic not found: ${epicId}`);
       return apis.item.create({
         id, kind: "story", parentId: epicId, title, description, acceptance,
-        status: status ?? "backlog", size, priority, capabilities,
+        status, size, priority, capabilities,
         assigneeAgent: assigned ?? null,
-        assigneeHarness: assigned ? (assigneeHarness ?? "legacy") : null,
+        assigneeHarness: assigned ? assigneeHarness : null,
         emit: false,
       });
     },

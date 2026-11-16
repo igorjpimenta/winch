@@ -2,6 +2,7 @@
 // tags, and kind lookups. Facades (epic/story/task) add domain rules on top.
 
 import { newItemId } from "../ids.js";
+import { resolveAssignmentPair } from "../reserved.js";
 import { EXECUTION_KINDS, ITEM_KINDS } from "../schema.js";
 
 export function createItemApi({ core }) {
@@ -15,8 +16,19 @@ export function createItemApi({ core }) {
       const kind = input.kind;
       if (!ITEM_KINDS.includes(kind)) throw new Error(`invalid item kind: ${kind}`);
       const id = input.id || newItemId();
-      const status = input.status || DEFAULT_STATUS[kind];
+      const pair = resolveAssignmentPair(
+        input.assigneeAgent ?? (input.assigned ?? null),
+        input.assigneeHarness ?? null,
+      );
+      const assigneeHarness = pair.harness;
+      const assigneeAgent = pair.agent;
+      if ((assigneeHarness == null) !== (assigneeAgent == null)) {
+        throw new Error(`assignment is a pair: ${id}`);
+      }
+      const assigned = assigneeHarness != null && assigneeAgent != null;
+      const status = input.status ?? DEFAULT_STATUS[kind];
       if (!STATUSES_BY_KIND[kind].includes(status)) throw new Error(`invalid ${kind} status: ${status}`);
+      if (status === "ready" && !assigned) throw new Error(`ready item requires an assignment: ${id}`);
       const executionKind = input.executionKind ?? "manual";
       if (!EXECUTION_KINDS.includes(executionKind)) throw new Error(`invalid execution_kind: ${executionKind}`);
       const parentId = kind === "epic" ? null : (input.parentId ?? null);
@@ -45,7 +57,7 @@ export function createItemApi({ core }) {
           VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, status, JSON.stringify(input.state ?? {}),
-          input.assigneeHarness ?? null, input.assigneeAgent ?? null,
+          assigneeHarness, assigneeAgent,
           t, ITEM_TERMINAL.has(status) ? t : null, null,
         );
         for (const tag of input.capabilities ?? []) {
@@ -62,6 +74,22 @@ export function createItemApi({ core }) {
             note: input.note ?? `${kind} created`,
             at: t,
           });
+        }
+        // Birth is always the default (backlog); an assignee on the create
+        // call is an assignment, so it moves the item to ready immediately.
+        if (assigned && status === "backlog") {
+          db.prepare("UPDATE item_state SET revision=revision+1, status='ready', updated_at=? WHERE item_id=?").run(t, id);
+          if (input.emit !== false) {
+            appendEvent({
+              itemId: id,
+              fromStatus: "backlog",
+              toStatus: "ready",
+              kind: `${kind}.assigned`,
+              actor: input.actor ?? null,
+              note: `assign ${assigneeAgent}`,
+              at: t,
+            });
+          }
         }
         db.exec("COMMIT");
       } catch (err) {
@@ -95,7 +123,7 @@ export function createItemApi({ core }) {
     update(id, patch = {}) {
       const existing = getRow(id, { includeDeleted: true });
       if (!existing) throw new Error(`item not found: ${id}`);
-      const status = patch.status ?? existing.status;
+      let status = patch.status ?? existing.status;
       if (!STATUSES_BY_KIND[existing.kind].includes(status)) throw new Error(`invalid ${existing.kind} status: ${status}`);
       const executionKind = patch.executionKind ?? existing.execution_kind;
       if (!EXECUTION_KINDS.includes(executionKind)) throw new Error(`invalid execution_kind: ${executionKind}`);
@@ -117,12 +145,28 @@ export function createItemApi({ core }) {
         deleted_at: patch.deletedAt !== undefined ? patch.deletedAt : existing.deleted_at,
       };
       if (patch.assigned !== undefined) next.assignee_agent = patch.assigned ?? null;
+      const pair = resolveAssignmentPair(next.assignee_agent, next.assignee_harness);
+      next.assignee_agent = pair.agent;
+      next.assignee_harness = pair.harness;
       if (next.assignee_agent == null) next.assignee_harness = null;
-      else if (next.assignee_harness == null) next.assignee_harness = patch.harness ?? "legacy";
+      else if (next.assignee_harness == null) throw new Error(`assignment requires a harness: ${id}`);
       if (patch.status && ITEM_TERMINAL.has(status) && !existing.closed_at) next.closed_at = t;
       if (patch.status && !ITEM_TERMINAL.has(status) && existing.closed_at && patch.closedAt === undefined) next.closed_at = null;
       if ((next.assignee_harness == null) !== (next.assignee_agent == null)) {
         throw new Error(`assignment is a pair: ${id}`);
+      }
+      const assignmentChanged = patch.assigneeHarness !== undefined || patch.assigneeAgent !== undefined || patch.assigned !== undefined;
+      if (patch.status === undefined && assignmentChanged) {
+        if (status === "ready" && (next.assignee_harness == null || next.assignee_agent == null)) status = "backlog";
+        else if (status === "backlog" && next.assignee_harness != null && next.assignee_agent != null) status = "ready";
+      }
+      if (status === "ready" && (next.assignee_harness == null || next.assignee_agent == null)) {
+        throw new Error(`ready item requires an assignment: ${id}`);
+      }
+      if (existing.status === "blocked" && status !== "blocked" && next.state_json?.wait?.kind === "deps") {
+        const state = { ...next.state_json };
+        delete state.wait;
+        next.state_json = state;
       }
       const statusChanged = status !== existing.status;
       const note = patch.note ?? null;
@@ -175,7 +219,7 @@ export function createItemApi({ core }) {
       const row = getRow(id, { includeDeleted: true });
       if (!row) return null;
       const descendants = itemApi.tree(id, { includeDeleted: true }).filter((r) => r.id !== id);
-      const claimed = descendants.filter((r) => r.kind === "task" && (r.attempt_count > 0 || r.status !== "todo"));
+      const claimed = descendants.filter((r) => r.kind === "task" && (r.attempt_count > 0 || (r.status !== "backlog" && r.status !== "ready")));
       const t = at ?? now();
       const note = reason ? `dropped: ${String(reason).slice(0, 160)}` : `dropped with ${row.kind}`;
       db.exec("BEGIN IMMEDIATE");
