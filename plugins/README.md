@@ -83,8 +83,8 @@ claim, `STORY-…` to break down, `EPIC-…` to review. The session is started
 through the gateway's own CLI entry (`agent --session-key
 agent:<agent>:winch:<id>`), because the host only lets bundled plugins schedule
 turns in-process. Config: `dispatchEnabled`
-(default true), `dispatchPlanner` (fallback: atlas), `dispatchStatePath`
-(reviewed epics across restarts).
+(default true), `dispatchMaxConcurrent` (default 8), `dispatchPlanner`
+(fallback: atlas), `dispatchStatePath` (reviewed epics across restarts).
 
 Routing, one row per decision:
 
@@ -116,6 +116,12 @@ on connect (`{"type":"history"}`), so a restarted gateway catches up without a
 timer. A task wake is suppressed for 35 minutes and an epic review happens
 once per epic (remembered in `dispatchStatePath`); the claim lease remains the
 real guard against double work.
+
+Wakes are admitted through a bounded FIFO queue per dispatcher process: at most `dispatchMaxConcurrent`
+(default 8) agent processes run at once, and a burst queues instead of spawning
+every wake simultaneously. The queue never drops an event, dedupes per
+`kind:message` tuple while pending, and admits oldest-first. Raise the cap only
+when the host has memory headroom for that many concurrent agent sessions.
 
 ## Claim webhook (wake on attribution)
 
@@ -180,6 +186,12 @@ minutes, reviewed epics are remembered in `~/.opencode/state/winch-plugin-dispat
 and a null assignee/creator dies loudly on the dispatch layer (no wake, no
 retry) — a later assignment emits a new row. No planner agent is hardcoded;
 the fallback planner is supplied by the caller when needed.
+
+Wakes are admitted through a bounded FIFO queue per dispatcher process: default 8 concurrent agent
+processes, configurable with `dispatchMaxConcurrent` (V2 options) or
+`WINCH_DISPATCH_MAX_CONCURRENT` (V1 server); the rest wait instead of spawning
+all at once. The queue is idempotent per `kind:message` while pending and never
+drops an event.
 
 ### Local (stdio) — the strong shape
 

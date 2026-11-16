@@ -22,6 +22,97 @@ export const DEFAULT_WS_URL = "ws://127.0.0.1:38291";
 // its own lease, this only avoids duplicate turns for one assignment row.
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
 
+export const DEFAULT_MAX_CONCURRENT = 8;
+
+// Bounded FIFO admission for wakes. Events arrive in bursts (history replay,
+// a plan creating many assigned tasks), and each wake is a full agent process:
+// admitting them all at once multiplies memory by the burst size. The queue
+// admits oldest-first and never drops an event; idempotency is per
+// kind:message tuple, so a replayed row cannot occupy two slots.
+export function createWakeQueue({ limit = DEFAULT_MAX_CONCURRENT, run, onStart = null, logger = null } = {}) {
+  const n = Number(limit);
+  const cap = Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_CONCURRENT;
+  const pending = [];
+  const active = new Set();
+  let running = 0;
+  let pumping = false;
+
+  const keyOf = (route) => `${route.kind}:${route.message}`;
+
+  function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (running < cap && pending.length > 0) {
+        const job = pending.shift();
+        running++;
+        active.add(job.key);
+        onStart?.(job.route);
+        logger?.info?.(`winch: waking ${job.route.agent} for ${job.route.message} (${job.route.kind})`);
+        let result;
+        try {
+          result = run(job.route);
+        } catch (e) {
+          logger?.warn?.(`winch: wake failed for ${job.route.message}: ${e?.message ?? e}`);
+          running--;
+          active.delete(job.key);
+          continue;
+        }
+        if (result && typeof result.then === "function") {
+          Promise.resolve(result)
+            .catch((e) => logger?.warn?.(`winch: wake failed for ${job.route.message}: ${e?.message ?? e}`))
+            .finally(() => {
+              running--;
+              active.delete(job.key);
+              pump();
+            });
+        } else {
+          // A synchronous wake frees its slot immediately; deferring the
+          // release would make a sync harness look like a running process.
+          running--;
+          active.delete(job.key);
+        }
+      }
+    } finally {
+      pumping = false;
+    }
+  }
+
+  return {
+    enqueue(route) {
+      const key = keyOf(route);
+      if (active.has(key)) return false;
+      const existing = pending.find((job) => job.key === key);
+      if (existing) {
+        // A newer epic close marker supersedes a queued review of the same epic.
+        if (route.kind === "review" && (route.eventId ?? 0) > (existing.route.eventId ?? 0)) {
+          existing.route = route;
+          return true;
+        }
+        return false;
+      }
+      pending.push({ key, route });
+      if (running >= cap) {
+        logger?.info?.(`winch: queued ${route.agent} for ${route.message} (${route.kind}); ${pending.length} waiting`);
+      }
+      pump();
+      return true;
+    },
+    cancel(key) {
+      const i = pending.findIndex((job) => job.key === key);
+      if (i === -1) return false;
+      pending.splice(i, 1);
+      return true;
+    },
+    has(key) {
+      return active.has(key) || pending.some((job) => job.key === key);
+    },
+    get pending() { return pending.length; },
+    get running() { return running; },
+    get limit() { return cap; },
+  };
+}
+
 export function wakeFor(ev, { planner = "atlas" } = {}) {
   const id = ev?.item?.id ?? ev?.task?.id ?? null;
   if (!id) return null;
@@ -63,7 +154,7 @@ export function wakeFor(ev, { planner = "atlas" } = {}) {
   }
 }
 
-export function createRouter({ wake, planner, now = Date.now, statePath = null, logger = null }) {
+export function createRouter({ wake, planner, maxConcurrent = DEFAULT_MAX_CONCURRENT, now = Date.now, statePath = null, logger = null }) {
   const inflight = new Map();
   const reviewedIds = readReviewed(statePath); // epicId -> last reviewed event id
   // Rows are replayed on every reconnect; each row is acted on once, while a
@@ -83,21 +174,29 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
     }
   }
 
+  const queue = createWakeQueue({
+    limit: maxConcurrent,
+    run: wake,
+    logger,
+    onStart: (route) => {
+      if (route.kind === "review") rememberReview(route.message, route.eventId ?? 0);
+      else inflight.set(`${route.kind}:${route.message}`, now());
+    },
+  });
+
   function send(route) {
     const key = `${route.kind}:${route.message}`;
     if (route.kind === "review") {
       // A later marker for the same epic is a new review cycle.
       const last = reviewedIds[route.message] ?? 0;
       if (route.eventId != null && route.eventId <= last) return null;
-      rememberReview(route.message, route.eventId);
     } else {
       const seen = inflight.get(key);
       if (seen && now() - seen < INFLIGHT_TTL_MS) return null;
       inflight.set(key, now());
       for (const [k, at] of inflight) if (now() - at > INFLIGHT_TTL_MS) inflight.delete(k);
     }
-    logger?.info?.(`winch: waking ${route.agent} for ${route.message} (${route.kind})`);
-    Promise.resolve(wake(route)).catch((e) => logger?.warn?.(`winch: wake failed: ${e?.message ?? e}`));
+    if (!queue.enqueue(route)) return null;
     return route;
   }
 
@@ -114,6 +213,7 @@ export function createRouter({ wake, planner, now = Date.now, statePath = null, 
         // An earlier wake may have been refused as not-ready; that suppression
         // must not outlive the event that made the task claimable.
         inflight.delete(`task:${u.id}`);
+        queue.cancel(`task:${u.id}`);
         if (send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" })) acted = true;
       }
       const route = wakeFor(ev, { planner });
@@ -188,6 +288,7 @@ export function startDispatchClient({ url = DEFAULT_WS_URL, router, logger = nul
     ws.addEventListener("close", () => {
       if (stopped) return;
       retry = setTimeout(connect, 2000);
+      retry?.unref?.();
     });
     ws.addEventListener("error", () => {});
   };
