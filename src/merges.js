@@ -98,7 +98,7 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
           const dissolved = task.status === "blocked" && task.gate_type;
           if (!dryRun) {
             store.task.update(task.id, {
-              status: "todo", assigned: null, gate_type: null, blocked_at: null,
+              status: "ready", assigned: null, gate_type: null, blocked_at: null,
               actor: "merge-detector",
               note: dissolved ? `gate dissolved: closed unmerged PR #${pr.number}` : `closed unmerged: PR #${pr.number}`,
             });

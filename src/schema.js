@@ -12,9 +12,9 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 
-export const EPIC_STATUSES = ["idea", "planned", "in_progress", "done", "cancelled"];
-export const STORY_STATUSES = ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
-export const TASK_STATUSES = ["todo", "in_progress", "done", "blocked", "cancelled"];
+export const EPIC_STATUSES = ["backlog", "ready", "in_progress", "blocked", "review", "done", "cancelled"];
+export const STORY_STATUSES = ["backlog", "ready", "in_progress", "blocked", "review", "done", "cancelled"];
+export const TASK_STATUSES = ["backlog", "ready", "in_progress", "blocked", "review", "done", "cancelled"];
 export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
 export const ITEM_KINDS = ["epic", "story", "task"];
 

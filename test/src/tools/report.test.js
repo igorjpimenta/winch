@@ -43,7 +43,7 @@ test("done records the result, artifacts and the session", async () => {
 });
 
 test("reopening and closing the epic again writes a second marker", async () => {
-  const epic = h.store.epic.create({ title: "E-epic", status: "planned" });
+  const epic = h.store.epic.create({ title: "E-epic", status: "ready" });
   const story = h.store.story.create({ epicId: epic.id, title: "S-epic", status: "ready" });
   const t1 = h.store.task.create({ storyId: story.id, title: "one", status: "in_progress", executionKind: "manual", assigned: "atlas" });
   const t2 = h.store.task.create({ storyId: story.id, title: "two", status: "in_progress", executionKind: "manual", assigned: "atlas" });
@@ -60,10 +60,10 @@ test("reopening and closing the epic again writes a second marker", async () => 
 });
 
 test("a story closes with its last task and records the transition", async () => {
-  const epic = h.store.epic.create({ title: "E-story-close", status: "planned" });
+  const epic = h.store.epic.create({ title: "E-story-close", status: "ready" });
   const story = h.store.story.create({ epicId: epic.id, title: "S-close", status: "ready" });
   const a = h.store.task.create({ storyId: story.id, title: "a", status: "in_progress", executionKind: "manual", assigned: "atlas" });
-  const b = h.store.task.create({ storyId: story.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  const b = h.store.task.create({ storyId: story.id, title: "b", status: "ready", executionKind: "manual", assigned: "atlas" });
   await h.call("backlog_done", { taskId: a.id, resultSummary: "a done" });
   assert.equal(h.store.story.get(story.id).status, "ready");
   await h.call("backlog_claim", { taskId: b.id });
@@ -75,11 +75,11 @@ test("a story closes with its last task and records the transition", async () =>
 });
 
 test("the epic closes only when its last story does", async () => {
-  const epic = h.store.epic.create({ title: "E-two", status: "planned" });
+  const epic = h.store.epic.create({ title: "E-two", status: "ready" });
   const s1 = h.store.story.create({ epicId: epic.id, title: "s1", status: "ready" });
   const s2 = h.store.story.create({ epicId: epic.id, title: "s2", status: "ready" });
-  const a = h.store.task.create({ storyId: s1.id, title: "a", status: "todo", executionKind: "manual", assigned: "atlas" });
-  const b = h.store.task.create({ storyId: s2.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  const a = h.store.task.create({ storyId: s1.id, title: "a", status: "ready", executionKind: "manual", assigned: "atlas" });
+  const b = h.store.task.create({ storyId: s2.id, title: "b", status: "ready", executionKind: "manual", assigned: "atlas" });
   for (const t of [a, b]) {
     await h.call("backlog_claim", { taskId: t.id });
     await h.call("backlog_done", { taskId: t.id, resultSummary: "done" });
@@ -90,7 +90,7 @@ test("the epic closes only when its last story does", async () => {
 
 test("block records a reason and an optional dependency", async () => {
   const { task } = h.seedReadyTask();
-  const blocker = h.store.task.create({ storyId: task.story_id, title: "blocker", status: "todo", executionKind: "manual" });
+  const blocker = h.store.task.create({ storyId: task.story_id, title: "blocker", status: "ready", executionKind: "manual" });
   const res = await h.call("backlog_block", { taskId: task.id, reason: "waiting", blockedBy: { kind: "task", id: blocker.id } });
   assert.equal(res.details.status, "ok");
   assert.equal(h.store.task.get(task.id).status, "blocked");
@@ -114,6 +114,6 @@ test("gate type opens through openGate and resume accepts only the caller", asyn
   assert.equal(mismatch.details.reason, "actor_mismatch");
   const resumed = await h.call("backlog_resume", { taskId: task.id });
   assert.equal(resumed.details.status, "ok");
-  assert.equal(h.store.task.get(task.id).status, "todo");
+  assert.equal(h.store.task.get(task.id).status, "ready");
   assert.equal((await h.call("backlog_resume", { taskId: task.id })).details.reason, "not_resumable");
 });

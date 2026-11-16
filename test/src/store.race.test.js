@@ -23,7 +23,7 @@ test("four processes race one claim: exactly one winner, exactly one claim event
   dir = mkdtempSync(path.join(tmpdir(), "backlog-race-"));
   const dbPath = path.join(dir, "store.sqlite");
   const seed = createStore({ dbPath });
-  const epic = seed.epic.create({ title: "E", status: "planned" });
+  const epic = seed.epic.create({ title: "E", status: "ready" });
   const story = seed.story.create({ epicId: epic.id, title: "S", status: "ready" });
   const task = seed.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
   seed.close();

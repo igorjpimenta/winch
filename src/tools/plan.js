@@ -38,7 +38,7 @@ export function createPlanTools({ store, logger }) {
           title: epicIn.title,
           description: epicIn.description,
           acceptance: epicIn.acceptance,
-          status: "planned",
+          status: "ready",
           priority: epicIn.priority ?? 50,
           createdBy: identity.agent,
         });
@@ -59,7 +59,7 @@ export function createPlanTools({ store, logger }) {
               storyId: story.id,
               title: t.title,
               description: t.description,
-              status: "todo",
+              status: "ready",
               executionKind: t.executionKind ?? "manual",
               executionArgs: t.executionArgs,
               capabilities: t.capabilities ?? s.capabilities,
@@ -147,7 +147,7 @@ export function createPlanTools({ store, logger }) {
             storyId,
             title: t.title,
             description: t.description,
-            status: "todo",
+            status: "ready",
             executionKind: t.executionKind ?? "manual",
             executionArgs: t.executionArgs,
             capabilities: t.capabilities ?? parent?.capabilities,
@@ -168,7 +168,7 @@ export function createPlanTools({ store, logger }) {
         // task.created (from plan) stays planner noise.
         for (const t of created.tasks) {
           store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-            .run(t.id, "todo", "todo", "task.appended", `${identity.harness}:${identity.agent}`, t.title.slice(0, 120), at);
+            .run(t.id, "ready", "ready", "task.appended", `${identity.harness}:${identity.agent}`, t.title.slice(0, 120), at);
         }
         return ok(
           JSON.stringify({ ok: true, epicId: epic?.id ?? null, stories: created.stories, tasks: created.tasks }),
@@ -199,7 +199,7 @@ export function createPlanTools({ store, logger }) {
       const tasks = kind === "task" ? [task] : storyIds.flatMap((sid) => store.task.list({ storyId: sid }));
       // Dropping is reversible, but it must never hide work someone has done:
       // the guard covers every descendant, not just the row named in the call.
-      const claimed = tasks.filter((t) => t.claimed_at != null || (t.attempt_count ?? 0) > 0 || (t.status !== "todo" && t.status !== "cancelled"));
+      const claimed = tasks.filter((t) => t.claimed_at != null || (t.attempt_count ?? 0) > 0 || (t.status !== "backlog" && t.status !== "ready" && t.status !== "cancelled"));
       if (claimed.length > 0) {
         return err(
           `${id} cannot be dropped: ${claimed.length} task(s) under it were already claimed (${claimed.map((t) => t.id).join(", ")}).`,
@@ -269,15 +269,15 @@ export function createPlanTools({ store, logger }) {
         store.db.exec("BEGIN IMMEDIATE");
         try {
           for (const t of tasks) {
-            store.db.prepare("UPDATE tasks SET status='todo', updated_at=?, closed_at=NULL WHERE id=?").run(at, t.id);
+            store.db.prepare("UPDATE tasks SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, t.id);
             store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-              .run(t.id, "cancelled", "todo", "task.restored", actor, "restored", at);
+              .run(t.id, "cancelled", "ready", "task.restored", actor, "restored", at);
           }
           for (const sid of storyIds) {
             store.db.prepare("UPDATE stories SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, sid);
           }
           if (kind === "epic") {
-            store.db.prepare("UPDATE epics SET status='planned', updated_at=?, closed_at=NULL WHERE id=?").run(at, id);
+            store.db.prepare("UPDATE epics SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, id);
           }
           store.db.exec("COMMIT");
         } catch (e) {

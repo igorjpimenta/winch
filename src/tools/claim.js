@@ -58,12 +58,12 @@ export function createClaimTools({ store, logger }) {
       }
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_claim: not found: ${args?.taskId}`, "not_found", { taskId: args?.taskId ?? null });
-      if (task.status !== "todo") return err(`${task.id} is ${task.status}, not todo — claim applies to todo tasks only.`, "not_claimed", { taskId: task.id });
+      if (task.status !== "ready") return err(`${task.id} is ${task.status}, not ready — claim applies to ready tasks only.`, "not_claimed", { taskId: task.id });
       try {
         // No limit: an id lookup must not false-negative behind a paging cap.
         const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities });
         const c = candidates.find((cand) => cand.task.id === task.id);
-        if (!c) return err(`${task.id} is todo but not currently ready (deps unmet or caps mismatch) — nothing claimed.`, "not_ready", { taskId: task.id });
+        if (!c) return err(`${task.id} is ready but not currently claimable (deps unmet or caps mismatch) — nothing claimed.`, "not_ready", { taskId: task.id });
         if (args?.dryRun) {
           return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: task.id });
         }

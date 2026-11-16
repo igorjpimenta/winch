@@ -19,8 +19,8 @@ function teardown() {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function seed({ assigned = null, taskStatus = "todo" } = {}) {
-  const epic = store.epic.create({ title: "E", status: "planned", priority: 80 });
+function seed({ assigned = null, taskStatus = "ready" } = {}) {
+  const epic = store.epic.create({ title: "E", status: "ready", priority: 80 });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", priority: 70 });
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
@@ -52,12 +52,12 @@ test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it
   assert.equal(m.unrouted[0].assigned, null);
 });
 
-test("expired lease is swept back to todo and reported", () => {
+test("expired lease is swept back to ready and reported", () => {
   const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
   store.db.prepare("UPDATE tasks SET claim_expires_at=? WHERE id=?").run(Date.now() - 1000, task.id);
   const m = tick(store);
   assert.deepEqual(m.swept, [task.id]);
-  assert.equal(store.task.get(task.id).status, "todo");
+  assert.equal(store.task.get(task.id).status, "ready");
 });
 
 test("blocked tasks appear in blocked, never in claimable sets", () => {

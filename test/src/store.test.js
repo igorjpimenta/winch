@@ -52,9 +52,9 @@ test("S0.3: claim is CAS — first wins, loser gets null, re-claim after release
   const evs = eventsFor(store, task.id);
   assert.equal(evs.length, 2);
   assert.equal(evs[0].from_status, null);
-  assert.equal(evs[0].to_status, "todo");
+  assert.equal(evs[0].to_status, "ready");
   assert.equal(evs[0].note, "task created");
-  assert.equal(evs[1].from_status, "todo");
+  assert.equal(evs[1].from_status, "ready");
   assert.equal(evs[1].to_status, "in_progress");
   assert.equal(evs[1].actor, "agent-a");
   assert.equal(evs[1].note, "claim");
@@ -90,7 +90,7 @@ test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) 
     assert.equal(swept.length, 1);
     const after = store.task.get(task.id);
     if (attempt < MAX_ATTEMPTS) {
-      assert.equal(after.status, "todo");
+      assert.equal(after.status, "ready");
       assert.equal(after.attempt_count, attempt);
     } else {
       assert.equal(after.status, "blocked");
@@ -105,11 +105,11 @@ test("S0.4: sweeper re-releases expired claims, escalates at MAX_ATTEMPTS", (t) 
   assert.equal(sweeps.length, MAX_ATTEMPTS);
   for (const e of sweeps) {
     assert.equal(e.from_status, "in_progress");
-    assert.equal(e.to_status, "todo");
+    assert.equal(e.to_status, "ready");
   }
   const last = evs[evs.length - 1];
   assert.equal(last.note, "blocked: max attempts");
-  assert.equal(last.from_status, "todo");
+  assert.equal(last.from_status, "ready");
   assert.equal(last.to_status, "blocked");
 });
 
@@ -127,7 +127,7 @@ test("heartbeat: advances last_heartbeat only for the assigned in_progress agent
   const store = makeStore(t);
   const { task } = seedHierarchy(store);
 
-  assert.equal(store.task.heartbeat(task.id, "agent-a"), null, "todo task cannot heartbeat");
+  assert.equal(store.task.heartbeat(task.id, "agent-a"), null, "ready task cannot heartbeat");
 
   const claimed = store.task.claim({ id: task.id, agentId: "agent-a" });
   const beat = store.task.heartbeat(task.id, "agent-a");
@@ -152,7 +152,7 @@ test("task.update: status change writes an event; other patches do not", (t) => 
   assert.equal(done.status, "done");
   const evs = eventsFor(store, task.id);
   assert.equal(evs.length, 2);
-  assert.equal(evs[1].from_status, "todo");
+  assert.equal(evs[1].from_status, "ready");
   assert.equal(evs[1].to_status, "done");
   assert.equal(evs[1].actor, "agent-a");
   assert.equal(evs[1].note, "finished");
@@ -169,13 +169,13 @@ test("task.update: actor/note optional — defaults to system", (t) => {
 
 test("an expired lease requeues the task to its own worker", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E-sweep", status: "planned" });
+  const epic = store.epic.create({ title: "E-sweep", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1000 });
   store.task.sweepExpired({ now: Date.now() + 5000 });
   const after = store.task.get(task.id);
-  assert.equal(after.status, "todo");
+  assert.equal(after.status, "ready");
   assert.equal(after.assigned, "worker", "the owner is kept so a dispatcher can re-wake it");
   assert.equal(after.attempt_count, 1);
 });
@@ -186,25 +186,53 @@ test("0001 adds events.kind without rewriting history", (t) => {
   // legacy-shaped database: kind column never existed here
   {
     const db = new Database(dbPath);
-    db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE epics (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+    db.exec(`CREATE TABLE deps (from_id TEXT NOT NULL, from_kind TEXT NOT NULL,
+        to_id TEXT NOT NULL, to_kind TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY(from_id, to_id),
+        CONSTRAINT deps_from_kind CHECK(from_kind IN ('epic','story','task')),
+        CONSTRAINT deps_to_kind CHECK(to_kind IN ('epic','story','task')));
+      CREATE INDEX idx_deps_from ON deps (from_id);
+      CREATE INDEX idx_deps_to ON deps (to_id);
+      CREATE TABLE epics (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT,
         acceptance TEXT, status TEXT NOT NULL, owner_team TEXT,
-        priority INTEGER NOT NULL DEFAULT 50, created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL, closed_at INTEGER);
-      CREATE TABLE tasks (id TEXT PRIMARY KEY, story_id TEXT NOT NULL, title TEXT NOT NULL,
-        status TEXT NOT NULL, execution_kind TEXT NOT NULL DEFAULT 'manual',
-        gate_type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-      CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
-        from_status TEXT, to_status TEXT NOT NULL, actor TEXT, note TEXT, at INTEGER NOT NULL);
-      CREATE TABLE session_budgets (session_key TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-        tool_calls INTEGER NOT NULL DEFAULT 0, limit_calls INTEGER NOT NULL,
-        exhausted_at INTEGER, empty_wakes INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
-      INSERT INTO meta(key,value) VALUES('schema_version','6');
-      INSERT INTO tasks(id,story_id,title,status,execution_kind,gate_type,created_at,updated_at) VALUES
-        ('TASK-G','STORY-1','g','blocked','manual','release',1,2);
+        priority INTEGER DEFAULT 50 NOT NULL, created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, closed_at INTEGER,
+        CONSTRAINT epics_status CHECK(status IN ('idea','planned','in_progress','done','cancelled')));
+      CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        task_id TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL,
+        actor TEXT, note TEXT, session_ref TEXT, at INTEGER NOT NULL);
+      CREATE INDEX idx_events_task ON events (task_id);
+      CREATE TABLE session_budgets (session_key TEXT PRIMARY KEY NOT NULL, agent_id TEXT NOT NULL,
+        tool_calls INTEGER DEFAULT 0 NOT NULL, limit_calls INTEGER NOT NULL,
+        exhausted_at INTEGER, empty_wakes INTEGER DEFAULT 0 NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE stories (id TEXT PRIMARY KEY NOT NULL, epic_id TEXT NOT NULL,
+        title TEXT NOT NULL, description TEXT, acceptance TEXT, status TEXT NOT NULL,
+        size TEXT, priority INTEGER DEFAULT 50 NOT NULL, assigned TEXT, capabilities TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, closed_at INTEGER,
+        FOREIGN KEY(epic_id) REFERENCES epics(id) ON DELETE cascade,
+        CONSTRAINT stories_status CHECK(status IN ('backlog','ready','in_progress','review','done','blocked','cancelled')));
+      CREATE INDEX idx_stories_epic ON stories (epic_id);
+      CREATE INDEX idx_stories_status_assigned ON stories (status, assigned);
+      CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, story_id TEXT NOT NULL,
+        title TEXT NOT NULL, description TEXT, status TEXT NOT NULL,
+        execution_kind TEXT NOT NULL, execution_args TEXT DEFAULT '{}' NOT NULL,
+        assigned TEXT, capabilities TEXT, flow_id TEXT, task_run_id TEXT,
+        claim_expires_at INTEGER, lease_seconds INTEGER, last_heartbeat INTEGER,
+        attempt_count INTEGER DEFAULT 0 NOT NULL, gate_type TEXT, blocked_at INTEGER,
+        result_summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        claimed_at INTEGER, closed_at INTEGER,
+        FOREIGN KEY(story_id) REFERENCES stories(id) ON DELETE cascade,
+        CONSTRAINT tasks_status CHECK(status IN ('todo','in_progress','done','blocked','cancelled')),
+        CONSTRAINT tasks_execution_kind CHECK(execution_kind IN ('pipeclaw','subagent','cli','gate','manual')));
+      CREATE INDEX idx_tasks_story ON tasks (story_id);
+      CREATE INDEX idx_tasks_status_assigned ON tasks (status, assigned);
+      INSERT INTO epics(id,title,status,created_at,updated_at) VALUES ('EPIC-1','e','idea',1,2);
+      INSERT INTO stories(id,epic_id,title,status,created_at,updated_at) VALUES ('STORY-1','EPIC-1','s','ready',1,2);
+      INSERT INTO tasks(id,story_id,title,status,execution_kind,created_at,updated_at) VALUES
+        ('TASK-G','STORY-1','g','todo','manual',1,2);
       INSERT INTO events(task_id, from_status, to_status, actor, note, at) VALUES
         ('TASK-G','in_progress','blocked','a','blocked: need signoff',2000),
-        ('TASK-G','blocked','todo','op','gate resume',3000);`);
+        ('TASK-G','blocked','ready','op','gate resume',3000);`);
     // forge a 0000-only ledger so open applies exactly the new migration:
     // the migrator skips journal entries at or below the latest created_at
     db.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC NOT NULL);
@@ -216,11 +244,13 @@ test("0001 adds events.kind without rewriting history", (t) => {
   assert.ok(store.db.prepare("PRAGMA table_info(events)").all().some((c) => c.name === "kind"));
   assert.ok(!store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_budgets'").get(),
     "0002 drops session_budgets");
+  assert.equal(store.epic.get("EPIC-1").status, "backlog", "idea maps to backlog");
+  assert.equal(store.task.get("TASK-G").status, "ready", "todo maps to ready");
   // no backfill: pre-kind rows keep NULL and map by structure, as streamed
   const kinds = store.db.prepare("SELECT kind FROM events ORDER BY id").all().map((r) => r.kind);
   assert.deepEqual(kinds, [null, null]);
   assert.equal(kindForEvent({ from_status: "in_progress", to_status: "blocked", kind: null, note: "blocked: need signoff" }), "task.blocked");
-  assert.equal(kindForEvent({ from_status: "blocked", to_status: "todo", kind: null, note: "gate resume" }), "task.released");
+  assert.equal(kindForEvent({ from_status: "blocked", to_status: "ready", kind: null, note: "gate resume" }), "task.released");
 });
 
 test("heartbeat renews the claim lease — a live agent is never swept", (t) => {

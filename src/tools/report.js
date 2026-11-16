@@ -88,7 +88,7 @@ export function createReportTools({ store, logger }) {
       const task = store.task.get(args?.taskId);
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
       if (task.assigned && task.assigned !== agentId) return err(`${task.id} is assigned to ${task.assigned}, not ${agentId}.`, "not_assignee", { taskId: task.id });
-      if (task.status !== "in_progress" && task.status !== "todo") return err(`${task.id} is ${task.status}; blocking applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
+      if (task.status !== "in_progress" && task.status !== "ready") return err(`${task.id} is ${task.status}; blocking applies to ready/in_progress only.`, "wrong_status", { taskId: task.id });
       try {
         const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;
@@ -97,7 +97,7 @@ export function createReportTools({ store, logger }) {
           // gate.opened rows — never the generic update. Plain blocks keep
           // the generic path and its task.blocked kind.
           updated = store.task.openGate({ id: task.id, gateType: args.gateType, reason, actor: agentId });
-          if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to todo/in_progress only.`, "wrong_status", { taskId: task.id });
+          if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to ready/in_progress only.`, "wrong_status", { taskId: task.id });
         } else {
           updated = store.task.update(task.id, { status: "blocked", actor: agentId, note: `blocked: ${reason}` });
         }

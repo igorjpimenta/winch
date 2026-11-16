@@ -26,8 +26,8 @@ function call(name, args, identity = { harness: "test", agent: "atlas", session:
   return handle(name, args, identity);
 }
 
-function seed({ assigned = null, taskStatus = "todo" } = {}) {
-  const epic = store.epic.create({ title: "E", status: "planned", priority: 80 });
+function seed({ assigned = null, taskStatus = "ready" } = {}) {
+  const epic = store.epic.create({ title: "E", status: "ready", priority: 80 });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", priority: 70 });
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
@@ -49,18 +49,18 @@ test("openGate stamps gate fields + event, and a gate opens exactly once", () =>
   assert.equal(store.task.get(task.id).gate_type, "architecture");
 });
 
-test("resumeGate CAS: blocked → todo clears claim + gate, one resume per gate", () => {
+test("resumeGate CAS: blocked → ready clears claim + gate, one resume per gate", () => {
   const { task } = seed({ assigned: "atlas", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "release", actor: "herald" });
   const res = store.task.resumeGate({ id: task.id, actor: "operator" });
-  assert.equal(res.status, "todo");
+  assert.equal(res.status, "ready");
   assert.equal(res.assigned, null);
   assert.equal(res.gate_type, null);
   assert.equal(res.blocked_at, null);
   const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? AND note='gate resume'").all(task.id);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].from_status, "blocked");
-  assert.equal(ev[0].to_status, "todo");
+  assert.equal(ev[0].to_status, "ready");
   assert.equal(store.task.resumeGate({ id: task.id, actor: "operator" }), null);
   assert.equal(ev.length, 1);
 });
@@ -70,7 +70,7 @@ test("update-block stamps gate metadata; leaving blocked clears it", () => {
   const blocked = store.task.update(task.id, { status: "blocked", gateType: "roadmap", actor: "atlas", note: "blocked: gate" });
   assert.equal(blocked.gate_type, "roadmap");
   assert.ok(blocked.blocked_at > 0);
-  const back = store.task.update(task.id, { status: "todo", actor: "operator", note: "released" });
+  const back = store.task.update(task.id, { status: "ready", actor: "operator", note: "released" });
   assert.equal(back.gate_type, null);
   assert.equal(back.blocked_at, null);
 });
@@ -102,7 +102,7 @@ test("gate rows carry producer-stamped kinds, not inference", () => {
 });
 
 test("update() entering blocked with gateType stamps gate.opened at write", () => {
-  const { task } = seed({ taskStatus: "todo" });
+  const { task } = seed({ taskStatus: "ready" });
   store.task.update(task.id, { status: "blocked", gateType: "release", actor: "x", note: "blocked: need signoff" });
   const row = store.db.prepare("SELECT kind FROM events WHERE task_id=? AND to_status='blocked'").get(task.id);
   assert.equal(row.kind, "gate.opened", "gate context at write time beats note sniffing");

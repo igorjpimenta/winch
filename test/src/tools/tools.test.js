@@ -11,7 +11,7 @@ afterEach(() => h.teardown());
 test("a claim carries the store-only handoff: acceptance, artifacts, receiver prompt", async () => {
   const { story, task } = h.seedReadyTask();
   h.store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
-    .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/upstream", Date.now());
+    .run(task.id, "ready", "ready", "atlas", "artifact: https://example.test/upstream", Date.now());
   const res = await h.call("backlog_claim", { taskId: task.id });
   const body = JSON.parse(res.content[0].text);
   assert.equal(body.handoff.acceptance_criteria, "AC-1");
@@ -22,7 +22,7 @@ test("a claim carries the store-only handoff: acceptance, artifacts, receiver pr
 
 test("an artifact added mid-flight reaches the next claim on the story", async () => {
   const { story, task } = h.seedReadyTask();
-  const next = h.store.task.create({ storyId: story.id, title: "next", status: "todo", executionKind: "manual" });
+  const next = h.store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual" });
   await h.call("backlog_claim", { taskId: task.id });
   await h.call("backlog_update", { taskId: task.id, addArtifact: "https://example.test/mid" });
   await h.call("backlog_done", { taskId: task.id, resultSummary: "done" });

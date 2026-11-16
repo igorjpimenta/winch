@@ -17,7 +17,7 @@ function freshStore(config = {}) {
 }
 
 function seed(store) {
-  const epic = store.epic.create({ title: "E", status: "planned" });
+  const epic = store.epic.create({ title: "E", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   return store.task.create({ storyId: story.id, title: "T" });
 }

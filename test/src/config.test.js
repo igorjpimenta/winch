@@ -20,7 +20,7 @@ function tempStore(t, config) {
 }
 
 function seed(store) {
-  const epic = store.epic.create({ title: "E", status: "planned" });
+  const epic = store.epic.create({ title: "E", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   return store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
 }
@@ -86,7 +86,7 @@ test("store honors construction config: lease length and sweep attempts", (t) =>
 test("per-call meta tunes a single tool call without touching the server", async (t) => {
   const store = tempStore(t, {});
   const { handle } = createToolHandlers(store, null);
-  const epic = store.epic.create({ title: "E", status: "planned" });
+  const epic = store.epic.create({ title: "E", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
   store.task.claim({ id: task.id, agentId: "atlas" });

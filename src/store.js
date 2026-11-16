@@ -60,7 +60,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     create({ title, description, acceptance, status, ownerTeam, priority, id, createdBy }) {
       const epicId = id || newEpicId();
       const t = now();
-      const s = status || "idea";
+      const s = status || "backlog";
       if (!EPIC_STATUSES.includes(s)) throw new Error(`invalid epic status: ${s}`);
       db.prepare(`
         INSERT INTO epics(id, title, description, acceptance, status, owner_team, priority, created_by, created_at, updated_at)
@@ -168,13 +168,13 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     if (merged.status === "blocked" && existing.status !== "blocked") {
       return merged.gate_type ? "gate.opened" : "task.blocked";
     }
-    if (existing.status === "blocked" && merged.status === "todo") {
+    if (existing.status === "blocked" && merged.status === "ready") {
       return existing.gate_type ? "gate.dissolved" : "task.released";
     }
     if (merged.status === "done") return "task.completed";
     if (merged.status === "cancelled") return "task.cancelled";
-    if (existing.status === "todo" && merged.status === "in_progress") return "task.claimed";
-    if (merged.status === "todo") return "task.released";
+    if (existing.status === "ready" && merged.status === "in_progress") return "task.claimed";
+    if (merged.status === "ready") return "task.released";
     return "task.updated";
   }
 
@@ -183,7 +183,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       if (!storyApi.get(storyId)) throw new Error(`story not found: ${storyId}`);
       const taskId = id || newTaskId();
       const t = now();
-      const s = status || "todo";
+      const s = status || "ready";
       const ek = executionKind || "manual";
       if (!TASK_STATUSES.includes(s))     throw new Error(`invalid task status: ${s}`);
       if (!EXECUTION_KINDS.includes(ek))  throw new Error(`invalid execution_kind: ${ek}`);
@@ -282,7 +282,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       return r.changes > 0;
     },
     /**
-     * Open a human gate: CAS working states (todo|in_progress) → blocked with
+     * Open a human gate: CAS working states (ready|in_progress) → blocked with
      * gate_type stamped, event row in the same transaction. Null if terminal or
      * already blocked — a gate opens exactly once; the event trail is the audit.
      */
@@ -291,13 +291,13 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       db.exec("BEGIN IMMEDIATE");
       try {
         const cur = db.prepare("SELECT status FROM tasks WHERE id=?").get(id);
-        if (!cur || (cur.status !== "todo" && cur.status !== "in_progress")) {
+        if (!cur || (cur.status !== "ready" && cur.status !== "in_progress")) {
           db.exec("ROLLBACK");
           return null;
         }
         db.prepare(`
           UPDATE tasks SET status='blocked', gate_type=?, blocked_at=?, updated_at=?
-          WHERE id=? AND status IN ('todo','in_progress')
+          WHERE id=? AND status IN ('ready','in_progress')
         `).run(gateType, t, t, id);
         insertEvent({
           taskId: id, fromStatus: cur.status, toStatus: "blocked", kind: "gate.opened", actor,
@@ -311,7 +311,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       }
     },
     /**
-     * Operator resolution of a gate: CAS blocked → todo with claim fields and
+     * Operator resolution of a gate: CAS blocked → ready with claim fields and
      * gate metadata cleared, so the task re-enters the queue for a fresh claim.
      * Null when not blocked — one resume per gate, or the event trail lies.
      */
@@ -325,11 +325,11 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
           return null;
         }
         db.prepare(`
-          UPDATE tasks SET status='todo', assigned=NULL, claimed_at=NULL, claim_expires_at=NULL,
+          UPDATE tasks SET status='ready', assigned=NULL, claimed_at=NULL, claim_expires_at=NULL,
                            gate_type=NULL, blocked_at=NULL, updated_at=?
           WHERE id=? AND status='blocked'
         `).run(t, id);
-        insertEvent({ taskId: id, fromStatus: "blocked", toStatus: "todo", kind: "gate.resolved", actor, note: "gate resume", at: t });
+        insertEvent({ taskId: id, fromStatus: "blocked", toStatus: "ready", kind: "gate.resolved", actor, note: "gate resume", at: t });
         db.exec("COMMIT");
         return taskApi.get(id);
       } catch (e) {
@@ -353,11 +353,11 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       try {
         const r = db.prepare(`
           UPDATE tasks SET status='in_progress', assigned=?, claimed_at=?, claim_expires_at=?, lease_seconds=?, last_heartbeat=?, updated_at=?
-          WHERE id=? AND status='todo' AND (assigned IS NULL OR assigned=?)
+          WHERE id=? AND status='ready' AND (assigned IS NULL OR assigned=?)
         `).run(agentId, t, expires, leaseSeconds, t, t, id, agentId);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
         const eventsId = insertEvent({
-          taskId: id, fromStatus: "todo", toStatus: "in_progress", kind: "task.claimed",
+          taskId: id, fromStatus: "ready", toStatus: "in_progress", kind: "task.claimed",
           actor: agentId, note: "claim", at: t, sessionRef: sessionKey ?? null,
         });
         db.exec("COMMIT");
@@ -419,7 +419,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
       return taskApi.get(id);
     },
     /**
-     * Release a claim — task goes back to 'todo', assignment cleared,
+     * Release a claim — task goes back to 'ready', assignment cleared,
      * attempt_count incremented. Returns the task with `.lastEvent`, or null
      * if it wasn't in_progress. `note`/`at` are for sweepExpired's reuse of
      * this path; external callers just pass id.
@@ -430,12 +430,12 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
         // Keep the assignee: a lost lease means the worker died, not that the
         // work lost its owner, and the dispatcher can only re-wake an owner.
         const r = db.prepare(`
-          UPDATE tasks SET status='todo', claimed_at=NULL, claim_expires_at=NULL, attempt_count=attempt_count+1, updated_at=?
+          UPDATE tasks SET status='ready', claimed_at=NULL, claim_expires_at=NULL, attempt_count=attempt_count+1, updated_at=?
           WHERE id=? AND status='in_progress'
         `).run(at, id);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
         const eventsId = insertEvent({
-          taskId: id, fromStatus: "in_progress", toStatus: "todo", kind: "task.released",
+          taskId: id, fromStatus: "in_progress", toStatus: "ready", kind: "task.released",
           actor: null, note, at,
         });
         db.exec("COMMIT");
@@ -465,11 +465,11 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
           db.exec("BEGIN IMMEDIATE");
           try {
             const r = db.prepare(`
-              UPDATE tasks SET status='blocked', updated_at=? WHERE id=? AND status='todo'
+              UPDATE tasks SET status='blocked', updated_at=? WHERE id=? AND status='ready'
             `).run(at, id);
             if (r.changes > 0) {
               insertEvent({
-                taskId: id, fromStatus: "todo", toStatus: "blocked", kind: "task.blocked",
+                taskId: id, fromStatus: "ready", toStatus: "blocked", kind: "task.blocked",
                 actor: "sweeper", note: "blocked: max attempts", at,
               });
             }

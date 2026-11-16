@@ -76,7 +76,7 @@ test("closed-unmerged PR reclaims an in-flight task; done is never rewritten", (
   const s1 = applyMergeOutcomes(store, [pr(9, "CLOSED", body)]);
   assert.deepEqual(s1.reopenedTasks, [task.id]);
   const reopened = store.task.get(task.id);
-  assert.equal(reopened.status, "todo");
+  assert.equal(reopened.status, "ready");
   assert.equal(reopened.assigned, null);
 
   store.task.update(task.id, { status: "done", result_summary: "done" });
@@ -87,7 +87,7 @@ test("closed-unmerged PR reclaims an in-flight task; done is never rewritten", (
 test("PRs without markers and open PRs are untouched", () => {
   const s = applyMergeOutcomes(store, [pr(1, "MERGED", "unrelated"), pr(2, "OPEN", `Backlog: ${epic.id}`)]);
   assert.deepEqual(s.doneTasks, []);
-  assert.equal(store.task.get(task.id).status, "todo");
+  assert.equal(store.task.get(task.id).status, "ready");
   assert.equal(store.epic.get(epic.id).status, "in_progress");
   assert.deepEqual(s.skipped, ["pr#2:OPEN"]);
 });
@@ -110,7 +110,7 @@ test("closed-unmerged PR on a gated task dissolves the gate with its own note an
   const s = applyMergeOutcomes(store, [{ number: 10, state: "CLOSED", title: "x", body }]);
   assert.deepEqual(s.reopenedTasks, [task.id]);
   const t = store.task.get(task.id);
-  assert.equal(t.status, "todo");
+  assert.equal(t.status, "ready");
   assert.equal(t.gate_type, null, "gate metadata cleared");
   const ev = store.db.prepare("SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   assert.match(ev.note, /^gate dissolved: closed unmerged PR #10/);

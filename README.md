@@ -229,7 +229,7 @@ Claim leases, attempt caps, and the checkpoint/evidence validation rules:
 | `serve --mcp stdio` | serve the backlog tools over MCP stdio (env-only harness) |
 | `serve --mcp http --port N [--host H]` | serve the same tools over Streamable HTTP (shared daemon) |
 | `watch` | one watcher tick (JSON manifest on stdout) |
-| `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to todo |
+| `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to ready |
 | `next` | list the current ready queue |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers |
 | `merge-detect [--dry-run]` | apply merged/closed PR outcomes |
@@ -367,7 +367,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | "refused declaration (missing: harness)" | `WINCH_HARNESS` unset on stdio, or `X-Winch-Harness` missing on HTTP | Set the env var or add the header |
 | "refused declaration (reserved: harness)" | Harness name is `unknown` or `instance:*` | Use a real harness name |
 | "not found: TASK-..." | Task id does not exist | Check the id; tasks may have been dropped or never created |
-| "is in_progress, not todo" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
+| "is in_progress, not ready" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
 | "not_ready" on claim | Unmet dependency or capability mismatch | Check deps with `backlog_get`; offer matching capabilities |
 
 ## Why the name?

@@ -1,10 +1,10 @@
 // ready-queue.js — compute "what's ready to work on" for a given agent.
 //
 // A task is *ready* iff:
-//   - status = 'todo'
+//   - status = 'ready'
 //   - all of its outgoing deps resolve to status in {done, cancelled}
 //   - parent story status in {ready, in_progress}
-//   - parent epic  status in {planned, in_progress}
+//   - parent epic  status in {ready, in_progress}
 //   - (when agentId is supplied) assigned IS NULL OR assigned = agentId
 //   - (when capabilities supplied) intersection with task/story caps is non-empty
 //
@@ -32,7 +32,7 @@ function capMatch(required, offered) {
  */
 export function readyTasks(store, opts = {}) {
   const { agentId, capabilities, limit } = opts;
-  const candidates = store.task.list({ status: "todo" });
+  const candidates = store.task.list({ status: "ready" });
   const ready = [];
   for (const task of candidates) {
     const story = store.story.get(task.story_id);
@@ -40,7 +40,7 @@ export function readyTasks(store, opts = {}) {
     if (story.status !== "ready" && story.status !== "in_progress") continue;
     const epic = store.epic.get(story.epic_id);
     if (!epic) continue;
-    if (epic.status !== "planned" && epic.status !== "in_progress") continue;
+    if (epic.status !== "ready" && epic.status !== "in_progress") continue;
     if (task.assigned && agentId && task.assigned !== agentId) continue;
     const required = effectiveCaps(task, story);
     if (!capMatch(required, capabilities)) continue;

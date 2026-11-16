@@ -14,8 +14,8 @@ let dir, store, handle;
 const PLANNER = { harness: "openclaw", agent: "atlas", session: "s1" };
 const WORKER = { harness: "openclaw", agent: "tester", session: "s2" };
 
-function seed({ status = "todo", assigned = null } = {}) {
-  const epic = store.epic.create({ title: "E", status: "planned" });
+function seed({ status = "ready", assigned = null } = {}) {
+  const epic = store.epic.create({ title: "E", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
   return store.task.create({ storyId: story.id, title: "T", status, assigned });
 }
@@ -92,7 +92,7 @@ test("re-assigning a live task to its own worker is a no-op, not an error", asyn
 });
 
 test("a story can be assigned, and its owner is the one woken", async () => {
-  const epic = store.epic.create({ title: "E-story", status: "planned" });
+  const epic = store.epic.create({ title: "E-story", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S-story", acceptance: "AC", status: "ready" });
   const res = await handle("backlog_assign", { id: story.id, agent: "tester", capabilities: ["verify"] }, PLANNER);
   assert.equal(res.details.status, "ok");
@@ -104,7 +104,7 @@ test("a story can be assigned, and its owner is the one woken", async () => {
 });
 
 test("clearing a story assignee is rejected and closed stories refuse assignment", async () => {
-  const epic = store.epic.create({ title: "E-story2", status: "planned" });
+  const epic = store.epic.create({ title: "E-story2", status: "ready" });
   const story = store.story.create({ epicId: epic.id, title: "S-story2", status: "ready" });
   await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
   const cleared = await handle("backlog_assign", { id: story.id, agent: null }, PLANNER);

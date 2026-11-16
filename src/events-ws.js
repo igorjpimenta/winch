@@ -67,17 +67,19 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
 // branch here may read note content — a renamed note must never reclassify
 // history. Pre-kind rows therefore keep exactly the meanings they streamed
 // with before the column existed: an append-only log keeps its history.
+// Pre-standardization rows still carry `todo` as a task status; map it with
+// `ready` so the append-only history keeps the meaning it streamed with.
 export function kindForEvent(row) {
   if (row.kind) return row.kind;
   const from = row.from_status;
   const to = row.to_status;
   if (from == null) return "task.created";
-  if (from === "todo" && to === "in_progress") return "task.claimed";
+  if ((from === "ready" || from === "todo") && to === "in_progress") return "task.claimed";
   if (from === "in_progress" && to === "in_progress") return "task.progressed";
   if (to === "done") return "task.completed";
   if (to === "cancelled") return "task.cancelled";
   if (to === "blocked") return "task.blocked";
-  if (to === "todo") return "task.released";
+  if (to === "ready" || to === "todo") return "task.released";
   return "task.updated";
 }
 
@@ -124,13 +126,13 @@ export function toEventMessage(store, row) {
     // so a tagged task must still appear here or it never gets woken.
     // A close frees dependents; a requeue (lease lost) makes the task itself
     // claimable again. Both need a wake, so both carry the list.
-    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "todo"
+    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "ready" || row.to_status === "todo"
       ? store.db.prepare(`
           SELECT t.id, t.assigned FROM tasks t
             JOIN stories s ON s.id=t.story_id
             JOIN epics   e ON e.id=s.epic_id
-           WHERE t.status='todo' AND t.assigned IS NOT NULL
-             AND s.status IN ('ready','in_progress') AND e.status IN ('planned','in_progress')
+           WHERE t.status='ready' AND t.assigned IS NOT NULL
+             AND s.status IN ('ready','in_progress') AND e.status IN ('ready','in_progress')
              AND NOT EXISTS (
                SELECT 1 FROM deps d
                  LEFT JOIN tasks   dt ON d.to_kind='task'  AND dt.id=d.to_id
