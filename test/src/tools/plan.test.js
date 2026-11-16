@@ -44,7 +44,7 @@ test("plan records who created the epic, and append reopens a closed one", async
 });
 
 test("plan rejects a bad plan without leaving partial records", async () => {
-  const before = h.store.db.prepare("SELECT COUNT(*) AS n FROM epics").get().n;
+  const before = h.store.db.prepare("SELECT COUNT(*) AS n FROM items WHERE kind='epic'").get().n;
   const dup = await h.call("backlog_plan", {
     epic: { title: "E" },
     stories: [{ title: "S", tasks: [{ title: "a", key: "k" }, { title: "b", key: "k" }] }],
@@ -60,7 +60,7 @@ test("plan rejects a bad plan without leaving partial records", async () => {
     stories: [{ title: "S", tasks: [{ title: "a", dependsOn: ["nope"] }] }],
   });
   assert.equal(unknown.details.status, "rejected");
-  assert.equal(h.store.db.prepare("SELECT COUNT(*) AS n FROM epics").get().n, before);
+  assert.equal(h.store.db.prepare("SELECT COUNT(*) AS n FROM items WHERE kind='epic'").get().n, before);
 });
 
 test("append adds tasks to a story, unassigned, with an appended row", async () => {
@@ -76,7 +76,7 @@ test("append adds tasks to a story, unassigned, with an appended row", async () 
   const body = JSON.parse(res.content[0].text);
   const [first, second] = body.tasks;
   assert.equal(h.store.task.get(first.id).assigned, null);
-  const appended = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='task.appended'").all(first.id);
+  const appended = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='task.appended'").all(first.id);
   assert.equal(appended.length, 1);
   assert.equal(appended[0].actor, "test:tester");
   assert.equal(h.store.task.get(second.id).status, "ready");
@@ -92,10 +92,10 @@ test("append adds a story to an epic and rejects unknown references atomically",
   const body = JSON.parse(res.content[0].text);
   assert.equal(body.stories.length, 1);
   assert.equal(h.store.story.get(body.stories[0].id).assigned, null);
-  const before = h.store.db.prepare("SELECT COUNT(*) AS n FROM tasks").get().n;
+  const before = h.store.db.prepare("SELECT COUNT(*) AS n FROM items WHERE kind='task'").get().n;
   const bad = await h.call("backlog_append", { epicId: epic.id, stories: [{ title: "X", tasks: [{ title: "y", dependsOn: ["nope"] }] }] });
   assert.equal(bad.details.reason, "error");
-  assert.equal(h.store.db.prepare("SELECT COUNT(*) AS n FROM tasks").get().n, before);
+  assert.equal(h.store.db.prepare("SELECT COUNT(*) AS n FROM items WHERE kind='task'").get().n, before);
   const missingEpic = await h.call("backlog_append", { epicId: "EPIC-nope", stories: [{ title: "X", tasks: [{ title: "y" }] }] });
   assert.equal(missingEpic.details.reason, "not_found");
 });
@@ -104,8 +104,8 @@ test("drop disables unclaimed work and leaves a dropped row", async () => {
   const { story, task } = h.seedReadyTask();
   const res = await h.call("backlog_drop", { id: task.id, reason: "duplicate" });
   assert.equal(res.details.status, "ok");
-  assert.equal(h.store.task.get(task.id).status, "cancelled");
-  const ev = h.store.db.prepare("SELECT * FROM events WHERE task_id=? AND kind='task.dropped'").all(task.id);
+  assert.equal(h.store.item.get(task.id, { includeDeleted: true }).status, "cancelled");
+  const ev = h.store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND kind='task.dropped'").all(task.id);
   assert.equal(ev.length, 1);
   assert.match(ev[0].note, /duplicate/);
   assert.ok(h.store.story.get(story.id));
@@ -124,8 +124,8 @@ test("drop cascades to a story's tasks and restore brings them back", async () =
   const { addDep } = await import("../../../src/deps.js");
   assert.ok(addDep(h.store, second.id, task.id).ok);
   assert.equal((await h.call("backlog_drop", { id: story.id })).details.status, "ok");
-  assert.equal(h.store.story.get(story.id).status, "cancelled");
-  assert.equal(h.store.task.get(task.id).status, "cancelled");
+  assert.equal(h.store.item.get(story.id, { includeDeleted: true }).status, "cancelled");
+  assert.equal(h.store.item.get(task.id, { includeDeleted: true }).status, "cancelled");
   assert.equal(h.store.dep.listOutgoing(second.id).length, 1);
   const restored = await h.call("backlog_restore", { id: story.id });
   assert.equal(restored.details.status, "ok");

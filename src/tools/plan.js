@@ -33,6 +33,7 @@ export function createPlanTools({ store, logger }) {
         }
       }
       let epic = null;
+      const createdIds = [];
       try {
         epic = store.epic.create({
           title: epicIn.title,
@@ -42,6 +43,7 @@ export function createPlanTools({ store, logger }) {
           priority: epicIn.priority ?? 50,
           createdBy: identity.agent,
         });
+        createdIds.push(epic.id);
         const idByKey = new Map();
         const stories = storiesIn.map((s, si) => {
           const story = store.story.create({
@@ -53,6 +55,7 @@ export function createPlanTools({ store, logger }) {
             priority: s.priority ?? epic.priority,
             capabilities: s.capabilities,
           });
+          createdIds.push(story.id);
           const tasks = (s.tasks ?? []).map((t, ti) => {
             const key = t.key ?? `s${si}t${ti}`;
             const task = store.task.create({
@@ -64,6 +67,7 @@ export function createPlanTools({ store, logger }) {
               executionArgs: t.executionArgs,
               capabilities: t.capabilities ?? s.capabilities,
             });
+            createdIds.push(task.id);
             idByKey.set(key, task.id);
             return { id: task.id, key, title: task.title };
           });
@@ -83,9 +87,11 @@ export function createPlanTools({ store, logger }) {
           { status: "ok", agentId: identity.agent, epicId: epic.id, tasks: flat.length }
         );
       } catch (e) {
-        // Creating the epic is the first write; cascade removes anything
-        // written under it, so a failure leaves the store as it was.
-        if (epic?.id) store.db.prepare("DELETE FROM epics WHERE id=?").run(epic.id);
+        // The epic is the root; deleting it cascades everything written under it.
+        if (epic?.id) {
+          for (const id of createdIds) store.db.prepare("DELETE FROM item_events WHERE item_id=?").run(id);
+          store.db.prepare("DELETE FROM items WHERE id=?").run(epic.id);
+        }
         logger?.warn?.(`backlog_plan failed: ${e?.message}`);
         return err(`backlog_plan failed: ${e?.message}`, "error");
       }
@@ -111,7 +117,7 @@ export function createPlanTools({ store, logger }) {
       }
       const created = { stories: [], tasks: [] };
       const idByKey = new Map();
-      const at = Date.now();
+      const actor = `${identity.harness}:${identity.agent}`;
       try {
         (args.stories ?? []).forEach((st, si) => {
           if (!st?.title) throw new Error("every story needs a title");
@@ -152,13 +158,14 @@ export function createPlanTools({ store, logger }) {
             executionArgs: t.executionArgs,
             capabilities: t.capabilities ?? parent?.capabilities,
             assigned: t.assigned ?? null,
+            assigneeHarness: t.assigned ? identity.harness : null,
           });
           entry.task = row;
-          created.tasks.push({ id: row.id, key, title: row.title, storyId, assigned: row.assigned });
+          created.tasks.push({ id: row.id, key, title: row.title, storyId, assigned: row.assignee_agent });
         }
         for (const [key, entry] of idByKey) {
           for (const dep of entry.deferred.t.dependsOn ?? []) {
-            const target = idByKey.get(dep)?.task?.id ?? (/^(TASK|STORY|EPIC)-/.test(dep) ? dep : null);
+            const target = idByKey.get(dep)?.task?.id ?? (store.itemKindOf(dep) ? dep : null);
             if (!target) throw new Error(`unknown dependsOn: ${dep}`);
             const res = addDep(store, entry.task.id, target);
             if (!res.ok) throw new Error(`dependency ${key} -> ${dep} rejected: ${res.code}`);
@@ -167,16 +174,24 @@ export function createPlanTools({ store, logger }) {
         // task.appended tells a dispatcher this work arrived after the plan;
         // task.created (from plan) stays planner noise.
         for (const t of created.tasks) {
-          store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-            .run(t.id, "ready", "ready", "task.appended", `${identity.harness}:${identity.agent}`, t.title.slice(0, 120), at);
+          store.event.append({
+            itemId: t.id, fromStatus: "ready", toStatus: "ready", kind: "task.appended",
+            actor, note: t.title.slice(0, 120),
+          });
         }
         return ok(
           JSON.stringify({ ok: true, epicId: epic?.id ?? null, stories: created.stories, tasks: created.tasks }),
           { status: "ok", agentId: identity.agent, stories: created.stories.length, tasks: created.tasks.length }
         );
       } catch (e) {
-        for (const t of created.tasks) store.db.prepare("DELETE FROM tasks WHERE id=?").run(t.id);
-        for (const st of created.stories) store.db.prepare("DELETE FROM stories WHERE id=?").run(st.id);
+        for (const t of created.tasks) {
+          store.db.prepare("DELETE FROM item_events WHERE item_id=?").run(t.id);
+          store.db.prepare("DELETE FROM items WHERE id=?").run(t.id);
+        }
+        for (const st of created.stories) {
+          store.db.prepare("DELETE FROM item_events WHERE item_id=?").run(st.id);
+          store.db.prepare("DELETE FROM items WHERE id=?").run(st.id);
+        }
         logger?.warn?.(`backlog_append failed: ${e?.message}`);
         return err(`backlog_append failed: ${e?.message}`, "error");
       }
@@ -186,20 +201,13 @@ export function createPlanTools({ store, logger }) {
       const id = args?.id;
       if (!id) return err("backlog_drop: id is required", "rejected");
       const kind = store.itemKindOf(id);
-      if (!kind) return err(`backlog_drop: not found: ${id}`, "not_found");
-      const epic = kind === "epic" ? store.epic.get(id) : null;
-      const story = kind === "story" ? store.story.get(id) : null;
-      const task = kind === "task" ? store.task.get(id) : null;
-      if ((kind === "epic" && !epic) || (kind === "story" && !story) || (kind === "task" && !task)) {
-        return err(`backlog_drop: not found: ${id}`, "not_found");
-      }
-      const storyIds = kind === "epic"
-        ? store.story.list({ epicId: id }).map((s) => s.id)
-        : kind === "story" ? [id] : [];
-      const tasks = kind === "task" ? [task] : storyIds.flatMap((sid) => store.task.list({ storyId: sid }));
+      const row = kind ? store.item.get(id, { includeDeleted: true }) : null;
+      if (!kind || !row) return err(`backlog_drop: not found: ${id}`, "not_found");
+      const tree = store.item.tree(id, { includeDeleted: true });
+      const tasks = tree.filter((r) => r.kind === "task");
       // Dropping is reversible, but it must never hide work someone has done:
       // the guard covers every descendant, not just the row named in the call.
-      const claimed = tasks.filter((t) => t.claimed_at != null || (t.attempt_count ?? 0) > 0 || (t.status !== "backlog" && t.status !== "ready" && t.status !== "cancelled"));
+      const claimed = tasks.filter((t) => t.attempt_count > 0 || (t.status !== "backlog" && t.status !== "ready" && t.status !== "cancelled"));
       if (claimed.length > 0) {
         return err(
           `${id} cannot be dropped: ${claimed.length} task(s) under it were already claimed (${claimed.map((t) => t.id).join(", ")}).`,
@@ -208,30 +216,8 @@ export function createPlanTools({ store, logger }) {
         );
       }
       try {
-        const at = Date.now();
-        const note = args?.reason ? `dropped: ${String(args.reason).slice(0, 160)}` : `dropped with ${kind}`;
         const actor = `${identity.harness}:${identity.agent}`;
-        store.db.exec("BEGIN IMMEDIATE");
-        try {
-          for (const t of tasks) {
-            if (t.status === "cancelled") continue;
-            store.db.prepare("UPDATE tasks SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, t.id);
-            store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-              .run(t.id, t.status, "cancelled", "task.dropped", actor, note, at);
-          }
-          for (const sid of storyIds) {
-            const row = store.story.get(sid);
-            if (row.status === "cancelled") continue;
-            store.db.prepare("UPDATE stories SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, sid);
-          }
-          if (kind === "epic") {
-            store.db.prepare("UPDATE epics SET status='cancelled', updated_at=?, closed_at=? WHERE id=?").run(at, at, id);
-          }
-          store.db.exec("COMMIT");
-        } catch (e) {
-          store.db.exec("ROLLBACK");
-          throw e;
-        }
+        const result = store.item.drop(id, { reason: args?.reason ?? null, actor });
         logger?.info?.(`backlog: ${actor} dropped ${id} (${tasks.length} task(s), soft)`);
         return ok(JSON.stringify({ ok: true, dropped: { kind, id, reversible: true }, tasks: tasks.map((t) => t.id) }), {
           status: "ok", agentId: identity.agent, level: kind, id,
@@ -246,46 +232,20 @@ export function createPlanTools({ store, logger }) {
       const id = args?.id;
       if (!id) return err("backlog_restore: id is required", "rejected");
       const kind = store.itemKindOf(id);
-      if (!kind) return err(`backlog_restore: not found: ${id}`, "not_found");
-      const epic = kind === "epic" ? store.epic.get(id) : null;
-      const story = kind === "story" ? store.story.get(id) : null;
-      const task = kind === "task" ? store.task.get(id) : null;
-      if ((kind === "epic" && !epic) || (kind === "story" && !story) || (kind === "task" && !task)) {
-        return err(`backlog_restore: not found: ${id}`, "not_found");
+      const row = kind ? store.item.get(id, { includeDeleted: true }) : null;
+      if (!kind || !row) return err(`backlog_restore: not found: ${id}`, "not_found");
+      if (row.deleted_at == null && row.status !== "cancelled") {
+        return err(`${id} is ${row.status}, not dropped.`, "not_dropped");
       }
-      const storyIds = kind === "epic"
-        ? store.story.list({ epicId: id }).filter((s) => s.status === "cancelled").map((s) => s.id)
-        : kind === "story" && story.status === "cancelled" ? [id] : [];
-      const tasks = (kind === "task"
-        ? [task].filter((t) => t.status === "cancelled")
-        : storyIds.flatMap((sid) => store.task.list({ storyId: sid }))
-      ).filter((t) => t.status === "cancelled");
-      if (kind === "epic" && epic.status !== "cancelled") return err(`${id} is ${epic.status}, not dropped.`, "not_dropped");
-      if (kind === "story" && story.status !== "cancelled") return err(`${id} is ${story.status}, not dropped.`, "not_dropped");
-      if (kind === "task" && task.status !== "cancelled") return err(`${id} is ${task.status}, not dropped.`, "not_dropped");
       try {
-        const at = Date.now();
         const actor = `${identity.harness}:${identity.agent}`;
-        store.db.exec("BEGIN IMMEDIATE");
-        try {
-          for (const t of tasks) {
-            store.db.prepare("UPDATE tasks SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, t.id);
-            store.db.prepare("INSERT INTO events(task_id,from_status,to_status,kind,actor,note,at) VALUES(?,?,?,?,?,?,?)")
-              .run(t.id, "cancelled", "ready", "task.restored", actor, "restored", at);
-          }
-          for (const sid of storyIds) {
-            store.db.prepare("UPDATE stories SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, sid);
-          }
-          if (kind === "epic") {
-            store.db.prepare("UPDATE epics SET status='ready', updated_at=?, closed_at=NULL WHERE id=?").run(at, id);
-          }
-          store.db.exec("COMMIT");
-        } catch (e) {
-          store.db.exec("ROLLBACK");
-          throw e;
+        const tree = store.item.tree(id, { includeDeleted: true });
+        // Restore top-down so a child never outlives its cancelled parent.
+        for (const r of tree) {
+          if (r.deleted_at != null || r.status === "cancelled") store.item.restore(r.id, { actor });
         }
-        logger?.info?.(`backlog: ${actor} restored ${id} (${tasks.length} task(s))`);
-        return ok(JSON.stringify({ ok: true, restored: { kind, id }, tasks: tasks.map((t) => t.id) }), {
+        logger?.info?.(`backlog: ${actor} restored ${id} (${tree.filter((r) => r.kind === "task").length} task(s))`);
+        return ok(JSON.stringify({ ok: true, restored: { kind, id }, tasks: tree.filter((r) => r.kind === "task").map((r) => r.id) }), {
           status: "ok", agentId: identity.agent, level: kind, id,
         });
       } catch (e) {

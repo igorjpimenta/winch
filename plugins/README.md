@@ -78,8 +78,8 @@ worker must never receive a hand-written brief: the record is the spec.
 
 The plugin does this itself: it follows `winch serve --ws` (config
 `dispatchWsUrl`, default `ws://127.0.0.1:38291`), and for each routable row
-starts a one-shot agent session whose message is just the item id — `TASK-…` to
-claim, `STORY-…` to break down, `EPIC-…` to review. The session is started
+starts a one-shot agent session whose message is just the opaque item id; the
+row's `kind` says whether to claim, break down, or review. The session is started
 through the gateway's own CLI entry (`agent --session-key
 agent:<agent>:winch:<id>`), because the host only lets bundled plugins schedule
 turns in-process. Config: `dispatchEnabled`
@@ -105,17 +105,19 @@ Two more rows matter to the dispatcher:
   few seconds first and skip it if the appending turn already assigned.
 - `story.completed` — written when a story's last task closes; usually just
   bookkeeping for dashboards.
-- `epic.completed` — exactly one row per epic, written when its last story
-  closes (each story closes when its last task does). Wake `epics.created_by`
-  with the epic id; the planner calls `backlog_get`, reviews the delivered
-  results and artifacts, and either appends follow-up tasks (which reopens the
-  epic) or reports it done. Act on each epic once, not on every replay.
+- `epic.completed` — one row per close cycle, written when the epic's last
+  story closes (each story closes when its last task does). Wake
+  `epics.created_by` with the epic id; the planner calls `backlog_get`,
+  reviews the delivered results and artifacts, and either appends follow-up
+  tasks (which reopens the epic) or reports it done. Act on each marker once,
+  not on every replay.
 
 Dispatch is event-driven, never polled: `serve --ws` replays backlog history
 on connect (`{"type":"history"}`), so a restarted gateway catches up without a
-timer. A task wake is suppressed for 35 minutes and an epic review happens
-once per epic (remembered in `dispatchStatePath`); the claim lease remains the
-real guard against double work.
+timer. A task wake is suppressed for 35 minutes; each `epic.completed` marker is
+reviewed once (the last reviewed event id is remembered per epic in
+`dispatchStatePath`). The claim lease remains the real guard against double
+work.
 
 ## Claim webhook (wake on attribution)
 
@@ -138,7 +140,7 @@ opens a **fresh session** for the task:
 3. On claim, winch POSTs `{event:"task.claimed", task, session, handoff}`
    (see `src/claim-webhook.js`); the plugin verifies the bearer, then
    `scheduleSessionTurn`s a one-shot turn (`deleteAfterRun`, tag
-   `winch-claim`) in session `winch-claim-<TASK-ID>` carrying the receiver
+   `winch-claim`) in session `winch-claim-<item-id>` carrying the receiver
    prompt, and injects a pointer into the claiming session. If the fresh
    session fails, the turn falls back to the claiming session; if scheduling
    is unavailable, the claim parks in a pending queue (4h TTL) drained by

@@ -14,17 +14,24 @@ export function clampNote(s, max = 2000) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
-// Artifacts upstream tasks recorded on this story: addArtifact events plus
-// done-result artifact lists, deduped. Everything read is a store row.
+// Artifacts upstream tasks recorded on this story: addArtifact events,
+// explicit artifact rows, and done-result artifact lists, deduped.
 export function collectStoryArtifacts(store, storyId) {
   const out = new Set();
-  for (const t of store.task.list({ storyId })) {
-    const evs = store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'artifact:%'").all(t.id);
-    for (const e of evs) out.add(e.note.slice("artifact: ".length).trim());
+  const story = store.item.get(storyId);
+  if (!story) return [];
+  const tasks = store.item.tree(storyId).filter((r) => r.kind === "task");
+  for (const t of tasks) {
+    for (const e of store.event.listFor(t.id)) {
+      if (typeof e.note === "string" && e.note.startsWith("artifact:")) {
+        out.add(e.note.slice("artifact:".length).trim());
+      }
+    }
+    for (const a of store.artifact.listFor(t.id)) out.add(a.uri);
     const m = t.result_summary ? t.result_summary.match(/\nartifacts: (.+)$/) : null;
     if (m) for (const a of m[1].split(",")) out.add(a.trim());
   }
-  return [...out];
+  return [...out].filter(Boolean);
 }
 
 // Rendered exclusively from store rows (task/story/epic/artifact events).
@@ -35,9 +42,9 @@ export function renderReceiverPrompt({ task, story, epic, artifacts }) {
   const parts = [
     `# Task: ${task.title}`,
     task.description ? `## Context\n${task.description}` : null,
-    `## Acceptance\n${story.acceptance ?? "(none recorded)"}`,
+    `## Acceptance\n${story?.acceptance ?? "(none recorded)"}`,
     `## Upstream artifacts\n${artifacts.length ? artifacts.map((a) => `- ${a}`).join("\n") : "(none yet)"}`,
-    `## Parent\n${epic.title} — ${story.title}`,
+    `## Parent\n${epic?.title ?? "(none)"} — ${story?.title ?? "(none)"}`,
   ];
   return parts.filter(Boolean).join("\n\n");
 }

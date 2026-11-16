@@ -1,19 +1,18 @@
-// read.js — one read tool, any level: epic, story or task.
+// read.js — one read tool, any level: epic, story or task. The row's `kind`
+// selects the level.
 import { depsResolved } from "../deps.js";
 import { ok, err, collectStoryArtifacts, renderReceiverPrompt } from "./shared.js";
 
 export function createReadTools({ store, logger }) {
-  // One shape for a task inside a tree, so epic and story views agree.
   const taskView = (t) => ({
     id: t.id,
     title: t.title,
     description: t.description ?? null,
     status: t.status,
-    assigned: t.assigned ?? null,
-    capabilities: t.capabilities ?? null,
+    assigned: t.assignee_agent ?? null,
+    capabilities: t.capabilities?.length ? t.capabilities : null,
     result_summary: t.result_summary ?? null,
-    artifacts: store.db.prepare("SELECT note FROM events WHERE task_id=? AND note LIKE 'artifact:%'").all(t.id)
-      .map((e) => e.note.slice("artifact: ".length).trim()),
+    artifacts: store.artifact.listFor(t.id).map((a) => a.uri),
   });
 
   return {
@@ -21,13 +20,15 @@ export function createReadTools({ store, logger }) {
       const id = args?.id;
       if (!id) return err("backlog_get: id is required", "rejected");
       try {
-        if (id.startsWith("EPIC-")) {
+        const kind = store.itemKindOf(id);
+        if (!kind) return err(`backlog_get: not found: ${id}`, "not_found");
+
+        if (kind === "epic") {
           const epic = store.epic.get(id);
-          if (!epic) return err(`backlog_get: not found: ${id}`, "not_found");
-          const stories = store.story.list({ epicId: epic.id }).map((s) => ({
+          const stories = store.item.list({ kind: "story", parentId: epic.id }).map((s) => ({
             id: s.id, title: s.title, description: s.description ?? null, acceptance: s.acceptance ?? null,
             status: s.status, priority: s.priority,
-            tasks: store.task.list({ storyId: s.id }).map(taskView),
+            tasks: store.item.tree(s.id).filter((r) => r.kind === "task").map(taskView),
           }));
           const all = stories.flatMap((s) => s.tasks);
           const count = (st) => all.filter((t) => t.status === st).length;
@@ -41,36 +42,34 @@ export function createReadTools({ store, logger }) {
             { status: "ok", agentId: identity.agent, level: "epic", id: epic.id }
           );
         }
-        if (id.startsWith("STORY-")) {
+
+        if (kind === "story") {
           const story = store.story.get(id);
-          if (!story) return err(`backlog_get: not found: ${id}`, "not_found");
-          const epic = store.epic.get(story.epic_id);
+          const epic = story.epic_id ? store.epic.get(story.epic_id) : null;
           return ok(
             JSON.stringify({
               level: "story",
               story: { id: story.id, title: story.title, description: story.description, acceptance: story.acceptance, status: story.status, priority: story.priority },
               epic: epic ? { id: epic.id, title: epic.title, acceptance: epic.acceptance, status: epic.status } : null,
-              tasks: store.task.list({ storyId: story.id }).map(taskView),
+              tasks: store.item.tree(story.id).filter((r) => r.kind === "task").map(taskView),
               artifacts: collectStoryArtifacts(store, story.id),
             }),
             { status: "ok", agentId: identity.agent, level: "story", id: story.id }
           );
         }
+
         const task = store.task.get(id);
-        if (!task) return err(`backlog_get: not found: ${id}`, "not_found");
-        const story = store.story.get(task.story_id);
-        const epic = story ? store.epic.get(story.epic_id) : null;
+        const story = task.story_id ? store.story.get(task.story_id) : null;
+        const epic = task.epic_id ? store.epic.get(task.epic_id) : null;
         const artifacts = story ? collectStoryArtifacts(store, story.id) : [];
         const requiredCaps = Array.isArray(task.capabilities) && task.capabilities.length > 0
           ? task.capabilities
           : Array.isArray(story?.capabilities) && story.capabilities.length > 0 ? story.capabilities : [];
         const offered = Array.isArray(args?.capabilities) ? args.capabilities : [];
         const deps = store.dep.listOutgoing(task.id).map((e) => {
-          const item = ({ epic: store.epic.get, story: store.story.get, task: store.task.get })[e.to_kind](e.to_id);
+          const item = store.item.get(e.to_id);
           return { kind: e.to_kind, id: e.to_id, status: item?.status ?? null };
         });
-        // Readiness mirrors ready-queue.js so a worker can tell "not mine" from
-        // "not yet" without guessing; the read itself is never filtered.
         const blockers = [];
         if (task.status !== "ready") blockers.push(`task is ${task.status}`);
         if (!story) blockers.push("story missing");
@@ -78,7 +77,7 @@ export function createReadTools({ store, logger }) {
         if (!epic) blockers.push("epic missing");
         else if (epic.status !== "ready" && epic.status !== "in_progress") blockers.push(`epic is ${epic.status}`);
         if (!depsResolved(store, task.id)) blockers.push("task dependencies unresolved");
-        if (task.assigned && task.assigned !== identity.agent) blockers.push(`assigned to ${task.assigned}`);
+        if (task.assignee_agent && task.assignee_agent !== identity.agent) blockers.push(`assigned to ${task.assignee_agent}`);
         if (offered.length > 0 && requiredCaps.length > 0 && !offered.some((c) => requiredCaps.includes(c))) {
           blockers.push(`requires [${requiredCaps.join(", ")}]`);
         }
@@ -90,8 +89,8 @@ export function createReadTools({ store, logger }) {
             epic: epic ? { id: epic.id, title: epic.title, description: epic.description, acceptance: epic.acceptance, status: epic.status, priority: epic.priority } : null,
             artifacts,
             dependencies: deps,
-            readiness: { ready: blockers.length === 0, blockers, requiresCapabilities: requiredCaps, assignedTo: task.assigned ?? null },
-            recentEvents: store.db.prepare("SELECT id, kind, actor, note, at FROM events WHERE task_id=? ORDER BY id DESC LIMIT 10").all(task.id),
+            readiness: { ready: blockers.length === 0, blockers, requiresCapabilities: requiredCaps, assignedTo: task.assignee_agent ?? null },
+            recentEvents: store.event.listFor(task.id).slice(-10).map((e) => ({ id: e.id, kind: e.kind, actor: e.actor, note: e.note, at: e.created_at })).reverse(),
             brief: story ? renderReceiverPrompt({ task, story, epic, artifacts }) : null,
           }),
           { status: "ok", agentId: identity.agent, level: "task", id: task.id }

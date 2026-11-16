@@ -54,8 +54,8 @@ Inside your harness agent:
 
     backlog_plan   { epic: { title: "my first epic" },
                      stories: [{ title: "S1", tasks: [{ title: "do the thing" }] }] }
-    backlog_claim  { taskId: "TASK-..." }     # identity stamped by the plugin
-    backlog_done   { taskId: "TASK-...", resultSummary: "done" }
+    backlog_claim  { taskId: "<item-id>" }    # identity stamped by the plugin
+    backlog_done   { taskId: "<item-id>", resultSummary: "done" }
 
 Verify from the operator side - no transcript reading:
 
@@ -190,34 +190,32 @@ webhook and prompts the claiming session through the OpenCode SDK.
 | `backlog_done` | close a claimed task with a result; closing the last task closes its story, and the last story closes the epic and wakes the agent that planned it |
 | `backlog_block` / `backlog_resume` | open a human gate (with optional `gateType` and `blockedBy` dep edge) and resolve it (`actor` optional) |
 
-## The order lifecycle
+## Task lifecycle
 
-An order moves from ready through a claim and a running task to review. The
-verdict decides where it lands, and resume returns rejected or blocked work to
-ready.
+A task moves from `ready` through a claim to `done`. A block parks it until an
+operator resumes it; the last task closes its story, and the last story closes
+the epic.
 
 ```mermaid
 flowchart LR
-  A[Order created] -->|status ready| B[Ready]
-  B -->|claim| C[Claimed]
-  C -->|attempt| D[Running]
-  D -->|checkpoint / evidence| D
-  D -->|done| E[Review]
-  D -->|blocked| F[Blocked]
-  E -->|approve| G[Approved]
-  E -->|reject| B
-  F -->|resume| B
+  A[ready] -->|claim by id or next| B[in_progress]
+  B -->|heartbeat / update| B
+  B -->|lease expires| A
+  B -->|done| C[done]
+  B -->|block| D[blocked]
+  D -->|resume| A
+  C -->|last task| E[story done]
+  E -->|last story| F[epic done]
 ```
 
-Claim leases, attempt caps, and the checkpoint/evidence validation rules:
-[lifecycle](docs/lifecycle.md).
+Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 
 ## Documentation
 
 | Goal | Start here |
 | --- | --- |
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
-| Understand claim/lease/verdict rules | [Lifecycle](docs/lifecycle.md) |
+| Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
 | Wake idle agents on claims | [Webhooks and wake bridge](docs/webhooks.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
@@ -266,14 +264,14 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
 ## Events stream
 
 `winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
-unless `--host` says otherwise) tails the events table and broadcasts every
+unless `--host` says otherwise) tails the `item_events` ledger and broadcasts every
 new row to all connected clients as JSON text frames:
 
 - `{"type":"welcome","lastEventId":N}` on connect, then
   `{"type":"history","events":[...]}` (newest 200), then
-- `{"type":"event","kind":"task.completed","id":N,"at":T,"task":{id,title,
-  story,epic,acceptance,artifacts,assignee},"actor":"...","note":"..."}` per
-  insert, in id order.
+- `{"type":"event","kind":"task.completed","id":N,"at":T,"item":{id,kind,
+  title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
+  assignee},"actor":"...","note":"..."}` per insert, in id order.
 
 Kinds on the wire come in three families - `task.*` for task lifecycle,
 `gate.*` for gate lifecycle, `release.*` for shipment - each declared by its
@@ -290,11 +288,11 @@ Delivery-dynamics notes the wire will not tell you: heartbeats renew the claim
 lease (only silence gets swept); an unmerged close dissolves its gate (late
 approvals answer `gate_dissolved`); starvation lives in the watcher manifest
 (`deferred` list, per-task `idleMs`), not the stream; a disputed completion is
-a new ticket linked by dep edge with a `supersedes: TASK-x` note, never a
+a new ticket linked by dep edge with a `supersedes: ITM-x` note, never a
 rewrite of history.
 
-Typed kinds and embedded task context land in follow-up work; this surface
-streams rows verbatim.
+Rows carry their stored `kind` and the recursive `item` envelope; the legacy
+`task`/`story`/`epic` blocks stay for subscribers that predate the recursive-item schema.
 
 The server never interprets a row - a gate opening is just another event, and
 reminders, digests and dashboards are subscriber code. Reconnect replays
@@ -307,7 +305,11 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` -> `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
-Schema lives in `src/schema.js` as Drizzle tables. `npm run db:generate`
+Schema lives in `src/schema.js` as Drizzle tables. The schema is one recursive
+`items` tree (`kind` = epic/story/task, `parent_id` for nesting), with
+`item_state`, `item_tags`, `item_edges`, `attempts`, `work_sessions`,
+`artifacts`, `item_events` and `harness_webhooks`. Item ids are opaque; `kind`
+is the discriminator, never an id prefix. `npm run db:generate`
 turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
 migrations on open, and `npm run db:migrate` does the same explicitly for a
 deploy. The files are plain SQL and may be edited before they are applied for
@@ -316,7 +318,7 @@ append a new one instead of editing it.
 
 Concurrency note: concurrent access to the sqlite file - server, watcher and
 CLI processes at once - is safe under WAL mode, and
-[test/store.race.test.js](test/store.race.test.js)
+[test/src/store/race.test.js](test/src/store/race.test.js)
 races 4 real OS processes with independent handles through one claim to prove
 the CAS transaction boundary under WAL contention.
 
@@ -366,7 +368,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | "halves in different channels - pairs never splice" | Agent from one channel, session from another | Stamp both in the same channel (`_meta.winch` or flat args) |
 | "refused declaration (missing: harness)" | `WINCH_HARNESS` unset on stdio, or `X-Winch-Harness` missing on HTTP | Set the env var or add the header |
 | "refused declaration (reserved: harness)" | Harness name is `unknown` or `instance:*` | Use a real harness name |
-| "not found: TASK-..." | Task id does not exist | Check the id; tasks may have been dropped or never created |
+| "not found: ITM-..." | Item id does not exist | Check the id; tasks may have been dropped or never created |
 | "is in_progress, not ready" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
 | "not_ready" on claim | Unmet dependency or capability mismatch | Check deps with `backlog_get`; offer matching capabilities |
 

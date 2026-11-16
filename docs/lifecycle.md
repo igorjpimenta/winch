@@ -1,54 +1,56 @@
 # Lifecycle
 
-An order moves from ready through a claim and a running task to review. The
-verdict decides where it lands, and resume returns rejected or blocked work to
-ready.
+A task moves from `ready` through a claim to `done`. A block parks it until an
+operator resumes it; closing the last task closes its story, and the last story
+closes the epic.
 
-## Order lifecycle
+## Task lifecycle
 
 ```mermaid
 flowchart LR
-  A[Order created] -->|status ready| B[Ready]
-  B -->|claim| C[Claimed]
-  C -->|attempt| D[Running]
-  D -->|checkpoint / evidence| D
-  D -->|done| E[Review]
-  D -->|blocked| F[Blocked]
-  E -->|approve| G[Approved]
-  E -->|reject| B
-  F -->|resume| B
+  A[ready] -->|claim by id or next| B[in_progress]
+  B -->|heartbeat / update| B
+  B -->|lease expires| A
+  B -->|done| C[done]
+  B -->|block| D[blocked]
+  D -->|resume| A
+  C -->|last task| E[story done]
+  E -->|last story| F[epic done]
 ```
 
-## Claim lifecycle
+A lease expiry keeps the assignee so a dispatcher can re-wake the same worker;
+only the status returns to `ready`.
+
+## Attempt lifecycle
 
 ```mermaid
 flowchart TD
-  A[Ready task] -->|claim by id or next| B[Claimed]
+  A[claim] --> B[running]
   B -->|heartbeat| B
-  B -->|update progress| B
-  B -->|done| C[Closed]
-  B -->|blocked| D[Blocked]
-  B -->|lease expires| A
-  D -->|resume| A
-  C -->|last task closes story| E[Story closed]
-  E -->|last story closes epic| F[Epic closed]
+  B -->|done| C[done]
+  B -->|block with gate| D[gated]
+  B -->|release / lease expires| E[released]
+  B -->|block without gate| E
 ```
+
+At `MAX_ATTEMPTS` the sweeper blocks the task instead of requeueing it.
 
 ## Gate lifecycle
 
 ```mermaid
 flowchart LR
-  A[Running] -->|block with gateType| B[Blocked / gate open]
-  B -->|resume by operator| C[Ready]
-  B -->|resume by wrong actor| B
+  A[ready or in_progress] -->|openGate with gateType| B[blocked / gate open]
+  B -->|resume| C[ready]
+  B -->|caller names another actor| B
   B -->|second resume| X[not_resumable]
+  B -->|unmerged PR close| C
 ```
 
-Claim leases, attempt caps, and the checkpoint/evidence validation rules.
+Claim leases, attempt caps, and gate checks:
 
 - **Claim**: atomic CAS under a lease. Highest-priority ready task selected when no id given.
 - **Dependencies**: forward-only, cycle-checked. Cancelled deps count as resolved.
-- **Gates**: block/resume with gate types. One resume per gate. Actor-checked.
+- **Gates**: `backlog_block` opens a gate when `gateType` is given; `backlog_resume` returns it to `ready` and clears the assignment. A caller that names another actor is refused.
 - **Close**: closing the last task closes its story; closing the last story closes the epic and wakes the planner.
 - **Starvation**: lives in the watcher manifest (deferred list, per-task idleMs).
 - **Lease sweeper**: claims self-heal on next tick when the lease expires without heartbeats.

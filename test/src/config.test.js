@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../src/store/index.js";
 import { createToolHandlers } from "../../src/tools/index.js";
 import { resolveConfig, resolveRequestConfig, CONFIG_DEFAULTS } from "../../src/config.js";
 
@@ -78,7 +78,7 @@ test("store honors construction config: lease length and sweep attempts", (t) =>
   const task = seed(store);
   const claimed = store.task.claim({ id: task.id, agentId: "a" });
   assert.equal(claimed.lease_seconds, 60, "claim derives from config, not the old 30min literal");
-  store.db.prepare("UPDATE tasks SET claim_expires_at=? WHERE id=?").run(1, task.id);
+  store.db.prepare("UPDATE attempts SET claimed_at=1, heartbeat_at=1 WHERE item_id=? AND ended_at IS NULL").run(task.id);
   store.task.sweepExpired({});
   assert.equal(store.task.get(task.id).status, "blocked", "one strike escalates at maxAttempts 1");
 });
@@ -94,13 +94,13 @@ test("per-call meta tunes a single tool call without touching the server", async
   const long = "x".repeat(100);
   const dflt = await handle("backlog_update", { taskId: task.id, progressSummary: long }, id);
   assert.equal(dflt.details.status, "ok");
-  const full = store.db.prepare("SELECT note FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id).note;
+  const full = store.db.prepare("SELECT note FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id).note;
   assert.ok(full.includes("x".repeat(100)), "default cap keeps the note whole");
   const tuned = await handle(
     "backlog_update", { taskId: task.id, progressSummary: long }, id,
     { winch: { config: { noteProgressLimit: 10 } } }
   );
   assert.equal(tuned.details.status, "ok");
-  const cut = store.db.prepare("SELECT note FROM events WHERE task_id=? ORDER BY id DESC LIMIT 1").get(task.id).note;
+  const cut = store.db.prepare("SELECT note FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id).note;
   assert.ok(cut.includes("xxxxxxxxxx…"), "per-call cap truncates just this call");
 });

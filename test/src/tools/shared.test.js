@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../../src/store.js";
+import { createStore } from "../../../src/store/index.js";
 import { clampNote, collectStoryArtifacts, renderReceiverPrompt } from "../../../src/tools/shared.js";
 
 let dir, store;
@@ -39,7 +39,7 @@ test("clampNote keeps short notes and truncates long ones", () => {
 
 test("collectStoryArtifacts reads artifact events and done summaries, deduped", () => {
   const { epic, story, task } = seed();
-  store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
+  store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,actor,note,created_at) VALUES(?,?,?,?,?,?)")
     .run(task.id, "ready", "ready", "atlas", "artifact: https://example.test/a", Date.now());
   store.task.update(task.id, { status: "done", result_summary: "done\n\nartifacts: https://example.test/b, https://example.test/a" });
   const artifacts = collectStoryArtifacts(store, story.id).sort();

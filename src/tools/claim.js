@@ -14,7 +14,7 @@ export function createClaimTools({ store, logger }) {
       // the same row.
       if (!args?.taskId) {
         try {
-          const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities, limit: cfg.candidates });
+          const candidates = readyTasks(store, { agentId, harness: identity.harness, capabilities: args?.capabilities, limit: cfg.candidates });
           if (candidates.length === 0) {
             return ok(JSON.stringify({ empty: true }), { status: "empty", agentId });
           }
@@ -23,7 +23,7 @@ export function createClaimTools({ store, logger }) {
             return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: c.task.id });
           }
           for (const c of candidates) {
-            const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
+            const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
             if (!claimed) continue;
             logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} from the ready queue`);
             const artifacts = collectStoryArtifacts(store, c.story.id);
@@ -61,13 +61,13 @@ export function createClaimTools({ store, logger }) {
       if (task.status !== "ready") return err(`${task.id} is ${task.status}, not ready — claim applies to ready tasks only.`, "not_claimed", { taskId: task.id });
       try {
         // No limit: an id lookup must not false-negative behind a paging cap.
-        const candidates = readyTasks(store, { agentId, capabilities: args?.capabilities });
+        const candidates = readyTasks(store, { agentId, harness: identity.harness, capabilities: args?.capabilities });
         const c = candidates.find((cand) => cand.task.id === task.id);
         if (!c) return err(`${task.id} is ready but not currently claimable (deps unmet or caps mismatch) — nothing claimed.`, "not_ready", { taskId: task.id });
         if (args?.dryRun) {
           return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: task.id });
         }
-        const claimed = store.task.claim({ id: c.task.id, agentId, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
+        const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
         if (!claimed) return ok(JSON.stringify({ empty: true, raced: true }), { status: "empty", reason: "claim_raced", agentId, taskId: task.id });
         logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} by id`);
         const artifacts = collectStoryArtifacts(store, c.story.id);

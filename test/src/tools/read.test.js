@@ -1,4 +1,4 @@
-// read.test.js — read.js: one read tool, the level follows the id prefix.
+// read.test.js — read.js: one read tool; the row's kind selects the level.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { makeHarness, WORKER } from "./_harness.js";
@@ -43,7 +43,7 @@ test("a task read explains why it is not ready for this agent", async () => {
 
 test("a story read returns its tasks, parent epic and artifacts", async () => {
   const { epic, story, task } = h.seedReadyTask();
-  h.store.db.prepare("INSERT INTO events(task_id,from_status,to_status,actor,note,at) VALUES(?,?,?,?,?,?)")
+  h.store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,actor,note,created_at) VALUES(?,?,?,?,?,?)")
     .run(task.id, "ready", "ready", "atlas", "artifact: https://example.test/a", Date.now());
   const res = await h.call("backlog_get", { id: story.id });
   assert.equal(res.details.level, "story");

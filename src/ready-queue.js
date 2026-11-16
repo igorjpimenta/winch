@@ -3,10 +3,10 @@
 // A task is *ready* iff:
 //   - status = 'ready'
 //   - all of its outgoing deps resolve to status in {done, cancelled}
-//   - parent story status in {ready, in_progress}
-//   - parent epic  status in {ready, in_progress}
-//   - (when agentId is supplied) assigned IS NULL OR assigned = agentId
-//   - (when capabilities supplied) intersection with task/story caps is non-empty
+//   - nearest story status in {ready, in_progress}
+//   - nearest epic  status in {ready, in_progress}
+//   - (when agentId is supplied) unassigned, or assigned to the same pair
+//   - (when capabilities supplied) intersection with task/story tags is non-empty
 //
 // Ordering: priority DESC (cascading story/epic priority on tie),
 //           then created_at ASC.
@@ -15,43 +15,47 @@ import { depsResolved } from "./deps.js";
 
 function effectiveCaps(task, story) {
   if (Array.isArray(task.capabilities) && task.capabilities.length > 0) return task.capabilities;
-  if (Array.isArray(story.capabilities) && story.capabilities.length > 0) return story.capabilities;
+  if (Array.isArray(story?.capabilities) && story.capabilities.length > 0) return story.capabilities;
   return [];
 }
 
 function capMatch(required, offered) {
   if (!required || required.length === 0) return true; // no requirement = open
-  if (!offered  || offered.length  === 0) return false;
+  if (!offered || offered.length === 0) return false;
   return required.some((r) => offered.includes(r));
 }
 
 /**
  * Return ready tasks, ordered by composite priority.
  *
- * @param {{agentId?: string, capabilities?: string[], limit?: number}} opts
+ * @param {{agentId?: string, harness?: string, capabilities?: string[], limit?: number}} opts
  */
 export function readyTasks(store, opts = {}) {
-  const { agentId, capabilities, limit } = opts;
-  const candidates = store.task.list({ status: "ready" });
+  const { agentId, harness, capabilities, limit, ignoreCapabilities = false } = opts;
+  const candidates = store.item.list({ kind: "task", status: "ready" });
   const ready = [];
   for (const task of candidates) {
-    const story = store.story.get(task.story_id);
+    const story = task.story_id ? store.item.get(task.story_id) : null;
     if (!story) continue;
     if (story.status !== "ready" && story.status !== "in_progress") continue;
-    const epic = store.epic.get(story.epic_id);
+    const epic = task.epic_id ? store.item.get(task.epic_id) : null;
     if (!epic) continue;
     if (epic.status !== "ready" && epic.status !== "in_progress") continue;
-    if (task.assigned && agentId && task.assigned !== agentId) continue;
+    if (task.assignee_agent && agentId) {
+      if (task.assignee_agent !== agentId) continue;
+      // Legacy assignments carry the wildcard harness; new ones name it.
+      if (harness && task.assignee_harness && task.assignee_harness !== "legacy" && task.assignee_harness !== harness) continue;
+    }
     const required = effectiveCaps(task, story);
-    if (!capMatch(required, capabilities)) continue;
+    if (!ignoreCapabilities && !capMatch(required, capabilities)) continue;
     if (!depsResolved(store, task.id)) continue;
     if (!depsResolved(store, story.id)) continue;
-    if (!depsResolved(store, epic.id))  continue;
+    if (!depsResolved(store, epic.id)) continue;
     ready.push({
       task,
       story,
       epic,
-      composite: [task.assigned === agentId ? 1 : 0, story.priority, epic.priority, -task.created_at],
+      composite: [task.assignee_agent === agentId ? 1 : 0, story.priority, epic.priority, -task.created_at],
     });
   }
   ready.sort((a, b) => {

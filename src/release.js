@@ -1,14 +1,13 @@
-// release.js — Herald's delivery surface: render release notes from the
-// store, then open a branch + PR that carries the backlog markers S2.6's
-// merge detector keys on (`Backlog: EPIC-…`, optional `Backlog-Task: TASK-…`,
-// optional `Release: vX.Y.Z`).
+// release.js — render release notes from the store, then open a branch + PR
+// that carries the backlog markers the merge detector keys on (`Backlog:
+// <item-id>`, optional `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`).
 
 import { execFileSync } from "node:child_process";
 
 export function renderReleaseNotes(store, epicId) {
   const epic = store.epic.get(epicId);
   if (!epic) throw new Error(`epic not found: ${epicId}`);
-  const stories = store.story.list({ epicId });
+  const stories = store.item.list({ kind: "story", parentId: epicId });
   const lines = [
     `# Release notes — ${epic.title}`,
     "",
@@ -19,22 +18,23 @@ export function renderReleaseNotes(store, epicId) {
   ];
   for (const s of stories) {
     lines.push(`- [${s.status}] ${s.id} ${s.title}${s.acceptance ? ` — ${s.acceptance}` : ""}`);
-    for (const t of store.task.list({ storyId: s.id })) {
+    for (const t of store.item.tree(s.id).filter((r) => r.kind === "task")) {
       const mark = t.status === "done" ? "x" : " ";
       lines.push(`  - [${mark}] ${t.id} ${t.title}${t.result_summary ? ` — ${t.result_summary.split("\n")[0]}` : ""}`);
     }
   }
-  const gated = store.db.prepare(
-    "SELECT id, title, gate_type FROM tasks WHERE status='blocked' AND gate_type IS NOT NULL AND story_id IN (SELECT id FROM stories WHERE epic_id=?)"
-  ).all(epicId);
+  const gated = store.item
+    .list({ kind: "task", status: "blocked" })
+    .filter((t) => t.epic_id === epicId && t.gate_type);
   if (gated.length) {
     lines.push("", "## Open gates");
     for (const g of gated) lines.push(`- ${g.gate_type}: ${g.id} ${g.title}`);
   }
-  const events = store.db.prepare(
-    "SELECT COUNT(*) AS n FROM events WHERE task_id IN (SELECT id FROM tasks WHERE story_id IN (SELECT id FROM stories WHERE epic_id=?))"
-  ).get(epicId);
-  lines.push("", `## Audit`, `- ${events.n} recorded events across this epic's tasks`, "");
+  const ids = store.item.tree(epicId).map((r) => r.id);
+  const count = ids.length
+    ? store.db.prepare(`SELECT COUNT(*) AS n FROM item_events WHERE item_id IN (${ids.map(() => "?").join(",")})`).get(...ids).n
+    : 0;
+  lines.push("", `## Audit`, `- ${count} recorded events across this epic's tasks`, "");
   return lines.filter((l) => l !== null && l !== undefined).join("\n");
 }
 
@@ -78,11 +78,11 @@ export function shipRelease(store, { epicId, taskId = null, version = null, base
 
 const invokedDirectly = process.argv[1]?.endsWith("release.js");
 if (invokedDirectly) {
-  const { createStore } = await import("./store.js");
+  const { createStore } = await import("./store/index.js");
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
   const epicId = get("--epic");
-  if (!epicId) { console.error("usage: release.js --epic EPIC-x [--task TASK-y] [--version vX.Y.Z] [--base main]"); process.exit(2); }
+  if (!epicId) { console.error("usage: release.js --epic <id> [--task <id>] [--version vX.Y.Z] [--base main]"); process.exit(2); }
   const store = createStore();
   try {
     const r = shipRelease(store, { epicId, taskId: get("--task"), version: get("--version"), base: get("--base") || "main" });
