@@ -76,6 +76,17 @@ const SPEC = {
   noteReasonLimit:    { env: "WINCH_NOTE_REASON_LIMIT",   parse: parseInt, check: (v) => v > 0 },
   noteArtifactLimit:  { env: "WINCH_NOTE_ARTIFACT_LIMIT", parse: parseInt, check: (v) => v > 0 },
   maxArtifacts:       { env: "WINCH_MAX_ARTIFACTS",       parse: parseInt, check: (v) => v > 0 },
+  costTracking: {
+    env: "WINCH_COST_TRACKING",
+    parse: (raw) => {
+      if (typeof raw === "boolean") return raw;
+      const s = String(raw ?? "").trim().toLowerCase();
+      if (s === "true" || s === "1") return true;
+      if (s === "false" || s === "0" || s === "") return false;
+      return null;
+    },
+    check: (v) => typeof v === "boolean",
+  },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -112,6 +123,7 @@ export const CONFIG_DEFAULTS = {
   noteReasonLimit: 1000,
   noteArtifactLimit: 500,
   maxArtifacts: 50,
+  costTracking: true,
 };
 
 export const CONFIG_ENV = Object.fromEntries(
