@@ -190,34 +190,32 @@ webhook and prompts the claiming session through the OpenCode SDK.
 | `backlog_done` | close a claimed task with a result; closing the last task closes its story, and the last story closes the epic and wakes the agent that planned it |
 | `backlog_block` / `backlog_resume` | open a human gate (with optional `gateType` and `blockedBy` dep edge) and resolve it (`actor` optional) |
 
-## The order lifecycle
+## Task lifecycle
 
-An order moves from ready through a claim and a running task to review. The
-verdict decides where it lands, and resume returns rejected or blocked work to
-ready.
+A task moves from `todo` through a claim to `done`. A block parks it until an
+operator resumes it; the last task closes its story, and the last story closes
+the epic.
 
 ```mermaid
 flowchart LR
-  A[Order created] -->|status ready| B[Ready]
-  B -->|claim| C[Claimed]
-  C -->|attempt| D[Running]
-  D -->|checkpoint / evidence| D
-  D -->|done| E[Review]
-  D -->|blocked| F[Blocked]
-  E -->|approve| G[Approved]
-  E -->|reject| B
-  F -->|resume| B
+  A[todo] -->|claim by id or next| B[in_progress]
+  B -->|heartbeat / update| B
+  B -->|lease expires| A
+  B -->|done| C[done]
+  B -->|block| D[blocked]
+  D -->|resume| A
+  C -->|last task| E[story done]
+  E -->|last story| F[epic done]
 ```
 
-Claim leases, attempt caps, and the checkpoint/evidence validation rules:
-[lifecycle](docs/lifecycle.md).
+Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 
 ## Documentation
 
 | Goal | Start here |
 | --- | --- |
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
-| Understand claim/lease/verdict rules | [Lifecycle](docs/lifecycle.md) |
+| Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
 | Wake idle agents on claims | [Webhooks and wake bridge](docs/webhooks.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
@@ -370,7 +368,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | "halves in different channels - pairs never splice" | Agent from one channel, session from another | Stamp both in the same channel (`_meta.winch` or flat args) |
 | "refused declaration (missing: harness)" | `WINCH_HARNESS` unset on stdio, or `X-Winch-Harness` missing on HTTP | Set the env var or add the header |
 | "refused declaration (reserved: harness)" | Harness name is `unknown` or `instance:*` | Use a real harness name |
-| "not found: TASK-..." | Task id does not exist | Check the id; tasks may have been dropped or never created |
+| "not found: ITM-..." | Item id does not exist | Check the id; tasks may have been dropped or never created |
 | "is in_progress, not todo" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
 | "not_ready" on claim | Unmet dependency or capability mismatch | Check deps with `backlog_get`; offer matching capabilities |
 
