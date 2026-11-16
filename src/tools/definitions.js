@@ -201,37 +201,6 @@ export const TOOL_DEFS = [
       },
     },
     {
-      name: "backlog_report_usage",
-      description:
-        "Record an LLM usage/cost event attributed to the caller (harness/agent/session), " +
-        "optionally linked to an item. Optional feature: only records when costTracking is enabled. " +
-        "Use to attribute per-call token/cost data to work.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          itemId: { type: "string", description: "Optional EPIC-.../STORY-.../TASK-... (or any item id) to attribute this usage to." },
-          item_id: { type: "string", description: "Alias for itemId." },
-          itemKind: { type: "string", description: "Kind of itemId: epic|story|task (inferred from prefix if omitted)." },
-          item_kind: { type: "string", description: "Alias for itemKind." },
-          taskId: { type: "string", description: "Optional TASK-... to attribute this usage to (alias for itemId with kind task)." },
-          task_id: { type: "string", description: "Alias for taskId." },
-          model: { type: "string", description: "Model name." },
-          tokensIn: { type: "integer", description: "Input tokens." },
-          tokens_in: { type: "integer", description: "Alias for tokensIn." },
-          tokensOut: { type: "integer", description: "Output tokens." },
-          tokens_out: { type: "integer", description: "Alias for tokensOut." },
-          cacheRead: { type: "integer", description: "Cached input tokens." },
-          cache_read: { type: "integer", description: "Alias for cacheRead." },
-          costUsd: { type: "number", description: "Cost in USD." },
-          cost_usd: { type: "number", description: "Alias for costUsd." },
-          cost: { type: "number", description: "Alias for costUsd." },
-          toolCalls: { type: "integer", description: "Tool calls in this turn." },
-          tool_calls: { type: "integer", description: "Alias for toolCalls." },
-        },
-      },
-    },
-    {
       name: "backlog_restore",
       description:
         "Undo `backlog_drop`: return a dropped epic, story or task, and everything dropped with it, to the queue (epic planned, " +
