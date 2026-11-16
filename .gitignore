@@ -1,3 +1,16 @@
 node_modules/
-
 *.tgz
+
+# macOS
+.DS_Store
+
+# local worktrees / harness state
+.doppler/
+
+# local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# build
+dist/
