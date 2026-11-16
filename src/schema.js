@@ -59,7 +59,6 @@ export const itemState = sqliteTable("item_state", {
   revision: integer("revision").notNull().default(0),
   status: text("status").notNull(),
   stateJson: text("state_json").notNull().default("{}"),
-  waitKind: text("wait_kind").generatedAlwaysAs(sql`json_extract(${sql.identifier("state_json")}, '$.wait.kind')`, { mode: "virtual" }),
   assigneeHarness: text("assignee_harness"),
   assigneeAgent: text("assignee_agent"),
   updatedAt: integer("updated_at").notNull(),

@@ -50,6 +50,13 @@
       "when": 1793063102061,
       "tag": "0006_recursive_items",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794852829865,
+      "tag": "0007_drop_wait_kind",
+      "breakpoints": true
     }
   ]
 }

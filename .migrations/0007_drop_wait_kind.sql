@@ -1,0 +1,1 @@
+ALTER TABLE `item_state` DROP COLUMN `wait_kind`;

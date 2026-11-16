@@ -15,4 +15,3 @@ export function newItemId() { return `ITM-${suffix()}`; }
 export function newAttemptId() { return `ATT-${suffix()}`; }
 export function newSessionId() { return `SES-${suffix()}`; }
 export function newArtifactId() { return `ART-${suffix()}`; }
-export function newAdmissionId() { return `ADM-${suffix()}`; }
