@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../src/store/index.js";
 import { createToolHandlers } from "../../src/tools/index.js";
 import { resolveConfig, resolveRequestConfig, CONFIG_DEFAULTS } from "../../src/config.js";
 

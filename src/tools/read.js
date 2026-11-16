@@ -1,5 +1,5 @@
-// read.js — one read tool, any level: epic, story or task. Level comes from
-// the row's `kind`, never from the id shape.
+// read.js — one read tool, any level: epic, story or task. The row's `kind`
+// selects the level.
 import { depsResolved } from "../deps.js";
 import { ok, err, collectStoryArtifacts, renderReceiverPrompt } from "./shared.js";
 

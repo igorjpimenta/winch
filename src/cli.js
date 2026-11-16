@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
-import { createStore } from "./store.js";
+import { createStore } from "./store/index.js";
 import { readyTasks } from "./ready-queue.js";
 import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";

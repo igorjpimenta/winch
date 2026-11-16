@@ -1,4 +1,4 @@
-// Shared context for the v8 store modules: the SQL projection, row decoration,
+// Shared context for the store modules: the SQL projection, row decoration,
 // event/session/attempt primitives, and the status vocabulary. `createStore`
 // owns the database handle; everything here closes over it.
 

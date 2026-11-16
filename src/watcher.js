@@ -11,7 +11,7 @@
 // cron message's decision, not the script's.
 
 import { pathToFileURL } from "node:url";
-import { createStore } from "./store.js";
+import { createStore } from "./store/index.js";
 import { readyTasks } from "./ready-queue.js";
 
 // An agent this busy should finish before it hears about more work. Keeps the

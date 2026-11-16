@@ -1,4 +1,4 @@
-// store.js — v8 data layer over better-sqlite3.
+// store/index.js — data layer over better-sqlite3.
 //
 // One recursive `items` table holds epics, stories and tasks; `item_state`
 // carries the mutable half, `attempts` one row per claim, `work_sessions` the
@@ -10,29 +10,29 @@
 // transition (claim + attempt + event, gate + event, drop) runs inside one
 // BEGIN IMMEDIATE transaction.
 
-import { resolveConfig } from "./config.js";
-import { resolveDbPath } from "./paths.js";
-import { openDatabase } from "./db.js";
+import { resolveConfig } from "../config.js";
+import { resolveDbPath } from "../paths.js";
+import { openDatabase } from "../db.js";
 import {
   EPIC_STATUSES,
   STORY_STATUSES,
   TASK_STATUSES,
   EXECUTION_KINDS,
   ITEM_KINDS,
-} from "./schema.js";
-import { createCore, jsonIn, MAX_ATTEMPTS } from "./store/core.js";
-import { createItemApi } from "./store/items.js";
-import { createAttemptApi } from "./store/attempts.js";
-import { createArtifactApi } from "./store/artifacts.js";
-import { createEpicApi } from "./store/epics.js";
-import { createStoryApi } from "./store/stories.js";
-import { createTaskApi } from "./store/tasks.js";
-import { createClaimMethods } from "./store/claims.js";
-import { createGateMethods } from "./store/gates.js";
-import { createSweepMethods } from "./store/sweep.js";
-import { createDepApi } from "./store/deps.js";
-import { createWebhookApi } from "./store/webhooks.js";
-import { createEventApi } from "./store/events.js";
+} from "../schema.js";
+import { createCore, jsonIn, MAX_ATTEMPTS } from "./core.js";
+import { createItemApi } from "./items.js";
+import { createAttemptApi } from "./attempts.js";
+import { createArtifactApi } from "./artifacts.js";
+import { createEpicApi } from "./epics.js";
+import { createStoryApi } from "./stories.js";
+import { createTaskApi } from "./tasks.js";
+import { createClaimMethods } from "./claims.js";
+import { createGateMethods } from "./gates.js";
+import { createSweepMethods } from "./sweep.js";
+import { createDepApi } from "./deps.js";
+import { createWebhookApi } from "./webhooks.js";
+import { createEventApi } from "./events.js";
 
 export { MAX_ATTEMPTS };
 export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };

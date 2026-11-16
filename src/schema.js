@@ -1,4 +1,4 @@
-// schema.js — the v8 schema: one recursive item tree with lifecycle,
+// schema.js — one recursive item tree with lifecycle,
 // attempts, sessions, artifacts and an append-only ledger.
 //
 // Drizzle owns the table/column types, constraints, indexes, generated

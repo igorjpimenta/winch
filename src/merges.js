@@ -125,7 +125,7 @@ export function collectPRs({ exec, cwd = process.cwd(), limit = 100 } = {}) {
 const invokedDirectly = process.argv[1]?.endsWith("merges.js");
 if (invokedDirectly) {
   const { execFileSync } = await import("node:child_process");
-  const { createStore } = await import("./store.js");
+  const { createStore } = await import("./store/index.js");
   const dryRun = process.argv.includes("--dry-run");
   const store = createStore();
   try {

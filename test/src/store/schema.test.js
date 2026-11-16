@@ -1,11 +1,11 @@
-// schema.test.js — the Drizzle migrations create the v8 schema and the
-// ledger makes reopen idempotent.
+// schema.test.js — the Drizzle migrations create the schema and the ledger
+// makes reopen idempotent.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../../src/store/index.js";
 
 function tempDb(t) {
   const dir = mkdtempSync(path.join(tmpdir(), "winch-schema-"));
@@ -21,7 +21,7 @@ function ledger(db) {
   return db.prepare("SELECT hash FROM __drizzle_migrations ORDER BY created_at").all();
 }
 
-test("fresh store creates the v8 schema and records the Drizzle migrations", (t) => {
+test("fresh store creates the schema and records the Drizzle migrations", (t) => {
   const store = createStore({ dbPath: tempDb(t) });
   t.after(() => store.close());
 

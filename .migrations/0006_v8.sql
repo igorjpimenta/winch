@@ -1,6 +1,6 @@
--- v8: one recursive item tree, lifecycle split out, attempts/sessions as
+-- One recursive item tree, lifecycle split out, attempts/sessions as
 -- first-class rows, and a single append-only ledger. Data is copied from the
--- v6 tables before they are dropped, so the migration is in-place.
+-- legacy tables before they are dropped, so the migration is in-place.
 CREATE TABLE `items` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -152,7 +152,7 @@ CREATE TABLE `harness_webhooks` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
--- ── copy v6 rows into the recursive tree ─────────────────────────────────
+-- ── copy legacy rows into the recursive tree ─────────────────────────────
 INSERT INTO items (id, kind, parent_id, title, description, acceptance,
                    priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
 SELECT id, 'epic', NULL, title, description, acceptance,

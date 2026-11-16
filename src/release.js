@@ -78,7 +78,7 @@ export function shipRelease(store, { epicId, taskId = null, version = null, base
 
 const invokedDirectly = process.argv[1]?.endsWith("release.js");
 if (invokedDirectly) {
-  const { createStore } = await import("./store.js");
+  const { createStore } = await import("./store/index.js");
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
   const epicId = get("--epic");

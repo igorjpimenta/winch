@@ -1,5 +1,4 @@
-// read.test.js — read.js: one read tool; the level follows the row's kind,
-// never the id shape.
+// read.test.js — read.js: one read tool; the row's kind selects the level.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { makeHarness, WORKER } from "./_harness.js";

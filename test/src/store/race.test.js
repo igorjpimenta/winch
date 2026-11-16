@@ -1,4 +1,4 @@
-// store.race.test.js — the claim race taken literally: N real
+// race.test.js — the claim race taken literally: N real
 // OS processes racing one claim. In-process sequential calls prove the CAS
 // predicate; only parallel processes with independent sqlite handles prove the
 // transaction boundary under WAL contention.
@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../../src/store/index.js";
 
-const storeUrl = pathToFileURL(path.resolve(import.meta.dirname, "..", "..", "src", "store.js")).href;
+const storeUrl = pathToFileURL(path.resolve(import.meta.dirname, "..", "..", "..", "src", "store", "index.js")).href;
 let dir;
 
 afterEach(() => {

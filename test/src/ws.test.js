@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../src/store/index.js";
 import { startEventServer, kindForEvent } from "../../src/events-ws.js";
 
 let dir, store, srv, sockets;

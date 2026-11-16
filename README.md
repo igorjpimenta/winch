@@ -294,7 +294,7 @@ a new ticket linked by dep edge with a `supersedes: ITM-x` note, never a
 rewrite of history.
 
 Rows carry their stored `kind` and the recursive `item` envelope; the legacy
-`task`/`story`/`epic` blocks stay for subscribers that predate v8.
+`task`/`story`/`epic` blocks stay for subscribers that predate the recursive-item schema.
 
 The server never interprets a row - a gate opening is just another event, and
 reminders, digests and dashboards are subscriber code. Reconnect replays
@@ -307,7 +307,7 @@ front. Plain HTTP hits get 404.
 DB path resolution: `WINCH_DB` -> `~/.winch/store.sqlite`. The store is
 winch's, not the launching harness's.
 
-Schema lives in `src/schema.js` as Drizzle tables. v8 is one recursive
+Schema lives in `src/schema.js` as Drizzle tables. The schema is one recursive
 `items` tree (`kind` = epic/story/task, `parent_id` for nesting), with
 `item_state`, `item_tags`, `item_edges`, `attempts`, `work_sessions`,
 `artifacts`, `item_events` and `harness_webhooks`. Item ids are opaque; `kind`
@@ -320,7 +320,7 @@ append a new one instead of editing it.
 
 Concurrency note: concurrent access to the sqlite file - server, watcher and
 CLI processes at once - is safe under WAL mode, and
-[test/store.race.test.js](test/store.race.test.js)
+[test/src/store/race.test.js](test/src/store/race.test.js)
 races 4 real OS processes with independent handles through one claim to prove
 the CAS transaction boundary under WAL contention.
 

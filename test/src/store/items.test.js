@@ -1,14 +1,14 @@
-// v8.test.js — the mechanics the schema change exists for: recursive items,
-// attempt history, generated columns, and ids that carry no kind.
+// The mechanics the recursive model exists for: nested items, attempt
+// history, generated columns, and ids that carry no kind.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../src/store.js";
+import { createStore } from "../../../src/store/index.js";
 
 function makeStore(t) {
-  const dir = mkdtempSync(path.join(tmpdir(), "winch-v8-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-items-"));
   const store = createStore({ dbPath: path.join(dir, "store.sqlite") });
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   return store;
@@ -26,7 +26,7 @@ test("a task can split into subtasks without a schema change", (t) => {
   assert.deepEqual(store.item.tree(epic.id).map((r) => r.id), [epic.id, story.id, task.id, sub.id]);
 });
 
-test("ids are opaque: kind comes from the row, never from the string", (t) => {
+test("ids are opaque: kind comes from the row", (t) => {
   const store = makeStore(t);
   const epic = store.epic.create({ title: "E" });
   const story = store.story.create({ epicId: epic.id, title: "S" });
