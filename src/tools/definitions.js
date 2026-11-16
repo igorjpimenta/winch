@@ -52,6 +52,37 @@ export const TOOL_DEFS = [
       },
     },
     {
+      name: "backlog_delegate",
+      description:
+        "Hand part of a task to another worker without changing the parent's accountable assignee. Creates a child task under the parent, " +
+        "assigns it to `agent`, makes the parent depend on the child, and parks the parent in `blocked`. When the child closes, the parent " +
+        "returns to `ready` for the accountable assignee. Use `agent: \"human\"` for human work; the child carries the reserved human pair.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskId", "agent", "title"],
+        properties: {
+          taskId: { type: "string", description: "Parent task item id (opaque). The caller must be its accountable assignee or it must be unassigned." },
+          agent: { type: "string", description: "Worker agent that claims and delivers the child. Use `human` for human work." },
+          title: { type: "string", description: "Child task title." },
+          description: { type: "string", description: "Child task description." },
+          acceptance: { type: "string", description: "What done means for the child. Defaults to the parent acceptance." },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Capability tags the child requires. Defaults to the parent tags.",
+          },
+          executionKind: {
+            type: "string",
+            enum: ["pipeclaw", "subagent", "cli", "gate", "manual"],
+            description: "How the child is executed; default manual.",
+          },
+          executionArgs: { type: "object", description: "Execution arguments for the child." },
+          reason: { type: "string", description: "Why the work is delegated; recorded on the parent wait." },
+        },
+      },
+    },
+    {
       name: "backlog_plan",
       description:
         "Create a whole plan in one call: an epic, its stories, and their tasks, wired with dependencies. This is how a planner " +

@@ -1,12 +1,13 @@
 // Task facade: the tool-facing task methods plus the state transition that
 // ends/creates an attempt and then writes the item event.
 
+import { depsResolved } from "../deps.js";
 import { TASK_STATUSES } from "../schema.js";
 
 export function createTaskApi({ core, apis }) {
   const {
     db, cfg, now, splitSessionKey, ensureSession, systemSession,
-    liveAttempt, endAttempt, createAttempt, ITEM_TERMINAL,
+    liveAttempt, endAttempt, createAttempt, appendEvent, ITEM_TERMINAL,
   } = core;
 
   const taskApi = {
@@ -113,6 +114,71 @@ export function createTaskApi({ core, apis }) {
         updatedAt: t,
       });
       return row;
+    },
+    blockOnDeps({ id, note = null, childId = null, actor = "system", at = null }) {
+      const existing = taskApi.get(id);
+      if (!existing) throw new Error(`task not found: ${id}`);
+      if (!["backlog", "ready", "in_progress"].includes(existing.status)) {
+        throw new Error(`${existing.id} is ${existing.status}; cannot wait on dependencies`);
+      }
+      const t = at ?? now();
+      const state = { ...(existing.state_json ?? {}) };
+      state.wait = {
+        kind: "deps",
+        since: t,
+        ...(childId ? { childId } : {}),
+        ...(note ? { reason: note } : {}),
+      };
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const live = liveAttempt(id);
+        if (live) endAttempt(live.id, { status: "released", endedAt: t });
+        db.prepare("UPDATE item_state SET revision=revision+1, status='blocked', state_json=?, updated_at=? WHERE item_id=?")
+          .run(JSON.stringify(state), t, id);
+        appendEvent({
+          itemId: id, fromStatus: existing.status, toStatus: "blocked",
+          kind: "deps.waiting", actor,
+          note: note ?? (childId ? `waiting on ${childId}` : "waiting on dependencies"), at: t,
+        });
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return taskApi.get(id);
+    },
+    resumeDependencyWaits({ at = null } = {}) {
+      const rows = db.prepare(`
+        SELECT s.item_id, s.assignee_harness, s.assignee_agent, s.state_json
+          FROM item_state s JOIN items i ON i.id = s.item_id
+         WHERE i.kind = 'task' AND s.status = 'blocked' AND s.deleted_at IS NULL
+           AND s.wait_kind = 'deps'
+      `).all();
+      const resolved = [];
+      if (rows.length === 0) return resolved;
+      const t = at ?? now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const dependencyView = { dep: apis.dep, item: apis.item, config: cfg };
+        for (const row of rows) {
+          if (!depsResolved(dependencyView, row.item_id)) continue;
+          const status = row.assignee_harness && row.assignee_agent ? "ready" : "backlog";
+          const state = JSON.parse(row.state_json || "{}");
+          delete state.wait;
+          db.prepare("UPDATE item_state SET revision=revision+1, status=?, state_json=?, updated_at=? WHERE item_id=?")
+            .run(status, JSON.stringify(state), t, row.item_id);
+          appendEvent({
+            itemId: row.item_id, fromStatus: "blocked", toStatus: status,
+            kind: "deps.resolved", actor: "system", note: "dependencies resolved", at: t,
+          });
+          resolved.push(row.item_id);
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return resolved;
     },
     delete(id) {
       const r = db.prepare("DELETE FROM items WHERE id=? AND kind='task'").run(id);

@@ -21,8 +21,9 @@ import { readyTasks } from "./ready-queue.js";
 export const MAX_ACTIVE_PER_AGENT = 2;
 
 /**
- * @returns {{ts:number, swept:string[], waits:object[], routed:object[], human:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
+ * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
  *   swept    — lease-expired tasks the sweep requeued or escalated this tick
+ *   resolved — dependency-wait tasks returned to ready this tick
  *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
  *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
  *   human    — claimable human work: ready for a person, never woken through an agent harness
@@ -33,6 +34,7 @@ export function tick(store, { config: override = null } = {}) {
   const cfg = override ?? store.config;
   const nowTs = Date.now();
   const swept = store.task.sweepExpired({});
+  const resolved = store.task.resumeDependencyWaits({ at: nowTs });
   const waits = store.task.recordGateWaits({ now: nowTs });
   const claimable = readyTasks(store, { limit: cfg.scanLimit }).map((r) => ({
     taskId: r.task.id,
@@ -81,6 +83,7 @@ export function tick(store, { config: override = null } = {}) {
   return {
     ts: nowTs,
     swept: swept.map((t) => t.id),
+    resolved,
     waits,
     routed,
     human,

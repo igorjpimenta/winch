@@ -21,6 +21,11 @@ flowchart LR
 A lease expiry keeps the assignee so a dispatcher can re-wake the same worker;
 only the status returns to `ready`.
 
+Delegation keeps the accountable on the parent: a child task carries the
+worker, the parent depends on it and waits in `blocked`, and the watcher
+returns the parent to `ready` for the accountable when every child is
+terminal.
+
 ## Attempt lifecycle
 
 ```mermaid

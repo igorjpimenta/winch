@@ -218,6 +218,7 @@ export function createPlanTools({ store, logger }) {
       try {
         const actor = `${identity.harness}:${identity.agent}`;
         const result = store.item.drop(id, { reason: args?.reason ?? null, actor });
+        store.task.resumeDependencyWaits();
         logger?.info?.(`backlog: ${actor} dropped ${id} (${tasks.length} task(s), soft)`);
         return ok(JSON.stringify({ ok: true, dropped: { kind, id, reversible: true }, tasks: tasks.map((t) => t.id) }), {
           status: "ok", agentId: identity.agent, level: kind, id,

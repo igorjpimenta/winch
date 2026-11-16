@@ -11,6 +11,7 @@ import { TOOL_DEFS } from "./definitions.js";
 import { err } from "./shared.js";
 import { createClaimTools } from "./claim.js";
 import { createAssignTools } from "./assign.js";
+import { createDelegateTools } from "./delegate.js";
 import { createPlanTools } from "./plan.js";
 import { createReadTools } from "./read.js";
 import { createReportTools } from "./report.js";
@@ -23,6 +24,7 @@ export function createToolHandlers(store, logger) {
   const handlers = {
     ...createClaimTools({ store, logger }),
     ...createAssignTools({ store, logger }),
+    ...createDelegateTools({ store, logger }),
     ...createPlanTools({ store, logger }),
     ...createReadTools({ store, logger }),
     ...createReportTools({ store, logger }),

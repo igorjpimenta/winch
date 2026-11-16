@@ -163,6 +163,11 @@ export function createItemApi({ core }) {
       if (status === "ready" && (next.assignee_harness == null || next.assignee_agent == null)) {
         throw new Error(`ready item requires an assignment: ${id}`);
       }
+      if (existing.status === "blocked" && status !== "blocked" && next.state_json?.wait?.kind === "deps") {
+        const state = { ...next.state_json };
+        delete state.wait;
+        next.state_json = state;
+      }
       const statusChanged = status !== existing.status;
       const note = patch.note ?? null;
       const actor = patch.actor ?? (statusChanged ? "system" : null);

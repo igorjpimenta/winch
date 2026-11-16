@@ -96,6 +96,11 @@ test("block records a reason and an optional dependency", async () => {
   assert.equal(h.store.task.get(task.id).status, "blocked");
   assert.equal(res.details.dep, "added");
   assert.equal(h.store.dep.listOutgoing(task.id)[0].to_id, blocker.id);
+  assert.equal(h.store.task.get(task.id).state_json.wait.kind, "deps");
+
+  h.store.task.update(blocker.id, { status: "done" });
+  assert.deepEqual(h.store.task.resumeDependencyWaits(), [task.id]);
+  assert.equal(h.store.task.get(task.id).status, "ready");
 });
 
 test("block refuses a task assigned to another agent", async () => {

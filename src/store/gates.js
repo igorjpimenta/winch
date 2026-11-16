@@ -49,6 +49,8 @@ export function createGateMethods({ core, apis }) {
       const existing = apis.task.get(id);
       if (!existing || existing.status !== "blocked") return null;
       const status = existing.assignee_harness && existing.assignee_agent ? "ready" : "backlog";
+      const state = { ...(existing.state_json ?? {}) };
+      delete state.wait;
       const t = now();
       const parsed = splitSessionKey(session);
       let sessionId = null;
@@ -65,9 +67,9 @@ export function createGateMethods({ core, apis }) {
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(`
-          UPDATE item_state SET revision=revision+1, status=?, updated_at=?
+          UPDATE item_state SET revision=revision+1, status=?, state_json=?, updated_at=?
            WHERE item_id=?
-        `).run(status, t, id);
+        `).run(status, JSON.stringify(state), t, id);
         appendEvent({
           itemId: id, sessionId, fromStatus: "blocked", toStatus: status,
           kind: "gate.resolved", actor, note: "gate resume", at: t,

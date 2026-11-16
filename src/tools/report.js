@@ -51,6 +51,7 @@ export function createReportTools({ store, logger }) {
           sessionKey, harness: identity.harness, session: identity.session, agentId,
         });
         for (const uri of artifacts) store.artifact.add({ itemId: task.id, attemptId: updated.attempt_id, kind: "link", uri });
+        store.task.resumeDependencyWaits();
         // Close upward, one level at a time: a story closes when its last task
         // does, and the epic closes only when its last story does. The epic
         // row is what wakes its creator to review the delivery.
@@ -91,6 +92,7 @@ export function createReportTools({ store, logger }) {
       try {
         const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;
+        let depResult = null;
         if (args?.gateType) {
           // Human gates open through openGate — the one path that stamps
           // gate.opened rows — never the generic update.
@@ -99,22 +101,31 @@ export function createReportTools({ store, logger }) {
             harness: identity.harness, session: identity.session,
           });
           if (!updated) return err(`${task.id} is ${store.task.get(task.id)?.status ?? "gone"}; gating applies to ready/in_progress only.`, "wrong_status", { taskId: task.id });
+          if (args?.blockedBy) {
+            const r = addDep(store, task.id, args.blockedBy.id);
+            depResult = r.ok ? "added" : `failed:${r.code}`;
+            if (r.ok) {
+              store.event.append({
+                itemId: task.id, fromStatus: "blocked", toStatus: "blocked",
+                actor: agentId, note: `dep: ${task.id} depends on ${args.blockedBy.id}`,
+              });
+            }
+          }
+        } else if (args?.blockedBy) {
+          // A dependency wait returns to ready on its own; a plain manual
+          // block stays blocked until backlog_resume.
+          const r = addDep(store, task.id, args.blockedBy.id);
+          if (!r.ok) return err(`backlog_block: dependency rejected: ${r.code}`, "error", { taskId: task.id });
+          depResult = "added";
+          updated = store.task.blockOnDeps({
+            id: task.id, childId: args.blockedBy.id, actor: agentId,
+            note: `blocked: ${reason}; dep ${args.blockedBy.id}`,
+          });
         } else {
           updated = store.task.update(task.id, {
             status: "blocked", actor: agentId, note: `blocked: ${reason}`,
             sessionKey: identitySessionKey(identity), harness: identity.harness, session: identity.session, agentId,
           });
-        }
-        let depResult = null;
-        if (args?.blockedBy) {
-          const r = addDep(store, task.id, args.blockedBy.id);
-          depResult = r.ok ? "added" : `failed:${r.code}`;
-          if (r.ok) {
-            store.event.append({
-              itemId: task.id, fromStatus: "blocked", toStatus: "blocked",
-              actor: agentId, note: `dep: ${task.id} depends on ${args.blockedBy.id}`,
-            });
-          }
         }
         logger?.warn?.(`backlog: ${agentId} blocked ${task.id} (${reason})`);
         return ok(JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status }, dep: depResult }), { status: "ok", taskId: task.id, agentId, dep: depResult });
