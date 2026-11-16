@@ -16,6 +16,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
 import { readyTasks } from "./ready-queue.js";
+import { HUMAN_AGENT } from "./reserved.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -118,7 +119,7 @@ export function toEventMessage(store, row) {
     // tags are the claimant's business, so a tagged task must still appear.
     // `todo` remains here for pre-standardization rows.
     unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "ready" || row.to_status === "todo"
-      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent).slice(0, 20)
+      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent && r.task.assignee_agent !== HUMAN_AGENT).slice(0, 20)
           .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent, assigneeHarness: r.task.assignee_harness }))
       : [],
     task: task

@@ -48,7 +48,7 @@ flowchart LR
 
 Claim leases, attempt caps, and gate checks:
 
-- **Claim**: atomic CAS under a lease. Highest-priority ready task selected when no id given.
+- **Claim**: atomic CAS under a lease. Highest-priority ready task selected when no id given. Human work uses the reserved `human` / `human_in_the_loop` pair: it keeps `ready`/`in_progress` but is never claimable by an agent.
 - **Dependencies**: forward-only, cycle-checked. Cancelled deps count as resolved.
 - **Gates**: `backlog_block` opens a gate when `gateType` is given; `backlog_resume` returns it to `ready` and clears the assignment. A caller that names another actor is refused.
 - **Close**: closing the last task closes its story; closing the last story closes the epic and wakes the planner.

@@ -13,6 +13,7 @@ CREATE TABLE `__new_item_state` (
 	FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "item_state_status" CHECK("__new_item_state"."status" IN ('backlog', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled')),
 	CONSTRAINT "item_state_assignment_pair" CHECK(("__new_item_state"."assignee_harness" IS NULL) = ("__new_item_state"."assignee_agent" IS NULL)),
+	CONSTRAINT "item_state_human_pair" CHECK(("__new_item_state"."assignee_agent" IS 'human') = ("__new_item_state"."assignee_harness" IS 'human_in_the_loop')),
 	CONSTRAINT "item_state_ready_assigned" CHECK("__new_item_state"."status" <> 'ready' OR ("__new_item_state"."assignee_harness" IS NOT NULL AND "__new_item_state"."assignee_agent" IS NOT NULL))
 );
 --> statement-breakpoint

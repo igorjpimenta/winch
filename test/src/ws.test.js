@@ -171,12 +171,14 @@ test("a close carries the work it just made claimable", async () => {
   const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
   const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", assigneeHarness: "test", capabilities: ["verify"] });
+  const human = store.task.create({ storyId: story.id, title: "human", status: "ready", executionKind: "manual", assigned: "human" });
   const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder", assigneeHarness: "test" }]);
+  assert.ok(!msg.unblocked.some((r) => r.id === human.id), "human work is not an agent wake");
 });
 
 test("history and live rows share one envelope", async () => {

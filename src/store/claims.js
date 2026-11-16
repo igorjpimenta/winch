@@ -2,6 +2,8 @@
 // direct assignment path. Claim and release each write the attempt and event
 // in the same BEGIN IMMEDIATE transaction.
 
+import { HUMAN_AGENT, HUMAN_HARNESS, resolveAssignmentPair } from "../reserved.js";
+
 export function createClaimMethods({ core, apis }) {
   const {
     db, cfg, now, splitSessionKey, ensureSession,
@@ -14,6 +16,7 @@ export function createClaimMethods({ core, apis }) {
       if (!row || row.kind !== "task") return null;
       const parsed = splitSessionKey(sessionKey);
       const h = harness ?? parsed?.harness ?? "system";
+      if (agentId === HUMAN_AGENT || h === HUMAN_HARNESS) return null;
       const extSession = session ?? parsed?.session ?? `store-${agentId}`;
       const t = now();
       const leaseMs = watchdogMs ?? cfg.leaseSeconds * 1000;
@@ -50,16 +53,17 @@ export function createClaimMethods({ core, apis }) {
       if (existing.status === "in_progress" && (existing.assigned ?? null) !== next) {
         throw new Error(`${existing.id} is in_progress by ${existing.assigned ?? "nobody"}; wait for release before reassigning`);
       }
-      if (next != null && !harness) throw new Error(`assignment requires a harness: ${id}`);
+      const pair = resolveAssignmentPair(next, harness);
+      if (pair.agent != null && pair.harness == null) throw new Error(`assignment requires a harness: ${id}`);
       const t = now();
-      const h = next == null ? null : harness;
+      const h = pair.harness;
       let status = existing.status;
-      if (next == null && status === "ready") status = "backlog";
-      else if (next != null && status === "backlog") status = "ready";
+      if (pair.agent == null && status === "ready") status = "backlog";
+      else if (pair.agent != null && status === "backlog") status = "ready";
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare("UPDATE item_state SET revision=revision+1, status=?, assignee_harness=?, assignee_agent=?, updated_at=? WHERE item_id=?")
-          .run(status, h, next, t, id);
+          .run(status, h, pair.agent, t, id);
         if (capabilities !== undefined) {
           db.prepare("DELETE FROM item_tags WHERE item_id=?").run(id);
           for (const tag of capabilities ?? []) {
@@ -69,7 +73,7 @@ export function createClaimMethods({ core, apis }) {
         }
         appendEvent({
           itemId: id, fromStatus: existing.status, toStatus: status, kind: "task.assigned",
-          actor, note: `assign ${next ?? "nobody"}`, at: t,
+          actor, note: `assign ${pair.agent ?? "nobody"}`, at: t,
         });
         db.exec("COMMIT");
       } catch (err) {

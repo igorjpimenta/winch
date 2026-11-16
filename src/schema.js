@@ -69,6 +69,7 @@ export const itemState = sqliteTable("item_state", {
 }, (table) => [
   check("item_state_status", sql`${table.status} IN (${inList(ALL_STATUSES)})`),
   check("item_state_assignment_pair", sql`(${table.assigneeHarness} IS NULL) = (${table.assigneeAgent} IS NULL)`),
+  check("item_state_human_pair", sql`(${table.assigneeAgent} IS 'human') = (${table.assigneeHarness} IS 'human_in_the_loop')`),
   check("item_state_ready_assigned", sql`${table.status} <> 'ready' OR (${table.assigneeHarness} IS NOT NULL AND ${table.assigneeAgent} IS NOT NULL)`),
   index("idx_state_ready").on(table.status, table.assigneeHarness, table.assigneeAgent),
   index("idx_state_updated").on(table.updatedAt),

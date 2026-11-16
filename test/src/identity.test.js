@@ -21,6 +21,7 @@ test("assertDeclaration: missing harness throws and names it", () => {
 test("assertDeclaration: reserved harness throws", () => {
   assert.throws(() => assertDeclaration({ harness: "unknown" }), /refused declaration/);
   assert.throws(() => assertDeclaration({ harness: "instance:4721" }), /refused declaration/);
+  assert.throws(() => assertDeclaration({ harness: "human_in_the_loop" }), /refused declaration/);
 });
 
 test("declaredFromEnv reads only the harness", () => {
@@ -73,6 +74,10 @@ test("resolveIdentity: meta carrying reserved tokens fails instead of minting", 
     () => resolveIdentity({ base: BASE, meta: { winch: { agent: "UNKNOWN", session: "s" } } }),
     /refused caller identity.*agent/
   );
+  assert.throws(
+    () => resolveIdentity({ base: BASE, meta: { winch: { agent: "human", session: "s" } } }),
+    /refused caller identity.*agent/
+  );
 });
 
 test("resolveIdentity: incomplete base throws even with full meta", () => {
@@ -92,6 +97,14 @@ test("sessionKey format: harness:agent:session", () => {
 test("identitySessionKey refuses to mint a poisoned key", () => {
   assert.throws(
     () => identitySessionKey({ harness: "x", agent: "unknown", session: "s" }),
+    /refused session key.*agent/
+  );
+  assert.throws(
+    () => identitySessionKey({ harness: "human_in_the_loop", agent: "a", session: "s" }),
+    /refused session key.*harness/
+  );
+  assert.throws(
+    () => identitySessionKey({ harness: "x", agent: "human", session: "s" }),
     /refused session key.*agent/
   );
 });

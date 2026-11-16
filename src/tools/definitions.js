@@ -34,6 +34,7 @@ export const TOOL_DEFS = [
         "A task assignee claims and delivers it. A story assignee breaks it down first: it reads the story and appends the tasks with " +
         "`backlog_append`, unassigned, so the planner can route them — use story assignment when the breakdown is not known at plan time. " +
         "Refuses to reassign a task already in progress by someone else. Passing `agent: null` or \"\" clears it. " +
+        "The reserved agent `human` assigns human work with the reserved harness `human_in_the_loop`. " +
         "Optional `capabilities` replaces the item's capability tags.",
       inputSchema: {
         type: "object",

@@ -737,6 +737,10 @@
           "name": "item_state_assignment_pair",
           "value": "(\"item_state\".\"assignee_harness\" IS NULL) = (\"item_state\".\"assignee_agent\" IS NULL)"
         },
+        "item_state_human_pair": {
+          "name": "item_state_human_pair",
+          "value": "(\"item_state\".\"assignee_agent\" IS 'human') = (\"item_state\".\"assignee_harness\" IS 'human_in_the_loop')"
+        },
         "item_state_ready_assigned": {
           "name": "item_state_ready_assigned",
           "value": "\"item_state\".\"status\" <> 'ready' OR (\"item_state\".\"assignee_harness\" IS NOT NULL AND \"item_state\".\"assignee_agent\" IS NOT NULL)"

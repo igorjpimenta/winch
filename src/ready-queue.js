@@ -7,6 +7,9 @@
 //   - (when agentId is supplied) assigned to the same harness:agent pair
 //   - (when capabilities supplied) intersection with task/story tags is non-empty
 //
+// The reserved `human` / `human_in_the_loop` pair is ready for a person, never
+// for an agent: dispatchers must keep it out of agent wake lists.
+//
 // Ordering: priority DESC (cascading story/epic priority on tie),
 //           then created_at ASC.
 

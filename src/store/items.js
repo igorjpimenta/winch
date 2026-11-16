@@ -2,6 +2,7 @@
 // tags, and kind lookups. Facades (epic/story/task) add domain rules on top.
 
 import { newItemId } from "../ids.js";
+import { resolveAssignmentPair } from "../reserved.js";
 import { EXECUTION_KINDS, ITEM_KINDS } from "../schema.js";
 
 export function createItemApi({ core }) {
@@ -15,8 +16,12 @@ export function createItemApi({ core }) {
       const kind = input.kind;
       if (!ITEM_KINDS.includes(kind)) throw new Error(`invalid item kind: ${kind}`);
       const id = input.id || newItemId();
-      const assigneeHarness = input.assigneeHarness ?? null;
-      const assigneeAgent = input.assigneeAgent ?? (input.assigned ?? null);
+      const pair = resolveAssignmentPair(
+        input.assigneeAgent ?? (input.assigned ?? null),
+        input.assigneeHarness ?? null,
+      );
+      const assigneeHarness = pair.harness;
+      const assigneeAgent = pair.agent;
       if ((assigneeHarness == null) !== (assigneeAgent == null)) {
         throw new Error(`assignment is a pair: ${id}`);
       }
@@ -140,6 +145,9 @@ export function createItemApi({ core }) {
         deleted_at: patch.deletedAt !== undefined ? patch.deletedAt : existing.deleted_at,
       };
       if (patch.assigned !== undefined) next.assignee_agent = patch.assigned ?? null;
+      const pair = resolveAssignmentPair(next.assignee_agent, next.assignee_harness);
+      next.assignee_agent = pair.agent;
+      next.assignee_harness = pair.harness;
       if (next.assignee_agent == null) next.assignee_harness = null;
       else if (next.assignee_harness == null) throw new Error(`assignment requires a harness: ${id}`);
       if (patch.status && ITEM_TERMINAL.has(status) && !existing.closed_at) next.closed_at = t;

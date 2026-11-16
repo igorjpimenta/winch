@@ -194,8 +194,11 @@ webhook and prompts the claiming session through the OpenCode SDK.
 
 A task starts in `backlog`. Assignment moves it to `ready`; clearing the
 assignment returns it to `backlog`, so only an assigned task can be claimed.
-A block parks it until an operator resumes it; the last task closes its story,
-and the last story closes the epic.
+Assigning the reserved agent `human` stamps the reserved harness
+`human_in_the_loop`: the pair keeps `ready`/`in_progress` semantics for human
+work, but neither value is a caller identity, and agent dispatchers never wake
+it. A block parks it until an operator resumes it; the last task closes its
+story, and the last story closes the epic.
 
 ```mermaid
 flowchart LR
@@ -370,7 +373,8 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | "refused caller identity (unresolved agent and session)" | No `_meta.winch` and no `winch_agent`/`winch_session` args | Ensure the companion plugin is installed and stamping; for OpenCode set `WINCH_AGENT` |
 | "halves in different channels - pairs never splice" | Agent from one channel, session from another | Stamp both in the same channel (`_meta.winch` or flat args) |
 | "refused declaration (missing: harness)" | `WINCH_HARNESS` unset on stdio, or `X-Winch-Harness` missing on HTTP | Set the env var or add the header |
-| "refused declaration (reserved: harness)" | Harness name is `unknown` or `instance:*` | Use a real harness name |
+| "refused declaration (reserved: harness)" | Harness name is `unknown`, `instance:*`, or `human_in_the_loop` | Use a real harness name |
+| "refused caller identity" with a reserved agent | Agent is `human`, the human-assignment sentinel | Use a real agent name; `human` is a target, not a caller |
 | "not found: ITM-..." | Item id does not exist | Check the id; tasks may have been dropped or never created |
 | "is in_progress, not ready" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
 | "not_ready" on claim | Unmet dependency or capability mismatch | Check deps with `backlog_get`; offer matching capabilities |
