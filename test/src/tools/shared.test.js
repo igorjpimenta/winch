@@ -22,7 +22,7 @@ afterEach(() => {
 function seed() {
   const epic = store.epic.create({ title: "Epic", acceptance: "EP-AC", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "Story", acceptance: "STORY-AC", status: "in_progress" });
-  const task = store.task.create({ storyId: story.id, title: "Task", status: "ready", executionKind: "manual", assigned: "atlas" });
+  const task = store.task.create({ storyId: story.id, title: "Task", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   return { epic, story, task };
 }
 

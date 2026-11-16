@@ -32,6 +32,7 @@ function seed({ assigned = "atlas", taskStatus = "ready" } = {}) {
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
     executionKind: "manual", assigned,
+    assigneeHarness: assigned ? "test" : null,
   });
   return { epic, story, task };
 }
@@ -50,7 +51,7 @@ test("openGate stamps gate fields + event, and a gate opens exactly once", () =>
 });
 
 test("resumeGate CAS: blocked → ready clears claim + gate, one resume per gate", () => {
-  const { task } = seed({ assigned: "atlas", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "atlas", assigneeHarness: "test", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "release", actor: "herald" });
   const res = store.task.resumeGate({ id: task.id, actor: "operator" });
   assert.equal(res.status, "ready");
@@ -76,7 +77,7 @@ test("update-block stamps gate metadata; leaving blocked clears it", () => {
 });
 
 test("backlog_block with gateType + watcher manifest carries gate fields", async () => {
-  const { task } = seed({ assigned: "builder", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
   const res = await call(
     "backlog_block",
     { taskId: task.id, reason: "waiting on API spec", gateType: "architecture" },
@@ -92,7 +93,7 @@ test("backlog_block with gateType + watcher manifest carries gate fields", async
 });
 
 test("gate rows carry producer-stamped kinds, not inference", () => {
-  const { task } = seed({ assigned: "builder", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "builder" });
   const opened = store.db.prepare("SELECT kind FROM item_events WHERE item_id=? AND to_status='blocked'").get(task.id);
   assert.equal(opened.kind, "gate.opened");
@@ -109,7 +110,7 @@ test("update() entering blocked with gateType stamps gate.opened at write", () =
 });
 
 test("recordGateWaits writes one 24h/72h row per gate, never twice", () => {
-  const { task } = seed({ assigned: "builder", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "builder" });
   assert.deepEqual(store.task.recordGateWaits({}), [], "fresh gate is silent");
   store.db.prepare("UPDATE attempts SET gate_record_json=json_set(COALESCE(gate_record_json, '{}'), '$.openedAt', ?) WHERE item_id=? AND gate_record_json IS NOT NULL").run(Date.now() - 25 * 3600 * 1000, task.id);

@@ -23,7 +23,7 @@ export function createClaimMethods({ core, apis }) {
         const r = db.prepare(`
           UPDATE item_state SET status='in_progress', assignee_harness=?, assignee_agent=?, updated_at=?
            WHERE item_id=? AND status='ready' AND deleted_at IS NULL
-             AND assignee_agent=? AND (assignee_harness=? OR assignee_harness='legacy')
+             AND assignee_agent=? AND assignee_harness=?
         `).run(h, agentId, t, id, agentId, h);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
         const sess = ensureSession({ harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim" });
@@ -50,8 +50,9 @@ export function createClaimMethods({ core, apis }) {
       if (existing.status === "in_progress" && (existing.assigned ?? null) !== next) {
         throw new Error(`${existing.id} is in_progress by ${existing.assigned ?? "nobody"}; wait for release before reassigning`);
       }
+      if (next != null && !harness) throw new Error(`assignment requires a harness: ${id}`);
       const t = now();
-      const h = next == null ? null : (harness ?? "legacy");
+      const h = next == null ? null : harness;
       let status = existing.status;
       if (next == null && status === "ready") status = "backlog";
       else if (next != null && status === "backlog") status = "ready";
@@ -92,7 +93,7 @@ export function createClaimMethods({ core, apis }) {
         const row = apis.item.get(id);
         if (!row || row.status !== "in_progress" || row.assignee_agent !== agentId) return null;
         const session = ensureSession({
-          harness: row.assignee_harness && row.assignee_harness !== "legacy" ? row.assignee_harness : "system",
+          harness: row.assignee_harness ?? "system",
           agentId, externalSessionId: `heartbeat-${id}`, itemId: id, kind: "system",
         });
         createAttempt({ itemId: id, sessionId: session.id, status: "running", claimedAt: t, leaseSeconds: cfg.leaseSeconds });

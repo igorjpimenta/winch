@@ -141,7 +141,7 @@ export function createItemApi({ core }) {
       };
       if (patch.assigned !== undefined) next.assignee_agent = patch.assigned ?? null;
       if (next.assignee_agent == null) next.assignee_harness = null;
-      else if (next.assignee_harness == null) next.assignee_harness = patch.harness ?? "legacy";
+      else if (next.assignee_harness == null) throw new Error(`assignment requires a harness: ${id}`);
       if (patch.status && ITEM_TERMINAL.has(status) && !existing.closed_at) next.closed_at = t;
       if (patch.status && !ITEM_TERMINAL.has(status) && existing.closed_at && patch.closedAt === undefined) next.closed_at = null;
       if ((next.assignee_harness == null) !== (next.assignee_agent == null)) {

@@ -123,7 +123,7 @@ test("drop refuses claimed work and keeps it untouched", async () => {
 
 test("drop cascades to a story's tasks and restore brings them back", async () => {
   const { story, task } = h.seedReadyTask();
-  const second = h.store.task.create({ storyId: story.id, title: "dep", status: "ready", executionKind: "manual", assigned: "atlas" });
+  const second = h.store.task.create({ storyId: story.id, title: "dep", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   const { addDep } = await import("../../../src/deps.js");
   assert.ok(addDep(h.store, second.id, task.id).ok);
   assert.equal((await h.call("backlog_drop", { id: story.id })).details.status, "ok");

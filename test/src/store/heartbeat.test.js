@@ -25,7 +25,7 @@ test("an expired lease requeues the task to its own worker", (t) => {
   const store = makeStore(t);
   const epic = store.epic.create({ title: "E-sweep", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "in_progress" });
-  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker", assigneeHarness: "system" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1000 });
   store.task.sweepExpired({ now: Date.now() + 5000 });
   const after = store.task.get(task.id);

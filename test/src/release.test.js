@@ -34,7 +34,7 @@ test("renderReleaseNotes projects the epic: statuses, acceptance, results, audit
 });
 
 test("renderReleaseNotes surfaces open gates", () => {
-  const t2 = store.task.create({ storyId: story.id, title: "Approve", executionKind: "manual", status: "ready", assigned: "herald" });
+  const t2 = store.task.create({ storyId: story.id, title: "Approve", executionKind: "manual", status: "ready", assigned: "herald", assigneeHarness: "test" });
   store.task.openGate({ id: t2.id, gateType: "release", actor: "herald" });
   const md = renderReleaseNotes(store, epic.id);
   assert.match(md, /## Open gates/);

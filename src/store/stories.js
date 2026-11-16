@@ -10,7 +10,7 @@ export function createStoryApi({ core, apis }) {
         id, kind: "story", parentId: epicId, title, description, acceptance,
         status, size, priority, capabilities,
         assigneeAgent: assigned ?? null,
-        assigneeHarness: assigned ? (assigneeHarness ?? "legacy") : null,
+        assigneeHarness: assigned ? assigneeHarness : null,
         emit: false,
       });
     },

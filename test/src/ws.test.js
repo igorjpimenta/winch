@@ -139,19 +139,19 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
 test("a requeue lists the task so its owner can be woken again", async () => {
   const epic = store.epic.create({ title: "E-req", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S-req", status: "in_progress" });
-  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker" });
-  store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1 });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker", assigneeHarness: "test" });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", sessionKey: "s", watchdogMs: 1 });
   store.task.sweepExpired({ now: Date.now() + 10 });
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
   assert.equal(msg.kind, "task.released");
-  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker" }]);
+  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker", assigneeHarness: "test" }]);
 });
 
 test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
   const epic = store.epic.create({ title: "E", status: "in_progress", createdBy: "atlas" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester", assigneeHarness: "test" });
   store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,kind,actor,note,created_at) VALUES(?,?,?,?,?,?,?)")
     .run(story.id, "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
   const row = store.db.prepare("SELECT * FROM item_events ORDER BY id DESC LIMIT 1").get();
@@ -170,13 +170,13 @@ test("a close carries the work it just made claimable", async () => {
   const epic = store.epic.create({ title: "E", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
-  const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", capabilities: ["verify"] });
+  const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", assigneeHarness: "test", capabilities: ["verify"] });
   const { addDep } = await import("../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
   const { toEventMessage } = await import("../../src/events-ws.js");
   const msg = toEventMessage(store, row);
-  assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder" }]);
+  assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder", assigneeHarness: "test" }]);
 });
 
 test("history and live rows share one envelope", async () => {

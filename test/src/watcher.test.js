@@ -25,6 +25,7 @@ function seed({ assigned = "builder", taskStatus = "ready" } = {}) {
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
     executionKind: "manual", assigned,
+    assigneeHarness: assigned ? "test" : null,
   });
   return { epic, story, task };
 }
@@ -41,7 +42,7 @@ test("empty tick: everything empty — the cron's silent-exit condition", () => 
 });
 
 test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it)", () => {
-  const a = seed({ assigned: "builder" });
+  const a = seed({ assigned: "builder", assigneeHarness: "test" });
   const b = seed({ assigned: null, taskStatus: "backlog" });
   const m = tick(store);
   assert.equal(m.routed.length, 1);
@@ -53,8 +54,8 @@ test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it
 });
 
 test("expired lease is swept back to ready and reported", () => {
-  const { task } = seed({ assigned: "lens", taskStatus: "ready" });
-  store.task.claim({ id: task.id, agentId: "lens" });
+  const { task } = seed({ assigned: "lens", assigneeHarness: "test", taskStatus: "ready" });
+  store.task.claim({ id: task.id, agentId: "lens", harness: "test" });
   store.db.prepare("UPDATE attempts SET claimed_at=1, heartbeat_at=1 WHERE item_id=? AND ended_at IS NULL").run(task.id);
   const m = tick(store);
   assert.deepEqual(m.swept, [task.id]);
@@ -62,7 +63,7 @@ test("expired lease is swept back to ready and reported", () => {
 });
 
 test("blocked tasks appear in blocked, never in claimable sets", () => {
-  const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "lens", assigneeHarness: "test", taskStatus: "in_progress" });
   store.task.update(task.id, { status: "blocked", actor: "lens", note: "blocked: waiting" });
   const m = tick(store);
   assert.deepEqual(m.routed, []);
@@ -73,11 +74,11 @@ test("blocked tasks appear in blocked, never in claimable sets", () => {
 
 // ───────────────────────────────────────────────────── load-aware routing
 test("busy assignee's claimable work defers; free assignee still routes", () => {
-  seed({ assigned: "scout" }); // free agent's claimable task
+  seed({ assigned: "scout", assigneeHarness: "test" }); // free agent's claimable task
   // builder: two in_progress tasks (at the cap) + one claimable
-  const busy = seed({ assigned: "builder", taskStatus: "in_progress" });
-  seed({ assigned: "builder", taskStatus: "in_progress" });
-  seed({ assigned: "builder" });
+  const busy = seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
+  seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
+  seed({ assigned: "builder", assigneeHarness: "test" });
   // second busy task needs its own story/epic — seed() makes one each ✓
   const m = tick(store);
 
@@ -92,8 +93,8 @@ test("busy assignee's claimable work defers; free assignee still routes", () => 
 });
 
 test("agent under the cap still routes", () => {
-  seed({ assigned: "lens", taskStatus: "in_progress" }); // 1 active < 2
-  seed({ assigned: "lens" });
+  seed({ assigned: "lens", assigneeHarness: "test", taskStatus: "in_progress" }); // 1 active < 2
+  seed({ assigned: "lens", assigneeHarness: "test" });
   const m = tick(store);
   assert.equal(m.routed.length, 1);
   assert.equal(m.routed[0].assigned, "lens");
@@ -101,7 +102,7 @@ test("agent under the cap still routes", () => {
 });
 
 test("tick writes gate-waiting rows for stale gates and reports waiting age", () => {
-  const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
+  const { task } = seed({ assigned: "lens", assigneeHarness: "test", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "lens" });
   store.db.prepare("UPDATE attempts SET gate_record_json=json_set(COALESCE(gate_record_json, '{}'), '$.openedAt', ?) WHERE item_id=? AND gate_record_json IS NOT NULL").run(Date.now() - 25 * 3600 * 1000, task.id);
   const u = seed({ assigned: null, taskStatus: "backlog" });

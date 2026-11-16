@@ -42,7 +42,7 @@ export function readyTasks(store, opts = {}) {
     if (agentId) {
       if (task.assignee_agent !== agentId) continue;
       // Legacy assignments carry the wildcard harness; new ones name it.
-      if (harness && task.assignee_harness !== "legacy" && task.assignee_harness !== harness) continue;
+      if (harness && task.assignee_harness !== harness) continue;
     }
     const required = effectiveCaps(task, story);
     if (!ignoreCapabilities && !capMatch(required, capabilities)) continue;

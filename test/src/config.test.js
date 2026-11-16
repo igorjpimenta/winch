@@ -22,7 +22,7 @@ function tempStore(t, config) {
 function seed(store) {
   const epic = store.epic.create({ title: "E", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
-  return store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas" });
+  return store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas", assigneeHarness: "system" });
 }
 
 test("resolveConfig with nothing declared returns the documented defaults", () => {
@@ -88,7 +88,7 @@ test("per-call meta tunes a single tool call without touching the server", async
   const { handle } = createToolHandlers(store, null);
   const epic = store.epic.create({ title: "E", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
-  const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas" });
+  const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas", assigneeHarness: "system" });
   store.task.claim({ id: task.id, agentId: "atlas" });
   const id = { harness: "test", agent: "atlas", session: "s-1" };
   const long = "x".repeat(100);

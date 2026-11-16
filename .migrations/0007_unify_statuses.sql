@@ -17,10 +17,15 @@ CREATE TABLE `__new_item_state` (
 );
 --> statement-breakpoint
 INSERT INTO `__new_item_state`("item_id", "revision", "status", "state_json", "assignee_harness", "assignee_agent", "updated_at", "closed_at", "deleted_at") SELECT "item_id", "revision", CASE
+    WHEN "assignee_harness" = 'legacy' THEN CASE WHEN "status" IN ('done', 'cancelled') THEN "status" ELSE 'backlog' END
+    WHEN "assignee_harness" IS NULL AND "status" NOT IN ('backlog', 'done', 'cancelled') THEN 'backlog'
     WHEN "status" IN ('todo', 'planned') AND "assignee_harness" IS NOT NULL AND "assignee_agent" IS NOT NULL THEN 'ready'
     WHEN "status" IN ('todo', 'planned', 'idea') THEN 'backlog'
     WHEN "status" = 'ready' AND ("assignee_harness" IS NULL OR "assignee_agent" IS NULL) THEN 'backlog'
-    ELSE "status" END, "state_json", "assignee_harness", "assignee_agent", "updated_at", "closed_at", "deleted_at" FROM `item_state`;--> statement-breakpoint
+    ELSE "status" END, "state_json",
+    CASE WHEN "assignee_harness" = 'legacy' THEN NULL ELSE "assignee_harness" END,
+    CASE WHEN "assignee_harness" = 'legacy' THEN NULL ELSE "assignee_agent" END,
+    "updated_at", "closed_at", "deleted_at" FROM `item_state`;--> statement-breakpoint
 DROP TABLE `item_state`;--> statement-breakpoint
 ALTER TABLE `__new_item_state` RENAME TO `item_state`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint

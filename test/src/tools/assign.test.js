@@ -17,7 +17,7 @@ const WORKER = { harness: "openclaw", agent: "tester", session: "s2" };
 function seed({ status = "backlog", assigned = null } = {}) {
   const epic = store.epic.create({ title: "E", status: "in_progress" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
-  return store.task.create({ storyId: story.id, title: "T", status, assigned });
+  return store.task.create({ storyId: story.id, title: "T", status, assigned, assigneeHarness: assigned ? "openclaw" : null });
 }
 
 beforeEach(() => {

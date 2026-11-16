@@ -119,7 +119,7 @@ export function toEventMessage(store, row) {
     // `todo` remains here for pre-standardization rows.
     unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "ready" || row.to_status === "todo"
       ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent).slice(0, 20)
-          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent }))
+          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent, assigneeHarness: r.task.assignee_harness }))
       : [],
     task: task
       ? {

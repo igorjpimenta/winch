@@ -19,7 +19,7 @@ export function createTaskApi({ core, apis }) {
         status, executionKind: executionKind ?? "manual",
         executionArgs, capabilities,
         assigneeAgent: assigned ?? null,
-        assigneeHarness: assigned ? (assigneeHarness ?? "legacy") : null,
+        assigneeHarness: assigned ? assigneeHarness : null,
         emit: true, note: "task created",
       });
     },
@@ -90,7 +90,7 @@ export function createTaskApi({ core, apis }) {
       if (patch.assigned !== undefined && patch.assignee_harness === undefined) {
         assigneeHarness = patch.assigned == null
           ? null
-          : (patch.harness ?? parsed?.harness ?? existing.assignee_harness ?? "legacy");
+          : (patch.harness ?? parsed?.harness ?? existing.assignee_harness);
       }
       const row = apis.item.update(id, {
         status: patch.status,
