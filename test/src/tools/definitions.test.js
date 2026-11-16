@@ -5,10 +5,10 @@ import { TOOL_DEFS } from "../../../src/tools/definitions.js";
 
 const byName = new Map(TOOL_DEFS.map((d) => [d.name, d]));
 
-test("the surface is exactly the eleven tools", () => {
+test("the surface is exactly the twelve tools", () => {
   assert.deepEqual([...byName.keys()].sort(), [
     "backlog_append", "backlog_assign", "backlog_block", "backlog_claim", "backlog_done",
-    "backlog_drop", "backlog_get", "backlog_plan", "backlog_restore", "backlog_resume", "backlog_update",
+    "backlog_drop", "backlog_get", "backlog_plan", "backlog_report_usage", "backlog_restore", "backlog_resume", "backlog_update",
   ]);
   assert.equal(byName.size, TOOL_DEFS.length, "names are unique");
 });
