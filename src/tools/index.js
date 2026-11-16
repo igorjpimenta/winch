@@ -33,6 +33,23 @@ export function createToolHandlers(store, logger) {
   async function handle(name, args, identity, meta = null) {
     assertCleanTriple(identity, `caller identity for ${name}`);
     const cfg = resolveRequestConfig(baseConfig, meta);
+    // Implicit session bind (option C): an item-touching call rebinds the
+    // session to that item, so usage pushed later over WebSocket attributes
+    // to the last-touched item.
+    try {
+      const fromArgs = (typeof args?.taskId === "string" || typeof args?.task_id === "string" ||
+        typeof args?.id === "string" || typeof args?.epicId === "string" ||
+        typeof args?.epic_id === "string" || typeof args?.storyId === "string" ||
+        typeof args?.story_id === "string");
+      const itemId = fromArgs
+        ? (args?.taskId ?? args?.task_id ?? args?.id ?? args?.epicId ?? args?.epic_id ?? args?.storyId ?? args?.story_id)
+        : null;
+      if (fromArgs && itemId) {
+        store.session.ensure({ harness: identity.harness, agentId: identity.agent, externalSessionId: identity.session, itemId, kind: "claim" });
+      }
+    } catch (e) {
+      logger?.warn?.(`winch: session bind failed: ${e?.message}`);
+    }
     const fn = handlers[name];
     if (!fn) return err(`unknown tool: ${name}`, "unknown_tool");
     return fn(args, identity, cfg);

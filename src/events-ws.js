@@ -214,14 +214,51 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
           len = buf.readUInt32BE(6);
           off = 10;
         }
-        if (buf[1] & 0x80) off += 4;
+        const masked = !!(buf[1] & 0x80);
+        let maskKey = null;
+        if (masked) {
+          if (buf.length < off + 4) return;
+          maskKey = buf.slice(off, off + 4);
+          off += 4;
+        }
         if (buf.length < off + len) return;
+        let payload = buf.slice(off, off + len);
+        if (masked && maskKey) {
+          const out = Buffer.alloc(len);
+          for (let i = 0; i < len; i++) out[i] = payload[i] ^ maskKey[i % 4];
+          payload = out;
+        }
         buf = buf.slice(off + len);
         if (opcode === 0x8) {
           socket.destroy();
           return;
         }
-        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
+        if (opcode === 0x9) { socket.write(Buffer.from([0x8a, 0x00])); return; }
+        if (opcode === 0x1) {
+          // Inbound usage frames: { type: "usage", sessionKey, usage }
+          try {
+            const msg = JSON.parse(payload.toString("utf8"));
+            if (msg && msg.type === "usage" && msg.sessionKey && msg.usage) {
+              const sess = store.db.prepare("SELECT item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?").get(msg.sessionKey);
+              if (sess) {
+                let itemKind = null;
+                const it = store.item.get(sess.item_id);
+                if (it) itemKind = it.kind;
+                store.usage.record({
+                  harness: sess.harness,
+                  agent: sess.agent_id,
+                  session: sess.external_session_id,
+                  itemId: sess.item_id,
+                  itemKind,
+                  usage: msg.usage,
+                  source: "ws",
+                });
+              }
+            }
+          } catch (e) {
+            logger?.warn?.(`winch: bad ws frame: ${e?.message}`);
+          }
+        }
       }
     });
     const drop = () => clients.delete(socket);
