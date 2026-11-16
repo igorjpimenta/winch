@@ -43,29 +43,29 @@ test("done records the result, artifacts and the session", async () => {
 });
 
 test("reopening and closing the epic again writes a second marker", async () => {
-  const epic = h.store.epic.create({ title: "E-epic", status: "planned" });
-  const story = h.store.story.create({ epicId: epic.id, title: "S-epic", status: "ready" });
-  const t1 = h.store.task.create({ storyId: story.id, title: "one", status: "in_progress", executionKind: "manual", assigned: "atlas" });
-  const t2 = h.store.task.create({ storyId: story.id, title: "two", status: "in_progress", executionKind: "manual", assigned: "atlas" });
+  const epic = h.store.epic.create({ title: "E-epic", status: "in_progress" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-epic", status: "in_progress" });
+  const t1 = h.store.task.create({ storyId: story.id, title: "one", status: "in_progress", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
+  const t2 = h.store.task.create({ storyId: story.id, title: "two", status: "in_progress", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   await h.call("backlog_done", { taskId: t1.id, resultSummary: "one done" });
   assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 0);
   await h.call("backlog_done", { taskId: t2.id, resultSummary: "two done" });
   assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
   // A review finding reopens the epic; the next close is a new cycle.
-  const t3 = h.store.task.create({ storyId: story.id, title: "three", status: "in_progress", executionKind: "manual", assigned: "atlas" });
+  const t3 = h.store.task.create({ storyId: story.id, title: "three", status: "in_progress", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   h.store.epic.update(epic.id, { status: "in_progress" });
-  h.store.story.update(story.id, { status: "ready" });
+  h.store.story.update(story.id, { status: "in_progress" });
   await h.call("backlog_done", { taskId: t3.id, resultSummary: "fix" });
   assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 2);
 });
 
 test("a story closes with its last task and records the transition", async () => {
-  const epic = h.store.epic.create({ title: "E-story-close", status: "planned" });
-  const story = h.store.story.create({ epicId: epic.id, title: "S-close", status: "ready" });
-  const a = h.store.task.create({ storyId: story.id, title: "a", status: "in_progress", executionKind: "manual", assigned: "atlas" });
-  const b = h.store.task.create({ storyId: story.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  const epic = h.store.epic.create({ title: "E-story-close", status: "in_progress" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-close", status: "in_progress" });
+  const a = h.store.task.create({ storyId: story.id, title: "a", status: "in_progress", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
+  const b = h.store.task.create({ storyId: story.id, title: "b", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   await h.call("backlog_done", { taskId: a.id, resultSummary: "a done" });
-  assert.equal(h.store.story.get(story.id).status, "ready");
+  assert.equal(h.store.story.get(story.id).status, "in_progress");
   await h.call("backlog_claim", { taskId: b.id });
   await h.call("backlog_done", { taskId: b.id, resultSummary: "b done" });
   assert.equal(h.store.story.get(story.id).status, "done");
@@ -75,11 +75,11 @@ test("a story closes with its last task and records the transition", async () =>
 });
 
 test("the epic closes only when its last story does", async () => {
-  const epic = h.store.epic.create({ title: "E-two", status: "planned" });
-  const s1 = h.store.story.create({ epicId: epic.id, title: "s1", status: "ready" });
-  const s2 = h.store.story.create({ epicId: epic.id, title: "s2", status: "ready" });
-  const a = h.store.task.create({ storyId: s1.id, title: "a", status: "todo", executionKind: "manual", assigned: "atlas" });
-  const b = h.store.task.create({ storyId: s2.id, title: "b", status: "todo", executionKind: "manual", assigned: "atlas" });
+  const epic = h.store.epic.create({ title: "E-two", status: "in_progress" });
+  const s1 = h.store.story.create({ epicId: epic.id, title: "s1", status: "in_progress" });
+  const s2 = h.store.story.create({ epicId: epic.id, title: "s2", status: "in_progress" });
+  const a = h.store.task.create({ storyId: s1.id, title: "a", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
+  const b = h.store.task.create({ storyId: s2.id, title: "b", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   for (const t of [a, b]) {
     await h.call("backlog_claim", { taskId: t.id });
     await h.call("backlog_done", { taskId: t.id, resultSummary: "done" });
@@ -90,12 +90,17 @@ test("the epic closes only when its last story does", async () => {
 
 test("block records a reason and an optional dependency", async () => {
   const { task } = h.seedReadyTask();
-  const blocker = h.store.task.create({ storyId: task.story_id, title: "blocker", status: "todo", executionKind: "manual" });
+  const blocker = h.store.task.create({ storyId: task.story_id, title: "blocker", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   const res = await h.call("backlog_block", { taskId: task.id, reason: "waiting", blockedBy: { kind: "task", id: blocker.id } });
   assert.equal(res.details.status, "ok");
   assert.equal(h.store.task.get(task.id).status, "blocked");
   assert.equal(res.details.dep, "added");
   assert.equal(h.store.dep.listOutgoing(task.id)[0].to_id, blocker.id);
+  assert.equal(h.store.task.get(task.id).state_json.wait.kind, "deps");
+
+  h.store.task.update(blocker.id, { status: "done" });
+  assert.deepEqual(h.store.task.resumeDependencyWaits(), [task.id]);
+  assert.equal(h.store.task.get(task.id).status, "ready");
 });
 
 test("block refuses a task assigned to another agent", async () => {
@@ -114,6 +119,6 @@ test("gate type opens through openGate and resume accepts only the caller", asyn
   assert.equal(mismatch.details.reason, "actor_mismatch");
   const resumed = await h.call("backlog_resume", { taskId: task.id });
   assert.equal(resumed.details.status, "ok");
-  assert.equal(h.store.task.get(task.id).status, "todo");
+  assert.equal(h.store.task.get(task.id).status, "ready");
   assert.equal((await h.call("backlog_resume", { taskId: task.id })).details.reason, "not_resumable");
 });

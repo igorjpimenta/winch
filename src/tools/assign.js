@@ -2,7 +2,8 @@
 //
 // The tool still takes only `agent`. The harness is not a parameter: it is
 // stamped from the caller's declared transport identity, so an assignment can
-// never name an agent without saying which harness it belongs to.
+// never name an agent without saying which harness it belongs to. The reserved
+// agent `human` gets the reserved harness `human_in_the_loop` instead.
 import { ok, err } from "./shared.js";
 
 export function createAssignTools({ store, logger }) {

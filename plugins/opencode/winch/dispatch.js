@@ -27,7 +27,7 @@ export function wakeFor(ev, { planner = null } = {}) {
   if (!id) return null;
   switch (ev.kind) {
     case "task.assigned": {
-      if (ev.item?.status && ev.item.status !== "todo") return null;
+      if (ev.item?.status && ev.item.status !== "ready") return null;
       const agent = ev.item?.assigned ?? ev.task?.assignee ?? null;
       if (!agent || agent === planner) return null;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
@@ -39,13 +39,13 @@ export function wakeFor(ev, { planner = null } = {}) {
       return { agent, sessionKey: `winch-story-${id}`, message: id, kind: "story" };
     }
     case "task.restored": {
-      if (ev.item?.status && ev.item.status !== "todo") return null;
+      if (ev.item?.status && ev.item.status !== "ready") return null;
       const agent = ev.item?.assigned ?? null;
       if (!agent || agent === planner) return null;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
     }
     case "task.appended": {
-      if (ev.item?.status && ev.item.status !== "todo") return null;
+      if (ev.item?.status && ev.item.status !== "ready") return null;
       const agent = ev.epicCreatedBy ?? planner ?? null;
       if (!agent) return null;
       return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "append" };

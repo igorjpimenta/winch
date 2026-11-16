@@ -184,6 +184,7 @@ webhook and prompts the claiming session through the OpenCode SDK.
 | `backlog_append` | add stories to an epic and/or tasks to a story after the plan, unassigned, for the planner to route |
 | `backlog_drop` / `backlog_restore` | disable an epic, story or task that was never claimed, and bring it back; claimed work can only be closed |
 | `backlog_assign` | set an assignee on a task (it claims and delivers) or a story (its owner breaks it into tasks); that row is what wakes the assignee. Null/empty agents are rejected loudly |
+| `backlog_delegate` | split work from a task to another worker (agent or human); the child becomes its own card, the parent parks in `blocked` until the child closes, then returns to `ready` for the accountable |
 | `backlog_get` | read an epic, story or task by id - acceptance, results, artifacts, dependencies, readiness |
 | `backlog_claim` | claim one task by id, or the highest-priority ready task when the id is omitted; atomic CAS under a lease |
 | `backlog_update` | heartbeat and append progress, comment or artifact to a claimed task |
@@ -192,18 +193,32 @@ webhook and prompts the claiming session through the OpenCode SDK.
 
 ## Task lifecycle
 
-A task moves from `todo` through a claim to `done`. A block parks it until an
-operator resumes it; the last task closes its story, and the last story closes
-the epic.
+A task starts in `backlog`. Assignment moves it to `ready`; clearing the
+assignment returns it to `backlog`, so only an assigned task can be claimed.
+Delegating creates a child task for the worker, parks the parent in `blocked`
+on that dependency, and returns the parent to `ready` when the child closes.
+`backlog_block` with `blockedBy` uses the same dependency wait; a plain block
+still needs `backlog_resume`.
+Assigning the reserved agent `human` stamps the reserved harness
+`human_in_the_loop`: the pair keeps `ready`/`in_progress` semantics for human
+work, but neither value is a caller identity, and agent dispatchers never wake
+it. A block parks it until an operator resumes it; the last task closes its
+story, and the last story closes the epic.
 
 ```mermaid
 flowchart LR
-  A[todo] -->|claim by id or next| B[in_progress]
+  Z[backlog] -->|assign| A[ready]
+  A -->|unassign| Z
+  A -->|claim by id or next| B[in_progress]
   B -->|heartbeat / update| B
   B -->|lease expires| A
   B -->|done| C[done]
   B -->|block| D[blocked]
-  D -->|resume| A
+  A -->|delegate| G[child task for worker]
+  B -->|delegate| G
+  G -->|parent waits| D
+  D -->|manual resume| A
+  D -->|deps resolve| A
   C -->|last task| E[story done]
   E -->|last story| F[epic done]
 ```
@@ -227,7 +242,7 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `serve --mcp stdio` | serve the backlog tools over MCP stdio (env-only harness) |
 | `serve --mcp http --port N [--host H]` | serve the same tools over Streamable HTTP (shared daemon) |
 | `watch` | one watcher tick (JSON manifest on stdout) |
-| `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to todo |
+| `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to ready |
 | `next` | list the current ready queue |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers |
 | `merge-detect [--dry-run]` | apply merged/closed PR outcomes |
@@ -367,9 +382,10 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | "refused caller identity (unresolved agent and session)" | No `_meta.winch` and no `winch_agent`/`winch_session` args | Ensure the companion plugin is installed and stamping; for OpenCode set `WINCH_AGENT` |
 | "halves in different channels - pairs never splice" | Agent from one channel, session from another | Stamp both in the same channel (`_meta.winch` or flat args) |
 | "refused declaration (missing: harness)" | `WINCH_HARNESS` unset on stdio, or `X-Winch-Harness` missing on HTTP | Set the env var or add the header |
-| "refused declaration (reserved: harness)" | Harness name is `unknown` or `instance:*` | Use a real harness name |
+| "refused declaration (reserved: harness)" | Harness name is `unknown`, `instance:*`, or `human_in_the_loop` | Use a real harness name |
+| "refused caller identity" with a reserved agent | Agent is `human`, the human-assignment sentinel | Use a real agent name; `human` is a target, not a caller |
 | "not found: ITM-..." | Item id does not exist | Check the id; tasks may have been dropped or never created |
-| "is in_progress, not todo" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
+| "is in_progress, not ready" | Task already claimed | Wait for completion or reassign via `backlog_assign` |
 | "not_ready" on claim | Unmet dependency or capability mismatch | Check deps with `backlog_get`; offer matching capabilities |
 
 ## Why the name?

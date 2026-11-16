@@ -16,8 +16,8 @@ function makeStore(t) {
 
 test("a task can split into subtasks without a schema change", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const task = store.task.create({ storyId: story.id, title: "T" });
   const sub = store.task.create({ storyId: task.id, title: "sub" });
   assert.equal(store.item.get(sub.id).parent_id, task.id);
@@ -40,9 +40,9 @@ test("ids are opaque: kind comes from the row", (t) => {
 
 test("claim/release/claim keeps every attempt and one live row", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "T" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "a", assigneeHarness: "test" });
   const first = store.task.claim({ id: task.id, agentId: "a", harness: "test", session: "s1" });
   assert.equal(first.status, "in_progress");
   assert.equal(store.attempt.list({ itemId: task.id, live: true }).length, 1);
@@ -56,9 +56,9 @@ test("claim/release/claim keeps every attempt and one live row", (t) => {
 
 test("generated columns project the JSON and lease without a second write", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "T" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "a", assigneeHarness: "test" });
   store.task.claim({ id: task.id, agentId: "a", harness: "test", session: "s1", watchdogMs: 60_000 });
   store.task.update(task.id, { status: "done", result_summary: "shipped", actor: "a" });
   const [attempt] = store.attempt.list({ itemId: task.id });

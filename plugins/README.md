@@ -169,7 +169,7 @@ The opencode companion ships the same event-driven dispatcher as openclaw
 `ws://127.0.0.1:38291`), replays history on connect, and routes each row by
 kind:
 
-- `task.assigned` → assignee (if todo)
+- `task.assigned` → assignee (if ready)
 - `story.assigned` → story owner (break down)
 - `task.appended` → epic creator (route new work)
 - `task.restored` → existing assignee

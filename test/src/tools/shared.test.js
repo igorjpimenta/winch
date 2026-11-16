@@ -20,9 +20,9 @@ afterEach(() => {
 });
 
 function seed() {
-  const epic = store.epic.create({ title: "Epic", acceptance: "EP-AC", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "Story", acceptance: "STORY-AC", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "Task", status: "todo", executionKind: "manual" });
+  const epic = store.epic.create({ title: "Epic", acceptance: "EP-AC", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "Story", acceptance: "STORY-AC", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "Task", status: "ready", executionKind: "manual", assigned: "atlas", assigneeHarness: "test" });
   return { epic, story, task };
 }
 
@@ -40,7 +40,7 @@ test("clampNote keeps short notes and truncates long ones", () => {
 test("collectStoryArtifacts reads artifact events and done summaries, deduped", () => {
   const { epic, story, task } = seed();
   store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,actor,note,created_at) VALUES(?,?,?,?,?,?)")
-    .run(task.id, "todo", "todo", "atlas", "artifact: https://example.test/a", Date.now());
+    .run(task.id, "ready", "ready", "atlas", "artifact: https://example.test/a", Date.now());
   store.task.update(task.id, { status: "done", result_summary: "done\n\nartifacts: https://example.test/b, https://example.test/a" });
   const artifacts = collectStoryArtifacts(store, story.id).sort();
   assert.deepEqual(artifacts, ["https://example.test/a", "https://example.test/b"]);

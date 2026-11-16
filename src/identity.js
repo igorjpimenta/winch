@@ -11,13 +11,17 @@
 // an unstamped call refuses execution. A key that cannot say which harness
 // and which of its calls it belongs to would poison claims.
 
+import { isReservedLayer } from "./reserved.js";
+
 // A usable layer names something: non-empty, and neither of the two tokens
-// no key may carry ("unknown", "instance:*").
-function isUsableLayer(v) {
+// no key may carry ("unknown", "instance:*"). Assignment sentinels are
+// reserved targets, so a caller can never mint a key from one either.
+function isUsableLayer(layer, v) {
   return (
     typeof v === "string" &&
     v.trim() !== "" &&
-    !/^(unknown|instance:.*)$/i.test(v.trim())
+    !/^(unknown|instance:.*)$/i.test(v.trim()) &&
+    !isReservedLayer(layer, v)
   );
 }
 
@@ -25,7 +29,7 @@ function isUsableLayer(v) {
  * declaration (construction), resolved identity (per request), caller
  * identity (direct tool entry), session key (the mint itself). */
 export function assertCleanTriple(id, who = "identity") {
-  const bad = ["harness", "agent", "session"].filter((k) => !isUsableLayer(id?.[k]));
+  const bad = ["harness", "agent", "session"].filter((k) => !isUsableLayer(k, id?.[k]));
   if (bad.length > 0) {
     throw new Error(`winch: refused ${who} (bad layers: ${bad.join(", ")}). Provide real harness/agent/session values.`);
   }
@@ -47,7 +51,7 @@ export function assertDeclaration(base) {
         "Agent and session are never declared: they arrive per call."
     );
   }
-  if (/^(unknown|instance:.*)$/i.test(h)) {
+  if (/^(unknown|instance:.*)$/i.test(h) || isReservedLayer("harness", h)) {
     throw new Error(
       `winch: refused declaration (reserved: harness). ` +
         `"${h}" cannot identify a consumer — declare the real harness name.`
@@ -77,10 +81,10 @@ export function resolveIdentity({ meta, args, base }) {
   const declared = assertDeclaration(base);
   const m = meta?.winch ?? meta ?? null;
   const am = args?._meta?.winch ?? null;
-  const usable = (v) => (isUsableLayer(v) ? String(v).trim() : null);
-  const mAgent = usable(m?.agent), mSession = usable(m?.session);
-  const amAgent = usable(am?.agent), amSession = usable(am?.session);
-  const aAgent = usable(args?.winch_agent), aSession = usable(args?.winch_session);
+  const usable = (layer, v) => (isUsableLayer(layer, v) ? String(v).trim() : null);
+  const mAgent = usable("agent", m?.agent), mSession = usable("session", m?.session);
+  const amAgent = usable("agent", am?.agent), amSession = usable("session", am?.session);
+  const aAgent = usable("agent", args?.winch_agent), aSession = usable("session", args?.winch_session);
   // Whole pairs only: a meta half never splices with an args half, so no
   // call can assemble an identity across trust channels.
   const pair = (mAgent && mSession)

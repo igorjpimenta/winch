@@ -9,7 +9,7 @@ test("heartbeat advances last_heartbeat only for the assigned in_progress agent"
   const store = makeStore(t);
   const { task } = seedHierarchy(store);
 
-  assert.equal(store.task.heartbeat(task.id, "agent-a"), null, "todo task cannot heartbeat");
+  assert.equal(store.task.heartbeat(task.id, "agent-a"), null, "ready task cannot heartbeat");
 
   const claimed = store.task.claim({ id: task.id, agentId: "agent-a" });
   const beat = store.task.heartbeat(task.id, "agent-a");
@@ -23,13 +23,13 @@ test("heartbeat advances last_heartbeat only for the assigned in_progress agent"
 
 test("an expired lease requeues the task to its own worker", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E-sweep", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "t", status: "todo", executionKind: "manual", assigned: "worker" });
+  const epic = store.epic.create({ title: "E-sweep", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker", assigneeHarness: "system" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1000 });
   store.task.sweepExpired({ now: Date.now() + 5000 });
   const after = store.task.get(task.id);
-  assert.equal(after.status, "todo");
+  assert.equal(after.status, "ready");
   assert.equal(after.assigned, "worker", "the owner is kept so a dispatcher can re-wake it");
   assert.equal(after.attempt_count, 1);
 });

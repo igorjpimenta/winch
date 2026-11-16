@@ -46,7 +46,7 @@ const USAGE = `usage: winch <command>
                                       (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
   serve --ws --port N [--host H]         stream store events over WebSocket
   watch                                  one watcher tick (JSON manifest on stdout)
-  resume <taskId> [--actor <name>]       resolve a human gate: blocked → todo
+  resume <taskId> [--actor <name>]       resolve a human gate: blocked → ready
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes

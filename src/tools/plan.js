@@ -39,7 +39,7 @@ export function createPlanTools({ store, logger }) {
           title: epicIn.title,
           description: epicIn.description,
           acceptance: epicIn.acceptance,
-          status: "planned",
+          status: "backlog",
           priority: epicIn.priority ?? 50,
           createdBy: identity.agent,
         });
@@ -51,7 +51,7 @@ export function createPlanTools({ store, logger }) {
             title: s.title,
             description: s.description,
             acceptance: s.acceptance,
-            status: "ready",
+            status: "backlog",
             priority: s.priority ?? epic.priority,
             capabilities: s.capabilities,
           });
@@ -62,7 +62,7 @@ export function createPlanTools({ store, logger }) {
               storyId: story.id,
               title: t.title,
               description: t.description,
-              status: "todo",
+              status: "backlog",
               executionKind: t.executionKind ?? "manual",
               executionArgs: t.executionArgs,
               capabilities: t.capabilities ?? s.capabilities,
@@ -113,7 +113,7 @@ export function createPlanTools({ store, logger }) {
         store.epic.update(epic.id, { status: "in_progress" });
       }
       if (story && (story.status === "done" || story.status === "cancelled")) {
-        store.story.update(story.id, { status: "ready" });
+        store.story.update(story.id, { status: story.assignee_agent ? "ready" : "backlog" });
       }
       const created = { stories: [], tasks: [] };
       const idByKey = new Map();
@@ -126,7 +126,7 @@ export function createPlanTools({ store, logger }) {
             title: st.title,
             description: st.description,
             acceptance: st.acceptance,
-            status: "ready",
+            status: "backlog",
             priority: st.priority ?? epic.priority,
             capabilities: st.capabilities,
           });
@@ -153,7 +153,7 @@ export function createPlanTools({ store, logger }) {
             storyId,
             title: t.title,
             description: t.description,
-            status: "todo",
+            status: "backlog",
             executionKind: t.executionKind ?? "manual",
             executionArgs: t.executionArgs,
             capabilities: t.capabilities ?? parent?.capabilities,
@@ -161,7 +161,7 @@ export function createPlanTools({ store, logger }) {
             assigneeHarness: t.assigned ? identity.harness : null,
           });
           entry.task = row;
-          created.tasks.push({ id: row.id, key, title: row.title, storyId, assigned: row.assignee_agent });
+          created.tasks.push({ id: row.id, key, title: row.title, storyId, status: row.status, assigned: row.assignee_agent });
         }
         for (const [key, entry] of idByKey) {
           for (const dep of entry.deferred.t.dependsOn ?? []) {
@@ -175,7 +175,7 @@ export function createPlanTools({ store, logger }) {
         // task.created (from plan) stays planner noise.
         for (const t of created.tasks) {
           store.event.append({
-            itemId: t.id, fromStatus: "todo", toStatus: "todo", kind: "task.appended",
+            itemId: t.id, fromStatus: t.status, toStatus: t.status, kind: "task.appended",
             actor, note: t.title.slice(0, 120),
           });
         }
@@ -207,7 +207,7 @@ export function createPlanTools({ store, logger }) {
       const tasks = tree.filter((r) => r.kind === "task");
       // Dropping is reversible, but it must never hide work someone has done:
       // the guard covers every descendant, not just the row named in the call.
-      const claimed = tasks.filter((t) => t.attempt_count > 0 || (t.status !== "todo" && t.status !== "cancelled"));
+      const claimed = tasks.filter((t) => t.attempt_count > 0 || (t.status !== "backlog" && t.status !== "ready" && t.status !== "cancelled"));
       if (claimed.length > 0) {
         return err(
           `${id} cannot be dropped: ${claimed.length} task(s) under it were already claimed (${claimed.map((t) => t.id).join(", ")}).`,
@@ -218,6 +218,7 @@ export function createPlanTools({ store, logger }) {
       try {
         const actor = `${identity.harness}:${identity.agent}`;
         const result = store.item.drop(id, { reason: args?.reason ?? null, actor });
+        store.task.resumeDependencyWaits();
         logger?.info?.(`backlog: ${actor} dropped ${id} (${tasks.length} task(s), soft)`);
         return ok(JSON.stringify({ ok: true, dropped: { kind, id, reversible: true }, tasks: tasks.map((t) => t.id) }), {
           status: "ok", agentId: identity.agent, level: kind, id,

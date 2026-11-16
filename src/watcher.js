@@ -11,6 +11,7 @@
 // cron message's decision, not the script's.
 
 import { pathToFileURL } from "node:url";
+import { HUMAN_AGENT } from "./reserved.js";
 import { createStore } from "./store/index.js";
 import { readyTasks } from "./ready-queue.js";
 
@@ -20,17 +21,20 @@ import { readyTasks } from "./ready-queue.js";
 export const MAX_ACTIVE_PER_AGENT = 2;
 
 /**
- * @returns {{ts:number, swept:string[], waits:object[], routed:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
+ * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
  *   swept    — lease-expired tasks the sweep requeued or escalated this tick
+ *   resolved — dependency-wait tasks returned to ready this tick
  *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
  *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
+ *   human    — claimable human work: ready for a person, never woken through an agent harness
  *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
- *   unrouted — claimable but unassigned, each with idleMs since last activity: heartbeat polls own these, never woken
+ *   unrouted — always empty while ready requires an assignment; kept for manifest compatibility
  */
 export function tick(store, { config: override = null } = {}) {
   const cfg = override ?? store.config;
   const nowTs = Date.now();
   const swept = store.task.sweepExpired({});
+  const resolved = store.task.resumeDependencyWaits({ at: nowTs });
   const waits = store.task.recordGateWaits({ now: nowTs });
   const claimable = readyTasks(store, { limit: cfg.scanLimit }).map((r) => ({
     taskId: r.task.id,
@@ -60,11 +64,12 @@ export function tick(store, { config: override = null } = {}) {
     if (!t.assignee_agent) continue;
     active.set(t.assignee_agent, (active.get(t.assignee_agent) ?? 0) + 1);
   }
+  const human = claimable.filter((c) => c.assigned === HUMAN_AGENT);
   const routed = claimable.filter(
-    (c) => c.assigned && (active.get(c.assigned) ?? 0) < cfg.maxActivePerAgent
+    (c) => c.assigned && c.assigned !== HUMAN_AGENT && (active.get(c.assigned) ?? 0) < cfg.maxActivePerAgent
   );
   const deferred = claimable
-    .filter((c) => c.assigned && (active.get(c.assigned) ?? 0) >= cfg.maxActivePerAgent)
+    .filter((c) => c.assigned && c.assigned !== HUMAN_AGENT && (active.get(c.assigned) ?? 0) >= cfg.maxActivePerAgent)
     .map((c) => ({ ...c, activeCount: active.get(c.assigned) }));
   const unrouted = claimable
     .filter((c) => !c.assigned)
@@ -78,8 +83,10 @@ export function tick(store, { config: override = null } = {}) {
   return {
     ts: nowTs,
     swept: swept.map((t) => t.id),
+    resolved,
     waits,
     routed,
+    human,
     deferred,
     unrouted,
     blocked,

@@ -48,7 +48,7 @@ test("history replay does not wake anyone for work that already moved", () => {
   assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "in_progress", assigned: "builder" } }), null);
   assert.equal(wakeFor({ kind: "task.appended", item: { id: "TASK-1", status: "cancelled" } }), null);
   assert.equal(wakeFor({ kind: "story.assigned", item: { id: "STORY-1", status: "done", assigned: "tester" } }), null);
-  assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "todo", assigned: "builder" } }).agent, "builder");
+  assert.equal(wakeFor({ kind: "task.assigned", item: { id: "TASK-1", status: "ready", assigned: "builder" } }).agent, "builder");
 });
 
 test("a close wakes the work it made claimable", () => {
@@ -84,11 +84,11 @@ test("a row that routed nothing is retried on the next replay", () => {
 });
 
 test("a restored task wakes the assignee it already had", () => {
-  const route = wakeFor({ kind: "task.restored", item: { id: "TASK-4", kind: "task", status: "todo", assigned: "builder" } });
+  const route = wakeFor({ kind: "task.restored", item: { id: "TASK-4", kind: "task", status: "ready", assigned: "builder" } });
   assert.equal(route.agent, "builder");
   assert.equal(route.sessionKey, "winch-task-TASK-4");
   assert.equal(wakeFor({ kind: "task.restored", item: { id: "TASK-4", status: "cancelled", assigned: "builder" } }), null);
-  assert.equal(wakeFor({ kind: "task.restored", item: { id: "TASK-4", status: "todo", assigned: null } }), null);
+  assert.equal(wakeFor({ kind: "task.restored", item: { id: "TASK-4", status: "ready", assigned: null } }), null);
 });
 
 test("unroutable rows are ignored", () => {

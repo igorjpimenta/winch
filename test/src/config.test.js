@@ -20,9 +20,9 @@ function tempStore(t, config) {
 }
 
 function seed(store) {
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  return store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  return store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas", assigneeHarness: "system" });
 }
 
 test("resolveConfig with nothing declared returns the documented defaults", () => {
@@ -76,7 +76,7 @@ test("store honors construction config: lease length and sweep attempts", (t) =>
   const store = tempStore(t, { leaseSeconds: 60, maxAttempts: 1 });
   assert.equal(store.config.leaseSeconds, 60);
   const task = seed(store);
-  const claimed = store.task.claim({ id: task.id, agentId: "a" });
+  const claimed = store.task.claim({ id: task.id, agentId: "atlas" });
   assert.equal(claimed.lease_seconds, 60, "claim derives from config, not the old 30min literal");
   store.db.prepare("UPDATE attempts SET claimed_at=1, heartbeat_at=1 WHERE item_id=? AND ended_at IS NULL").run(task.id);
   store.task.sweepExpired({});
@@ -86,9 +86,9 @@ test("store honors construction config: lease length and sweep attempts", (t) =>
 test("per-call meta tunes a single tool call without touching the server", async (t) => {
   const store = tempStore(t, {});
   const { handle } = createToolHandlers(store, null);
-  const epic = store.epic.create({ title: "E", status: "planned" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "atlas", assigneeHarness: "system" });
   store.task.claim({ id: task.id, agentId: "atlas" });
   const id = { harness: "test", agent: "atlas", session: "s-1" };
   const long = "x".repeat(100);

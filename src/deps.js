@@ -62,8 +62,8 @@ export function removeDep(store, fromId, toId) {
 export function depsResolved(store, id) {
   const out = store.dep.listOutgoing(id);
   for (const edge of out) {
-    const item = store.item.get(edge.to_id);
-    if (!item) return false; // missing dep target = block (safer than ignoring)
+    const item = store.item.get(edge.to_id, { includeDeleted: true });
+    if (!item) return false; // hard-deleted dep target = block (safer than ignoring)
     if (item.status !== "done" && item.status !== "cancelled") return false;
   }
   return true;

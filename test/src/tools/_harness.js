@@ -20,15 +20,16 @@ export function makeHarness(prefix = "winch-tools-") {
     rmSync(dir, { recursive: true, force: true });
   }
 
-  function seedReadyTask({ assigned = null, taskStatus = "todo", capabilities = null } = {}) {
-    const epic = store.epic.create({ title: "E", status: "planned", priority: 80 });
-    const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", acceptance: "AC-1", priority: 70 });
+  function seedReadyTask({ assigned = "atlas", taskStatus = "ready", capabilities = null } = {}) {
+    const epic = store.epic.create({ title: "E", status: "in_progress", priority: 80 });
+    const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress", acceptance: "AC-1", priority: 70 });
     const task = store.task.create({
       storyId: story.id,
       title: "T",
       status: taskStatus,
       executionKind: "manual",
       assigned,
+      assigneeHarness: assigned ? "test" : null,
       capabilities,
     });
     return { epic, story, task };
