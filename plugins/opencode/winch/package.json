@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/winch-opencode",
-  "version": "2026.11.13-beta.1",
+  "version": "2026.11.13-beta.2",
   "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls (V1 hooks + V2 setup). No SDK dependency — a plain id/setup/server export.",
   "license": "MIT",
   "type": "module",
@@ -19,7 +19,8 @@
   "files": [
     "index.js",
     "hooks.js",
-    "identity.js"
+    "identity.js",
+    "dispatch.js"
   ],
   "main": "index.js"
 }
