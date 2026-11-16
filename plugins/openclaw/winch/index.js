@@ -57,6 +57,11 @@ export default definePluginEntry({
         type: "string",
         description: "Event stream to follow, e.g. ws://127.0.0.1:38291 (default: that).",
       },
+      dispatchMaxConcurrent: {
+        type: "integer",
+        minimum: 1,
+        description: "Maximum wake processes admitted at once; remaining wakes queue FIFO (default: 8).",
+      },
       dispatchPlanner: {
         type: "string",
         description: "Fallback planner for rows without a recorded creator (default: atlas).",
@@ -162,6 +167,7 @@ export default definePluginEntry({
           };
           const router = createRouter({
             planner: cfg.dispatchPlanner ?? "atlas",
+            maxConcurrent: cfg.dispatchMaxConcurrent ?? 8,
             statePath: cfg.dispatchStatePath ?? defaultStatePath(),
             logger: api.logger,
             wake,

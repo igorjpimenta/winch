@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { wakeFor, createRouter, defaultStatePath } from "./dispatch.js";
+import { wakeFor, createRouter, createWakeQueue, defaultStatePath } from "./dispatch.js";
 
 function taskEvent(kind, { id = "TASK-1", assigned = "builder", epicCreatedBy = "atlas" } = {}) {
   return {
@@ -136,4 +136,68 @@ test("an epic review happens once per close cycle, across restarts", () => {
 
 test("the default state file lives under the openclaw state dir", () => {
   assert.match(defaultStatePath(), /\.openclaw[/\\]state[/\\]winch-plugin-dispatch\.json$/);
+});
+
+const tick = () => new Promise((r) => setImmediate(r));
+
+test("wakes are admitted FIFO with a concurrency cap", async () => {
+  const started = [];
+  const releases = [];
+  const router = createRouter({
+    wake: (r) => new Promise((resolve) => { started.push(r.message); releases.push(resolve); }),
+    maxConcurrent: 2,
+  });
+  for (const id of ["TASK-1", "TASK-2", "TASK-3", "TASK-4"]) {
+    router.handle(taskEvent("task.assigned", { id }));
+  }
+  await tick();
+  assert.deepEqual(started, ["TASK-1", "TASK-2"]);
+  releases.shift()();
+  await tick();
+  assert.deepEqual(started, ["TASK-1", "TASK-2", "TASK-3"]);
+  releases.shift()();
+  await tick();
+  assert.deepEqual(started, ["TASK-1", "TASK-2", "TASK-3", "TASK-4"]);
+  releases.forEach((r) => r());
+  await tick();
+});
+
+test("the queue is idempotent per kind:message while a wake is pending", async () => {
+  const started = [];
+  const gates = [];
+  const router = createRouter({
+    wake: (r) => new Promise((resolve) => { started.push(r.message); gates.push(resolve); }),
+    maxConcurrent: 1,
+  });
+  router.handle(taskEvent("task.assigned", { id: "TASK-1" }));
+  router.handle(taskEvent("task.assigned", { id: "TASK-1" }));
+  router.handle({
+    kind: "task.completed",
+    item: { id: "TASK-0", status: "done" },
+    unblocked: [{ id: "TASK-1", assigned: "builder" }],
+  });
+  await tick();
+  assert.deepEqual(started, ["TASK-1"]);
+  gates.forEach((g) => g());
+  await tick();
+});
+
+test("the queue never drops work and keeps FIFO order", async () => {
+  const ran = [];
+  let active = 0;
+  let peak = 0;
+  const queue = createWakeQueue({
+    limit: 2,
+    run: async (r) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      ran.push(r.message);
+      active--;
+    },
+  });
+  for (let i = 1; i <= 10; i++) queue.enqueue({ kind: "task", message: `TASK-${i}`, agent: "builder" });
+  while (ran.length < 10) await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.equal(peak, 2);
+  assert.deepEqual(ran, Array.from({ length: 10 }, (_, i) => `TASK-${i + 1}`));
 });
