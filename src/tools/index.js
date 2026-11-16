@@ -16,7 +16,6 @@ import { createDelegateTools } from "./delegate.js";
 import { createPlanTools } from "./plan.js";
 import { createReadTools } from "./read.js";
 import { createReportTools } from "./report.js";
-import { createUsageTools } from "./usage.js";
 import { resolveUsage, identitySessionKey } from "../identity.js";
 
 export { TOOL_DEFS } from "./definitions.js";
@@ -32,7 +31,6 @@ export function createToolHandlers(store, logger) {
     ...createPlanTools({ store, logger }),
     ...createReadTools({ store, logger }),
     ...createReportTools({ store, logger }),
-    ...createUsageTools({ store, logger }),
   };
 
   async function handle(name, args, identity, meta = null) {

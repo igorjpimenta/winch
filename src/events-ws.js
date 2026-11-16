@@ -226,6 +226,76 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
       clients.delete(socket);
     }
 
+    // Client frames are only ever interesting as close/ping; everything else
+    // is consumed and ignored. Mask bit respected when skipping payloads.
+    let buf = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      for (;;) {
+        if (buf.length < 2) return;
+        const opcode = buf[0] & 0x0f;
+        let len = buf[1] & 0x7f;
+        let off = 2;
+        if (len === 126) {
+          if (buf.length < 4) return;
+          len = buf.readUInt16BE(2);
+          off = 4;
+        } else if (len === 127) {
+          if (buf.length < 10) return;
+          if (buf.readUInt32BE(2) !== 0) {
+            socket.destroy();
+            return;
+          }
+          len = buf.readUInt32BE(6);
+          off = 10;
+        }
+        const masked = !!(buf[1] & 0x80);
+        let maskKey = null;
+        if (masked) {
+          if (buf.length < off + 4) return;
+          maskKey = buf.slice(off, off + 4);
+          off += 4;
+        }
+        if (buf.length < off + len) return;
+        let payload = buf.slice(off, off + len);
+        if (masked && maskKey) {
+          const out = Buffer.alloc(len);
+          for (let i = 0; i < len; i++) out[i] = payload[i] ^ maskKey[i % 4];
+          payload = out;
+        }
+        buf = buf.slice(off + len);
+        if (opcode === 0x8) {
+          socket.destroy();
+          return;
+        }
+        if (opcode === 0x9) { socket.write(Buffer.from([0x8a, 0x00])); return; }
+        if (opcode === 0x1) {
+          // Inbound usage frames: { type: "usage", sessionKey, usage }
+          try {
+            const msg = JSON.parse(payload.toString("utf8"));
+            if (msg && msg.type === "usage" && msg.sessionKey && msg.usage) {
+              const sess = store.db.prepare("SELECT item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?").get(msg.sessionKey);
+              if (sess) {
+                let itemKind = null;
+                const it = store.item.get(sess.item_id);
+                if (it) itemKind = it.kind;
+                store.usage.record({
+                  harness: sess.harness,
+                  agent: sess.agent_id,
+                  session: sess.external_session_id,
+                  itemId: sess.item_id,
+                  itemKind,
+                  usage: msg.usage,
+                  source: "ws",
+                });
+              }
+            }
+          } catch (e) {
+            logger?.warn?.(`winch: bad ws frame: ${e?.message}`);
+          }
+        }
+      }
+    });
     const drop = () => {
       clients.delete(socket);
       if (closing) return;
