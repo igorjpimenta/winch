@@ -1,11 +1,11 @@
 // ready-queue.js — compute "what's ready to work on" for a given agent.
 //
 // A task is *ready* iff:
-//   - status = 'ready'
+//   - status = 'ready' (which the store only permits for an assigned pair)
 //   - all of its outgoing deps resolve to status in {done, cancelled}
 //   - nearest story status in {ready, in_progress}
 //   - nearest epic  status in {ready, in_progress}
-//   - (when agentId is supplied) unassigned, or assigned to the same pair
+//   - (when agentId is supplied) assigned to the same harness:agent pair
 //   - (when capabilities supplied) intersection with task/story tags is non-empty
 //
 // Ordering: priority DESC (cascading story/epic priority on tie),
@@ -41,10 +41,10 @@ export function readyTasks(store, opts = {}) {
     const epic = task.epic_id ? store.item.get(task.epic_id) : null;
     if (!epic) continue;
     if (epic.status !== "ready" && epic.status !== "in_progress") continue;
-    if (task.assignee_agent && agentId) {
+    if (agentId) {
       if (task.assignee_agent !== agentId) continue;
       // Legacy assignments carry the wildcard harness; new ones name it.
-      if (harness && task.assignee_harness && task.assignee_harness !== "legacy" && task.assignee_harness !== harness) continue;
+      if (harness && task.assignee_harness !== "legacy" && task.assignee_harness !== harness) continue;
     }
     const required = effectiveCaps(task, story);
     if (!ignoreCapabilities && !capMatch(required, capabilities)) continue;

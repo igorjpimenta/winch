@@ -14,7 +14,7 @@ import {
 export const MAX_ATTEMPTS = 3;
 
 export const STATUSES_BY_KIND = { epic: EPIC_STATUSES, story: STORY_STATUSES, task: TASK_STATUSES };
-export const DEFAULT_STATUS = { epic: "backlog", story: "backlog", task: "ready" };
+export const DEFAULT_STATUS = { epic: "backlog", story: "backlog", task: "backlog" };
 export const ITEM_TERMINAL = new Set(["done", "cancelled"]);
 
 export const ITEM_SELECT = `

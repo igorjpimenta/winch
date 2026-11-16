@@ -23,12 +23,9 @@ export function createClaimMethods({ core, apis }) {
         const r = db.prepare(`
           UPDATE item_state SET status='in_progress', assignee_harness=?, assignee_agent=?, updated_at=?
            WHERE item_id=? AND status='ready' AND deleted_at IS NULL
-             AND (assignee_agent IS NULL OR (assignee_agent=? AND (assignee_harness IS NULL OR assignee_harness='legacy' OR assignee_harness=?)))
+             AND assignee_agent=? AND (assignee_harness=? OR assignee_harness='legacy')
         `).run(h, agentId, t, id, agentId, h);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
-        // A pre-existing assignment may carry a NULL harness (legacy row);
-        // the winning claim stamps the pair either way.
-        db.prepare("UPDATE item_state SET assignee_harness=?, assignee_agent=? WHERE item_id=?").run(h, agentId, id);
         const sess = ensureSession({ harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim" });
         const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds });
         const eventId = appendEvent({
@@ -55,10 +52,13 @@ export function createClaimMethods({ core, apis }) {
       }
       const t = now();
       const h = next == null ? null : (harness ?? "legacy");
+      let status = existing.status;
+      if (next == null && status === "ready") status = "backlog";
+      else if (next != null && status === "backlog") status = "ready";
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.prepare("UPDATE item_state SET assignee_harness=?, assignee_agent=?, updated_at=? WHERE item_id=?")
-          .run(h, next, t, id);
+        db.prepare("UPDATE item_state SET revision=revision+1, status=?, assignee_harness=?, assignee_agent=?, updated_at=? WHERE item_id=?")
+          .run(status, h, next, t, id);
         if (capabilities !== undefined) {
           db.prepare("DELETE FROM item_tags WHERE item_id=?").run(id);
           for (const tag of capabilities ?? []) {
@@ -67,7 +67,7 @@ export function createClaimMethods({ core, apis }) {
           }
         }
         appendEvent({
-          itemId: id, fromStatus: existing.status, toStatus: existing.status, kind: "task.assigned",
+          itemId: id, fromStatus: existing.status, toStatus: status, kind: "task.assigned",
           actor, note: `assign ${next ?? "nobody"}`, at: t,
         });
         db.exec("COMMIT");
@@ -109,10 +109,12 @@ export function createClaimMethods({ core, apis }) {
         const live = liveAttempt(id);
         if (!live) { db.exec("ROLLBACK"); return null; }
         endAttempt(live.id, { status: "released", endedAt: at });
-        db.prepare("UPDATE item_state SET revision=revision+1, status='ready', updated_at=? WHERE item_id=?").run(at, id);
+        const row = apis.item.get(id);
+        const status = row?.assignee_harness && row?.assignee_agent ? "ready" : "backlog";
+        db.prepare("UPDATE item_state SET revision=revision+1, status=?, updated_at=? WHERE item_id=?").run(status, at, id);
         const eventId = appendEvent({
           itemId: id, attemptId: live.id, sessionId: live.session_id,
-          fromStatus: "in_progress", toStatus: "ready", kind: "task.released",
+          fromStatus: "in_progress", toStatus: status, kind: "task.released",
           actor: null, note, at,
         });
         db.exec("COMMIT");

@@ -14,9 +14,9 @@ let dir, store, handle;
 const PLANNER = { harness: "openclaw", agent: "atlas", session: "s1" };
 const WORKER = { harness: "openclaw", agent: "tester", session: "s2" };
 
-function seed({ status = "ready", assigned = null } = {}) {
-  const epic = store.epic.create({ title: "E", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+function seed({ status = "backlog", assigned = null } = {}) {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   return store.task.create({ storyId: story.id, title: "T", status, assigned });
 }
 
@@ -41,7 +41,8 @@ test("assigns and writes the audit event", async () => {
   const ev = store.db.prepare("SELECT * FROM item_events WHERE kind='task.assigned'").all();
   assert.equal(ev.length, 1);
   assert.equal(ev[0].item_id, task.id);
-  assert.equal(ev[0].from_status, ev[0].to_status, "assignment never fakes a status transition");
+  assert.equal(ev[0].from_status, "backlog");
+  assert.equal(ev[0].to_status, "ready");
   assert.equal(ev[0].actor, "openclaw:atlas");
   assert.equal(ev[0].note, "assign tester");
 });
@@ -74,7 +75,7 @@ test("unknown task is refused without writing anything", async () => {
 });
 
 test("a live claim cannot be reassigned out from under its worker", async () => {
-  const task = seed();
+  const task = seed({ status: "ready", assigned: "tester" });
   await handle("backlog_claim", {}, WORKER);
   assert.equal(store.task.get(task.id).status, "in_progress");
   const r = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, PLANNER);
@@ -84,7 +85,7 @@ test("a live claim cannot be reassigned out from under its worker", async () => 
 });
 
 test("re-assigning a live task to its own worker is a no-op, not an error", async () => {
-  const task = seed();
+  const task = seed({ status: "ready", assigned: "tester" });
   await handle("backlog_claim", {}, WORKER);
   const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
   assert.equal(r.details.status, "ok");
@@ -92,8 +93,8 @@ test("re-assigning a live task to its own worker is a no-op, not an error", asyn
 });
 
 test("a story can be assigned, and its owner is the one woken", async () => {
-  const epic = store.epic.create({ title: "E-story", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S-story", acceptance: "AC", status: "ready" });
+  const epic = store.epic.create({ title: "E-story", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-story", acceptance: "AC", status: "in_progress" });
   const res = await handle("backlog_assign", { id: story.id, agent: "tester", capabilities: ["verify"] }, PLANNER);
   assert.equal(res.details.status, "ok");
   assert.equal(res.details.level, "story");
@@ -104,8 +105,8 @@ test("a story can be assigned, and its owner is the one woken", async () => {
 });
 
 test("clearing a story assignee is rejected and closed stories refuse assignment", async () => {
-  const epic = store.epic.create({ title: "E-story2", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S-story2", status: "ready" });
+  const epic = store.epic.create({ title: "E-story2", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-story2", status: "in_progress" });
   await handle("backlog_assign", { id: story.id, agent: "tester" }, PLANNER);
   const cleared = await handle("backlog_assign", { id: story.id, agent: null }, PLANNER);
   assert.equal(cleared.details.reason, "rejected");

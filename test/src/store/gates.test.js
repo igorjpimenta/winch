@@ -26,9 +26,9 @@ function call(name, args, identity = { harness: "test", agent: "atlas", session:
   return handle(name, args, identity);
 }
 
-function seed({ assigned = null, taskStatus = "ready" } = {}) {
-  const epic = store.epic.create({ title: "E", status: "ready", priority: 80 });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", priority: 70 });
+function seed({ assigned = "atlas", taskStatus = "ready" } = {}) {
+  const epic = store.epic.create({ title: "E", status: "in_progress", priority: 80 });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress", priority: 70 });
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
     executionKind: "manual", assigned,
@@ -54,7 +54,7 @@ test("resumeGate CAS: blocked → ready clears claim + gate, one resume per gate
   store.task.openGate({ id: task.id, gateType: "release", actor: "herald" });
   const res = store.task.resumeGate({ id: task.id, actor: "operator" });
   assert.equal(res.status, "ready");
-  assert.equal(res.assigned, null);
+  assert.equal(res.assigned, "atlas");
   assert.equal(res.gate_type, null);
   assert.equal(res.blocked_at, null);
   const ev = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND note='gate resume'").all(task.id);

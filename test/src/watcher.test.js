@@ -19,9 +19,9 @@ function teardown() {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function seed({ assigned = null, taskStatus = "ready" } = {}) {
-  const epic = store.epic.create({ title: "E", status: "ready", priority: 80 });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", priority: 70 });
+function seed({ assigned = "builder", taskStatus = "ready" } = {}) {
+  const epic = store.epic.create({ title: "E", status: "in_progress", priority: 80 });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress", priority: 70 });
   const task = store.task.create({
     storyId: story.id, title: "T", status: taskStatus,
     executionKind: "manual", assigned,
@@ -42,14 +42,14 @@ test("empty tick: everything empty — the cron's silent-exit condition", () => 
 
 test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it)", () => {
   const a = seed({ assigned: "builder" });
-  seed({ assigned: null });
+  const b = seed({ assigned: null, taskStatus: "backlog" });
   const m = tick(store);
   assert.equal(m.routed.length, 1);
   assert.equal(m.routed[0].taskId, a.task.id);
   assert.equal(m.routed[0].assigned, "builder");
   assert.equal(m.routed[0].executionKind, "manual");
-  assert.equal(m.unrouted.length, 1);
-  assert.equal(m.unrouted[0].assigned, null);
+  assert.deepEqual(m.unrouted, []);
+  assert.ok(!m.routed.some((r) => r.taskId === b.task.id), "backlog is not claimable");
 });
 
 test("expired lease is swept back to ready and reported", () => {
@@ -104,14 +104,13 @@ test("tick writes gate-waiting rows for stale gates and reports waiting age", ()
   const { task } = seed({ assigned: "lens", taskStatus: "in_progress" });
   store.task.openGate({ id: task.id, gateType: "roadmap", reason: "ADR", actor: "lens" });
   store.db.prepare("UPDATE attempts SET gate_record_json=json_set(COALESCE(gate_record_json, '{}'), '$.openedAt', ?) WHERE item_id=? AND gate_record_json IS NOT NULL").run(Date.now() - 25 * 3600 * 1000, task.id);
-  const u = seed({ assigned: null });
+  const u = seed({ assigned: null, taskStatus: "backlog" });
   const m = tick(store);
   assert.equal(m.waits.length, 1);
   assert.equal(m.waits[0].taskId, task.id);
   assert.equal(m.waits[0].label, "24h");
-  const idle = m.unrouted.find((r) => r.taskId === u.task.id);
-  assert.ok(idle, "unrouted task reported");
-  assert.ok(typeof idle.idleMs === "number" && idle.idleMs >= 0, "waiting age carried");
+  assert.deepEqual(m.unrouted, []);
+  assert.ok(!m.routed.some((r) => r.taskId === u.task.id), "unassigned backlog is not woken");
   const m2 = tick(store);
   assert.deepEqual(m2.waits, [], "second tick writes nothing new");
 });

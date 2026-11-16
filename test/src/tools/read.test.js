@@ -8,9 +8,9 @@ beforeEach(() => { h = makeHarness("winch-read-"); });
 afterEach(() => h.teardown());
 
 test("a task read returns the record a worker needs, without claiming", async () => {
-  const epic = h.store.epic.create({ title: "E-get", description: "epic body", acceptance: "EP-AC", status: "ready", priority: 80 });
-  const story = h.store.story.create({ epicId: epic.id, title: "S-get", description: "story body", acceptance: "AC-get", status: "ready", priority: 70 });
-  const task = h.store.task.create({ storyId: story.id, title: "T-get", description: "task body", status: "ready", executionKind: "cli" });
+  const epic = h.store.epic.create({ title: "E-get", description: "epic body", acceptance: "EP-AC", status: "in_progress", priority: 80 });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-get", description: "story body", acceptance: "AC-get", status: "in_progress", priority: 70 });
+  const task = h.store.task.create({ storyId: story.id, title: "T-get", description: "task body", status: "ready", executionKind: "cli", assigned: "atlas" });
   const res = await h.call("backlog_get", { id: task.id });
   assert.equal(res.details.status, "ok");
   assert.equal(res.details.level, "task");
@@ -23,14 +23,14 @@ test("a task read returns the record a worker needs, without claiming", async ()
   assert.deepEqual(body.readiness.blockers, []);
   assert.match(body.brief, /AC-get/);
   assert.equal(h.store.task.get(task.id).status, "ready");
-  assert.equal(h.store.task.get(task.id).assigned, null);
+  assert.equal(h.store.task.get(task.id).assigned, "atlas");
 });
 
 test("a task read explains why it is not ready for this agent", async () => {
-  const epic = h.store.epic.create({ title: "E-get2", status: "ready" });
-  const story = h.store.story.create({ epicId: epic.id, title: "S-get2", status: "ready", acceptance: "AC-2" });
-  const dep = h.store.task.create({ storyId: story.id, title: "T-dep", status: "ready", executionKind: "manual" });
-  const task = h.store.task.create({ storyId: story.id, title: "T-blocked", status: "ready", executionKind: "manual", capabilities: ["gpu"] });
+  const epic = h.store.epic.create({ title: "E-get2", status: "in_progress" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-get2", status: "in_progress", acceptance: "AC-2" });
+  const dep = h.store.task.create({ storyId: story.id, title: "T-dep", status: "ready", executionKind: "manual", assigned: "atlas" });
+  const task = h.store.task.create({ storyId: story.id, title: "T-blocked", status: "ready", executionKind: "manual", assigned: "atlas", capabilities: ["gpu"] });
   const { addDep } = await import("../../../src/deps.js");
   assert.ok(addDep(h.store, task.id, dep.id).ok);
   const mine = JSON.parse((await h.call("backlog_get", { id: task.id, capabilities: ["gpu"] })).content[0].text);
@@ -55,11 +55,11 @@ test("a story read returns its tasks, parent epic and artifacts", async () => {
 });
 
 test("an epic read returns the tree a reviewer needs", async () => {
-  const epic = h.store.epic.create({ title: "E-rev", acceptance: "EA", status: "ready" });
-  const story = h.store.story.create({ epicId: epic.id, title: "S-rev", acceptance: "SA", status: "ready" });
+  const epic = h.store.epic.create({ title: "E-rev", acceptance: "EA", status: "in_progress" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S-rev", acceptance: "SA", status: "in_progress" });
   const t1 = h.store.task.create({ storyId: story.id, title: "built", status: "done", executionKind: "manual" });
   h.store.task.update(t1.id, { result_summary: "ok" });
-  h.store.task.create({ storyId: story.id, title: "pending", status: "ready", executionKind: "manual" });
+  h.store.task.create({ storyId: story.id, title: "pending", status: "ready", executionKind: "manual", assigned: "atlas" });
   const res = await h.call("backlog_get", { id: epic.id });
   assert.equal(res.details.level, "epic");
   const body = JSON.parse(res.content[0].text);

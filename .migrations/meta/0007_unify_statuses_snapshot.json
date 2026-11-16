@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0d5adca6-fcb9-4481-9020-f23b4dfc1235",
+  "id": "0f959c4b-afa8-4650-951f-8008bb0289a6",
   "prevId": "6dc75a39-deba-47b9-ad27-0a7f2e3d20a1",
   "tables": {
     "artifacts": {
@@ -736,6 +736,10 @@
         "item_state_assignment_pair": {
           "name": "item_state_assignment_pair",
           "value": "(\"item_state\".\"assignee_harness\" IS NULL) = (\"item_state\".\"assignee_agent\" IS NULL)"
+        },
+        "item_state_ready_assigned": {
+          "name": "item_state_ready_assigned",
+          "value": "\"item_state\".\"status\" <> 'ready' OR (\"item_state\".\"assignee_harness\" IS NOT NULL AND \"item_state\".\"assignee_agent\" IS NOT NULL)"
         }
       }
     },

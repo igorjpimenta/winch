@@ -16,7 +16,7 @@ export function createTaskApi({ core, apis }) {
       if (parent.kind !== "story" && parent.kind !== "task") throw new Error(`task parent must be a story or task: ${storyId}`);
       return apis.item.create({
         id, kind: "task", parentId: storyId, title, description,
-        status: status ?? "ready", executionKind: executionKind ?? "manual",
+        status, executionKind: executionKind ?? "manual",
         executionArgs, capabilities,
         assigneeAgent: assigned ?? null,
         assigneeHarness: assigned ? (assigneeHarness ?? "legacy") : null,
@@ -86,6 +86,12 @@ export function createTaskApi({ core, apis }) {
         db.exec("ROLLBACK");
         throw err;
       }
+      let assigneeHarness = patch.assignee_harness;
+      if (patch.assigned !== undefined && patch.assignee_harness === undefined) {
+        assigneeHarness = patch.assigned == null
+          ? null
+          : (patch.harness ?? parsed?.harness ?? existing.assignee_harness ?? "legacy");
+      }
       const row = apis.item.update(id, {
         status: patch.status,
         title: patch.title,
@@ -96,8 +102,8 @@ export function createTaskApi({ core, apis }) {
         ownerTeam: patch.ownerTeam,
         executionKind: patch.execution_kind ?? patch.executionKind,
         executionArgs: patch.execution_args ?? patch.executionArgs,
-        assigneeHarness: patch.assignee_harness !== undefined ? patch.assignee_harness : (leavingBlocked && patch.assigned === null ? null : undefined),
-        assigneeAgent: patch.assigned !== undefined ? patch.assigned : (leavingBlocked && patch.assigned === null ? null : undefined),
+        assigneeHarness,
+        assigneeAgent: patch.assigned,
         capabilities: patch.capabilities,
         actor: patch.actor ?? null,
         note: patch.note ?? null,
@@ -106,15 +112,7 @@ export function createTaskApi({ core, apis }) {
         event: patch.event,
         updatedAt: t,
       });
-      if (patch.assigned !== undefined && patch.assignee_harness === undefined) {
-        const harness = patch.harness ?? parsed?.harness ?? "legacy";
-        if (patch.assigned == null) {
-          db.prepare("UPDATE item_state SET assignee_harness=NULL, assignee_agent=NULL WHERE item_id=?").run(id);
-        } else {
-          db.prepare("UPDATE item_state SET assignee_harness=?, assignee_agent=? WHERE item_id=?").run(harness, patch.assigned, id);
-        }
-      }
-      return taskApi.get(id);
+      return row;
     },
     delete(id) {
       const r = db.prepare("DELETE FROM items WHERE id=? AND kind='task'").run(id);

@@ -14,8 +14,8 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "backlog-merges-"));
   store = createStore({ dbPath: path.join(dir, "store.sqlite") });
   epic = store.epic.create({ title: "Ship v1", status: "in_progress" });
-  story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
+  story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual", assigned: "builder" });
 });
 afterEach(() => {
   store.close();
@@ -77,7 +77,7 @@ test("closed-unmerged PR reclaims an in-flight task; done is never rewritten", (
   assert.deepEqual(s1.reopenedTasks, [task.id]);
   const reopened = store.task.get(task.id);
   assert.equal(reopened.status, "ready");
-  assert.equal(reopened.assigned, null);
+  assert.equal(reopened.assigned, "builder");
 
   store.task.update(task.id, { status: "done", result_summary: "done" });
   const s2 = applyMergeOutcomes(store, [pr(9, "CLOSED", body)]);
@@ -127,7 +127,7 @@ test("closed-unmerged PR on a plain task keeps the generic note", () => {
 
 test("epic close with version writes one kind-stamped release event on the release task", () => {
   const epic2 = store.epic.create({ title: "E2", status: "in_progress" });
-  const story2 = store.story.create({ epicId: epic2.id, title: "S2", status: "ready" });
+  const story2 = store.story.create({ epicId: epic2.id, title: "S2", status: "in_progress" });
   const rel = store.task.create({ storyId: story2.id, title: "R", executionKind: "manual" });
   store.task.update(rel.id, { status: "done", actor: "herald", note: "done" });
   const body = `Backlog: ${epic2.id}\nBacklog-Task: ${rel.id}\nRelease: v2.0.0`;
@@ -153,7 +153,7 @@ test("epic close with version writes one kind-stamped release event on the relea
 
 test("failed tag writes no release event — the wire never claims an untagged ship", () => {
   const epic3 = store.epic.create({ title: "E3", status: "in_progress" });
-  const story3 = store.story.create({ epicId: epic3.id, title: "S3", status: "ready" });
+  const story3 = store.story.create({ epicId: epic3.id, title: "S3", status: "in_progress" });
   const rel = store.task.create({ storyId: story3.id, title: "R", executionKind: "manual" });
   store.task.update(rel.id, { status: "done", actor: "herald", note: "done" });
   const body = `Backlog: ${epic3.id}\nBacklog-Task: ${rel.id}\nRelease: v9.9.9`;

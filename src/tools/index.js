@@ -1,8 +1,8 @@
 // index.js — assembles the tool surface. Identity is never a tool param: the
 // caller comes from the resolved identity, so no agent can act as another.
 //
-// Claim semantics are the store's CAS (`status='ready' AND (assigned IS NULL
-// OR assigned=?)`): a race loser gets `claim === null` and moves on. There is
+// Claim semantics are the store's CAS (`status='ready' AND assignee_harness=? AND
+// assignee_agent=?`): a race loser gets `claim === null` and moves on. There is
 // no blocking wait inside a tool call.
 
 import { assertCleanTriple } from "../identity.js";

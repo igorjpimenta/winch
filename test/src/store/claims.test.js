@@ -41,3 +41,46 @@ test("claim event `at` equals the claim's `claimed_at`", (t) => {
   assert.equal(claimed.lastEvent.created_at, claimed.claimed_at);
   assert.equal(claimed.lastEvent.note, "claim");
 });
+
+test("ready requires an assignment: assign moves backlog to ready, clearing returns backlog", (t) => {
+  const store = makeStore(t);
+  const epic = store.epic.create({ title: "E" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T" });
+  assert.equal(task.status, "backlog");
+
+  assert.throws(
+    () => store.task.update(task.id, { status: "ready" }),
+    /ready item requires an assignment/
+  );
+
+  const assigned = store.task.assign({ id: task.id, agentId: "agent-a", harness: "test" });
+  assert.equal(assigned.status, "ready");
+  assert.equal(assigned.assignee_harness, "test");
+  assert.equal(assigned.assignee_agent, "agent-a");
+
+  const cleared = store.task.assign({ id: task.id, agentId: null });
+  assert.equal(cleared.status, "backlog");
+  assert.equal(cleared.assignee_agent, null);
+
+  assert.throws(
+    () => store.db.prepare("UPDATE item_state SET status='ready', assignee_harness=NULL, assignee_agent=NULL WHERE item_id=?").run(task.id),
+    /CHECK constraint failed/
+  );
+});
+
+test("only the assigned harness:agent pair may claim", (t) => {
+  const store = makeStore(t);
+  const epic = store.epic.create({ title: "E" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({
+    storyId: story.id, title: "T", status: "ready",
+    assigned: "agent-a", assigneeHarness: "test",
+  });
+
+  assert.equal(store.task.claim({ id: task.id, agentId: "agent-b", harness: "test" }), null);
+  assert.equal(store.task.claim({ id: task.id, agentId: "agent-a", harness: "other" }), null);
+  const claimed = store.task.claim({ id: task.id, agentId: "agent-a", harness: "test" });
+  assert.ok(claimed);
+  assert.equal(claimed.status, "in_progress");
+});

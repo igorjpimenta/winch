@@ -15,8 +15,15 @@ export function createItemApi({ core }) {
       const kind = input.kind;
       if (!ITEM_KINDS.includes(kind)) throw new Error(`invalid item kind: ${kind}`);
       const id = input.id || newItemId();
-      const status = input.status || DEFAULT_STATUS[kind];
+      const assigneeHarness = input.assigneeHarness ?? null;
+      const assigneeAgent = input.assigneeAgent ?? (input.assigned ?? null);
+      if ((assigneeHarness == null) !== (assigneeAgent == null)) {
+        throw new Error(`assignment is a pair: ${id}`);
+      }
+      const assigned = assigneeHarness != null && assigneeAgent != null;
+      const status = input.status ?? (assigned ? "ready" : DEFAULT_STATUS[kind]);
       if (!STATUSES_BY_KIND[kind].includes(status)) throw new Error(`invalid ${kind} status: ${status}`);
+      if (status === "ready" && !assigned) throw new Error(`ready item requires an assignment: ${id}`);
       const executionKind = input.executionKind ?? "manual";
       if (!EXECUTION_KINDS.includes(executionKind)) throw new Error(`invalid execution_kind: ${executionKind}`);
       const parentId = kind === "epic" ? null : (input.parentId ?? null);
@@ -45,7 +52,7 @@ export function createItemApi({ core }) {
           VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, status, JSON.stringify(input.state ?? {}),
-          input.assigneeHarness ?? null, input.assigneeAgent ?? null,
+          assigneeHarness, assigneeAgent,
           t, ITEM_TERMINAL.has(status) ? t : null, null,
         );
         for (const tag of input.capabilities ?? []) {
@@ -95,7 +102,7 @@ export function createItemApi({ core }) {
     update(id, patch = {}) {
       const existing = getRow(id, { includeDeleted: true });
       if (!existing) throw new Error(`item not found: ${id}`);
-      const status = patch.status ?? existing.status;
+      let status = patch.status ?? existing.status;
       if (!STATUSES_BY_KIND[existing.kind].includes(status)) throw new Error(`invalid ${existing.kind} status: ${status}`);
       const executionKind = patch.executionKind ?? existing.execution_kind;
       if (!EXECUTION_KINDS.includes(executionKind)) throw new Error(`invalid execution_kind: ${executionKind}`);
@@ -123,6 +130,14 @@ export function createItemApi({ core }) {
       if (patch.status && !ITEM_TERMINAL.has(status) && existing.closed_at && patch.closedAt === undefined) next.closed_at = null;
       if ((next.assignee_harness == null) !== (next.assignee_agent == null)) {
         throw new Error(`assignment is a pair: ${id}`);
+      }
+      const assignmentChanged = patch.assigneeHarness !== undefined || patch.assigneeAgent !== undefined || patch.assigned !== undefined;
+      if (patch.status === undefined && assignmentChanged) {
+        if (status === "ready" && (next.assignee_harness == null || next.assignee_agent == null)) status = "backlog";
+        else if (status === "backlog" && next.assignee_harness != null && next.assignee_agent != null) status = "ready";
+      }
+      if (status === "ready" && (next.assignee_harness == null || next.assignee_agent == null)) {
+        throw new Error(`ready item requires an assignment: ${id}`);
       }
       const statusChanged = status !== existing.status;
       const note = patch.note ?? null;

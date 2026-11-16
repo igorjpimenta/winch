@@ -17,9 +17,9 @@ function freshStore(config = {}) {
 }
 
 function seed(store) {
-  const epic = store.epic.create({ title: "E", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
-  return store.task.create({ storyId: story.id, title: "T" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  return store.task.create({ storyId: story.id, title: "T", assigned: "a1", assigneeHarness: "openclaw" });
 }
 
 const ID = { harness: "openclaw", agent: "a1", session: "s1" };

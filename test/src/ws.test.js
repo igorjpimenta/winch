@@ -28,8 +28,8 @@ afterEach(async () => {
 });
 
 function seedEvent() {
-  const epic = store.epic.create({ title: "E", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const task = store.task.create({ storyId: story.id, title: "T", executionKind: "manual" });
   // a status transition writes exactly one event row
   store.task.update(task.id, { status: "done", actor: "seed", note: "seeded" });
@@ -137,8 +137,8 @@ test("empty store: welcome id 0, empty history, still streams later rows", async
 });
 
 test("a requeue lists the task so its owner can be woken again", async () => {
-  const epic = store.epic.create({ title: "E-req", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "ready" });
+  const epic = store.epic.create({ title: "E-req", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "in_progress" });
   const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1 });
   store.task.sweepExpired({ now: Date.now() + 10 });
@@ -150,7 +150,7 @@ test("a requeue lists the task so its owner can be woken again", async () => {
 });
 
 test("a story-scoped row carries the item, its assignee and the epic creator", async () => {
-  const epic = store.epic.create({ title: "E", status: "ready", createdBy: "atlas" });
+  const epic = store.epic.create({ title: "E", status: "in_progress", createdBy: "atlas" });
   const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester" });
   store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,kind,actor,note,created_at) VALUES(?,?,?,?,?,?,?)")
     .run(story.id, "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
@@ -167,8 +167,8 @@ test("a story-scoped row carries the item, its assignee and the epic creator", a
 });
 
 test("a close carries the work it just made claimable", async () => {
-  const epic = store.epic.create({ title: "E", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
   const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", capabilities: ["verify"] });
   const { addDep } = await import("../../src/deps.js");
@@ -217,8 +217,8 @@ test("task.create writes a birth row the stream picks up", async () => {
   srv = await startEventServer({ store, port: 0, intervalMs: 50 });
   const ws = await connect(srv.port);
   await collect(ws, 2); // welcome + empty history
-  const epic = store.epic.create({ title: "E", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready" });
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
   store.task.create({ storyId: story.id, title: "born", executionKind: "manual" });
   const [live] = await collect(ws, 1);
   assert.equal(live.kind, "task.created");

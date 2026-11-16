@@ -1,6 +1,6 @@
 // Human gates: open a gate while a task is ready/in_progress, and resolve it
-// back to ready. Open ends any live attempt as `gated`; resolve clears the
-// assignment so the task is claimable again.
+// back to ready. Open ends any live attempt as `gated`; resolve keeps the
+// assignment, so the same worker is the one that can claim it again.
 
 export function createGateMethods({ core, apis }) {
   const {
@@ -48,6 +48,7 @@ export function createGateMethods({ core, apis }) {
     resumeGate({ id, actor = "operator", harness = null, session = null }) {
       const existing = apis.task.get(id);
       if (!existing || existing.status !== "blocked") return null;
+      const status = existing.assignee_harness && existing.assignee_agent ? "ready" : "backlog";
       const t = now();
       const parsed = splitSessionKey(session);
       let sessionId = null;
@@ -64,11 +65,11 @@ export function createGateMethods({ core, apis }) {
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(`
-          UPDATE item_state SET revision=revision+1, status='ready', assignee_harness=NULL, assignee_agent=NULL, updated_at=?
+          UPDATE item_state SET revision=revision+1, status=?, updated_at=?
            WHERE item_id=?
-        `).run(t, id);
+        `).run(status, t, id);
         appendEvent({
-          itemId: id, sessionId, fromStatus: "blocked", toStatus: "ready",
+          itemId: id, sessionId, fromStatus: "blocked", toStatus: status,
           kind: "gate.resolved", actor, note: "gate resume", at: t,
         });
         db.exec("COMMIT");

@@ -25,7 +25,7 @@ export const MAX_ACTIVE_PER_AGENT = 2;
  *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
  *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
  *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
- *   unrouted — claimable but unassigned, each with idleMs since last activity: heartbeat polls own these, never woken
+ *   unrouted — always empty while ready requires an assignment; kept for manifest compatibility
  */
 export function tick(store, { config: override = null } = {}) {
   const cfg = override ?? store.config;

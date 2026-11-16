@@ -21,11 +21,11 @@ test("claims the named task for the caller and stamps the session", async () => 
 });
 
 test("without an id it takes the highest-priority ready task", async () => {
-  const epic = h.store.epic.create({ title: "E", status: "ready" });
-  const low = h.store.story.create({ epicId: epic.id, title: "low", status: "ready", priority: 10 });
-  const high = h.store.story.create({ epicId: epic.id, title: "high", status: "ready", priority: 90 });
-  h.store.task.create({ storyId: low.id, title: "low task", status: "ready", executionKind: "manual" });
-  h.store.task.create({ storyId: high.id, title: "high task", status: "ready", executionKind: "manual" });
+  const epic = h.store.epic.create({ title: "E", status: "in_progress" });
+  const low = h.store.story.create({ epicId: epic.id, title: "low", status: "in_progress", priority: 10 });
+  const high = h.store.story.create({ epicId: epic.id, title: "high", status: "in_progress", priority: 90 });
+  h.store.task.create({ storyId: low.id, title: "low task", status: "ready", executionKind: "manual", assigned: "atlas" });
+  h.store.task.create({ storyId: high.id, title: "high task", status: "ready", executionKind: "manual", assigned: "atlas" });
   const first = await h.call("backlog_claim", {});
   assert.equal(JSON.parse(first.content[0].text).story.priority, 90);
   const second = await h.call("backlog_claim", {});
@@ -39,10 +39,10 @@ test("refuses unknown, non-ready and not-claimable ids distinctly", async () => 
   assert.equal(missing.details.reason, "not_found");
   const busy = h.seedReadyTask({ assigned: "atlas", taskStatus: "in_progress" });
   assert.equal((await h.call("backlog_claim", { taskId: busy.task.id })).details.reason, "not_claimed");
-  const epic = h.store.epic.create({ title: "E2", status: "ready" });
-  const story = h.store.story.create({ epicId: epic.id, title: "S2", status: "ready" });
-  const t1 = h.store.task.create({ storyId: story.id, title: "T1", status: "ready", executionKind: "manual" });
-  const t2 = h.store.task.create({ storyId: story.id, title: "T2", status: "ready", executionKind: "manual" });
+  const epic = h.store.epic.create({ title: "E2", status: "in_progress" });
+  const story = h.store.story.create({ epicId: epic.id, title: "S2", status: "in_progress" });
+  const t1 = h.store.task.create({ storyId: story.id, title: "T1", status: "ready", executionKind: "manual", assigned: "atlas" });
+  const t2 = h.store.task.create({ storyId: story.id, title: "T2", status: "ready", executionKind: "manual", assigned: "atlas" });
   const { addDep } = await import("../../../src/deps.js");
   assert.ok(addDep(h.store, t2.id, t1.id).ok);
   assert.equal((await h.call("backlog_claim", { taskId: t2.id })).details.reason, "not_ready");
@@ -61,14 +61,15 @@ test("dryRun reports without claiming", async () => {
   const byId = await h.call("backlog_claim", { taskId: task.id, dryRun: true });
   assert.equal(byId.details.dryRun, true);
   assert.equal(h.store.task.get(task.id).status, "ready");
-  assert.equal(h.store.task.get(task.id).assigned, null);
+  assert.equal(h.store.task.get(task.id).assigned, "atlas");
   const next = await h.call("backlog_claim", { dryRun: true });
   assert.equal(next.details.taskId, task.id);
   assert.equal(h.store.task.get(task.id).status, "ready");
 });
 
-test("a claim by another agent leaves the assignment alone", async () => {
+test("a claim by another agent is refused and leaves the assignment alone", async () => {
   const { task } = h.seedReadyTask();
-  await h.call("backlog_claim", { taskId: task.id }, WORKER);
-  assert.equal(h.store.task.get(task.id).assigned, "worker");
+  const res = await h.call("backlog_claim", { taskId: task.id }, WORKER);
+  assert.equal(res.details.reason, "not_ready");
+  assert.equal(h.store.task.get(task.id).assigned, "atlas");
 });

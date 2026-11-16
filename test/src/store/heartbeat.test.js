@@ -23,8 +23,8 @@ test("heartbeat advances last_heartbeat only for the assigned in_progress agent"
 
 test("an expired lease requeues the task to its own worker", (t) => {
   const store = makeStore(t);
-  const epic = store.epic.create({ title: "E-sweep", status: "ready" });
-  const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "ready" });
+  const epic = store.epic.create({ title: "E-sweep", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-sweep", status: "in_progress" });
   const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker" });
   store.task.claim({ id: task.id, agentId: "worker", sessionKey: "s", watchdogMs: 1000 });
   store.task.sweepExpired({ now: Date.now() + 5000 });

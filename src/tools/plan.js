@@ -39,7 +39,7 @@ export function createPlanTools({ store, logger }) {
           title: epicIn.title,
           description: epicIn.description,
           acceptance: epicIn.acceptance,
-          status: "ready",
+          status: "in_progress",
           priority: epicIn.priority ?? 50,
           createdBy: identity.agent,
         });
@@ -51,7 +51,7 @@ export function createPlanTools({ store, logger }) {
             title: s.title,
             description: s.description,
             acceptance: s.acceptance,
-            status: "ready",
+            status: "in_progress",
             priority: s.priority ?? epic.priority,
             capabilities: s.capabilities,
           });
@@ -62,7 +62,7 @@ export function createPlanTools({ store, logger }) {
               storyId: story.id,
               title: t.title,
               description: t.description,
-              status: "ready",
+              status: "backlog",
               executionKind: t.executionKind ?? "manual",
               executionArgs: t.executionArgs,
               capabilities: t.capabilities ?? s.capabilities,
@@ -113,7 +113,7 @@ export function createPlanTools({ store, logger }) {
         store.epic.update(epic.id, { status: "in_progress" });
       }
       if (story && (story.status === "done" || story.status === "cancelled")) {
-        store.story.update(story.id, { status: "ready" });
+        store.story.update(story.id, { status: "in_progress" });
       }
       const created = { stories: [], tasks: [] };
       const idByKey = new Map();
@@ -126,7 +126,7 @@ export function createPlanTools({ store, logger }) {
             title: st.title,
             description: st.description,
             acceptance: st.acceptance,
-            status: "ready",
+            status: "in_progress",
             priority: st.priority ?? epic.priority,
             capabilities: st.capabilities,
           });
@@ -153,7 +153,7 @@ export function createPlanTools({ store, logger }) {
             storyId,
             title: t.title,
             description: t.description,
-            status: "ready",
+            status: t.assigned ? "ready" : "backlog",
             executionKind: t.executionKind ?? "manual",
             executionArgs: t.executionArgs,
             capabilities: t.capabilities ?? parent?.capabilities,
@@ -161,7 +161,7 @@ export function createPlanTools({ store, logger }) {
             assigneeHarness: t.assigned ? identity.harness : null,
           });
           entry.task = row;
-          created.tasks.push({ id: row.id, key, title: row.title, storyId, assigned: row.assignee_agent });
+          created.tasks.push({ id: row.id, key, title: row.title, storyId, status: row.status, assigned: row.assignee_agent });
         }
         for (const [key, entry] of idByKey) {
           for (const dep of entry.deferred.t.dependsOn ?? []) {
@@ -175,7 +175,7 @@ export function createPlanTools({ store, logger }) {
         // task.created (from plan) stays planner noise.
         for (const t of created.tasks) {
           store.event.append({
-            itemId: t.id, fromStatus: "ready", toStatus: "ready", kind: "task.appended",
+            itemId: t.id, fromStatus: t.status, toStatus: t.status, kind: "task.appended",
             actor, note: t.title.slice(0, 120),
           });
         }

@@ -22,7 +22,7 @@ test("a claim carries the store-only handoff: acceptance, artifacts, receiver pr
 
 test("an artifact added mid-flight reaches the next claim on the story", async () => {
   const { story, task } = h.seedReadyTask();
-  const next = h.store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual" });
+  const next = h.store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "atlas" });
   await h.call("backlog_claim", { taskId: task.id });
   await h.call("backlog_update", { taskId: task.id, addArtifact: "https://example.test/mid" });
   await h.call("backlog_done", { taskId: task.id, resultSummary: "done" });

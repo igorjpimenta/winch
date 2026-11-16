@@ -192,13 +192,16 @@ webhook and prompts the claiming session through the OpenCode SDK.
 
 ## Task lifecycle
 
-A task moves from `ready` through a claim to `done`. A block parks it until an
-operator resumes it; the last task closes its story, and the last story closes
-the epic.
+A task starts in `backlog`. Assignment moves it to `ready`; clearing the
+assignment returns it to `backlog`, so only an assigned task can be claimed.
+A block parks it until an operator resumes it; the last task closes its story,
+and the last story closes the epic.
 
 ```mermaid
 flowchart LR
-  A[ready] -->|claim by id or next| B[in_progress]
+  Z[backlog] -->|assign| A[ready]
+  A -->|unassign| Z
+  A -->|claim by id or next| B[in_progress]
   B -->|heartbeat / update| B
   B -->|lease expires| A
   B -->|done| C[done]

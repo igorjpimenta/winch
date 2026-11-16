@@ -30,6 +30,7 @@ export const TOOL_DEFS = [
       name: "backlog_assign",
       description:
         "Set (or clear) the assignee of a task or a story; that row is what wakes the assignee. " +
+        "Assigning moves a backlog item to ready; clearing it returns the item to backlog. " +
         "A task assignee claims and delivers it. A story assignee breaks it down first: it reads the story and appends the tasks with " +
         "`backlog_append`, unassigned, so the planner can route them — use story assignment when the breakdown is not known at plan time. " +
         "Refuses to reassign a task already in progress by someone else. Passing `agent: null` or \"\" clears it. " +
@@ -54,7 +55,7 @@ export const TOOL_DEFS = [
       description:
         "Create a whole plan in one call: an epic, its stories, and their tasks, wired with dependencies. This is how a planner " +
         "protocols a demand — the spec goes INTO the records (task description, story acceptance, capability tags), because a " +
-        "worker receives only a task id and reads the record itself. Tasks are created `ready` and unassigned; assign them with " +
+        "worker receives only a task id and reads the record itself. Tasks land `backlog`; assigning one moves it to `ready`. Use " +
         "`backlog_assign`. `dependsOn` references other tasks in the same plan by key (default `s<story>t<task>`, zero-based) " +
         "and may only point backward, so the plan is acyclic by construction. All-or-nothing: an invalid key rolls back the plan.",
       inputSchema: {
@@ -117,7 +118,7 @@ export const TOOL_DEFS = [
       description:
         "Append to an existing plan: add stories to an epic, and/or tasks to a story, after work has started. Use it for a gap a worker " +
         "found, a follow-up from review, or a story split discovered late. Both kinds are written with the same self-sufficient record a " +
-        "planned item carries; tasks land `ready` unless `assigned` is given, and a `task.appended` row is written so a dispatcher can " +
+        "planned item carries; tasks land `backlog` unless `assigned` is given (then `ready`), and a `task.appended` row is written so a dispatcher can " +
         "route them. `dependsOn` accepts a key from this call or an existing item id. All-or-nothing.",
       inputSchema: {
         type: "object",

@@ -45,8 +45,9 @@ test("legacy data is copied into the recursive tree without losing ids or event 
   const story = store.item.get("STORY-1", { includeDeleted: true });
   const task = store.item.get("TASK-1", { includeDeleted: true });
   assert.equal(epic.kind, "epic");
-  assert.equal(epic.status, "ready", "legacy planned maps to ready");
+  assert.equal(epic.status, "backlog", "legacy planned without an assignment maps to backlog");
   assert.equal(story.kind, "story");
+  assert.equal(story.status, "ready", "legacy assigned ready stays ready");
   assert.equal(story.epic_id, "EPIC-1");
   assert.equal(task.kind, "task");
   assert.equal(task.story_id, "STORY-1");
