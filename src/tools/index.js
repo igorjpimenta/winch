@@ -32,10 +32,9 @@ export function createToolHandlers(store, logger) {
   async function handle(name, args, identity, meta = null) {
     assertCleanTriple(identity, `caller identity for ${name}`);
     const cfg = resolveRequestConfig(baseConfig, meta);
-    // Optional cost tracking: opportunistically record usage stamped by a
-    // companion plugin on the trusted meta/args channel. Never required.
-    if (cfg.costTracking !== false) {
-      try {
+    // Opportunistically record usage stamped by a companion plugin on the
+    // trusted meta/args channel. Always on.
+    try {
         const usage = resolveUsage({ meta, args });
         if (usage) {
           const fromArgs = (typeof args?.taskId === "string" || typeof args?.task_id === "string" ||
@@ -76,7 +75,6 @@ export function createToolHandlers(store, logger) {
       } catch (e) {
         logger?.warn?.(`winch: usage record failed: ${e?.message}`);
       }
-    }
     const fn = handlers[name];
     if (!fn) return err(`unknown tool: ${name}`, "unknown_tool");
     return fn(args, identity, cfg);
