@@ -1,23 +1,11 @@
-# Dispatch and wake
+# Dispatch webhooks
 
-Start the long-lived server with `winch serve --ws`. Despite the flag name, the
-process serves two things: the read-only WebSocket event stream and the HTTP
-dispatch endpoints. Wakes leave over executor webhooks, not the socket.
+Winch delivers dispatch wakes over HTTP. A receiver answers `202` (or any 2xx)
+to accept delivery; the agent's MCP `backlog_claim` remains the work guard, so
+duplicate wakes are safe. Routing, backoff and restart recovery live in
+[Dispatch and recovery](dispatch.md).
 
-- The server routes `task.assigned`, `story.assigned`, `task.restored`,
-  `task.appended` and `epic.completed` into `admission_queue`.
-- Each delivery attempt is an `admission_attempts` row. A queued wake is
-  POSTed to every registered endpoint for its harness. `202` means the
-  receiver accepted the request; it does **not** mean the work was claimed.
-  The agent's MCP `backlog_claim` is the work guard.
-- The row becomes `active` when the item is claimed and closes when the item
-  closes. Append and review wakes have no claim: one successful delivery is
-  one-shot, and the offer TTL ends the row instead of retrying it.
-- A failed delivery, an expired offer, or a wake that is never claimed
-  requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
-  cap and global cap are in [Configuration](configuration.md).
-
-## Executor registration
+## Registration
 
 Each adapter owns a stable executor id and bearer, persists them, receives
 wakes on `POST /wake`, and registers its URL:
@@ -36,30 +24,45 @@ endpoint can be registered or replaced from the CLI:
 
 `dispatch set` derives a stable `manual-<hash>` executor id from the URL when
 `--executor` is omitted. If `--bearer` is omitted it generates one and prints it
-once; later `list` output masks it. `dispatch test` sends
-`{"type":"ping"}` and reports each endpoint's status. The bearer is sent as
+once; later `list` output masks it. The bearer is sent as
 `Authorization: Bearer …` on every wake.
 
-## Restart recovery
+## Wake payload
 
-`POST /dispatch/recover` is the harness-owned reconciler:
+Winch POSTs this JSON body:
 
-    POST /dispatch/recover
-    {"harness":"openclaw","executorId":"openclaw-…"}
+    {
+      "type": "wake",
+      "admissionId": "ADM-…",
+      "itemId": "TASK-…",
+      "kind": "task",
+      "harness": "openclaw",
+      "agent": "worker",
+      "eventId": 42,
+      "offerExpiresAt": 1730000000000,
+      "at": 1729999880000
+    }
 
-It returns:
+The receiver should verify the bearer, keep the request bounded, and return 2xx
+once the wake is queued locally. A non-2xx response requeues delivery with
+backoff. The payload is a pointer, not a brief: the agent reads the record with
+`backlog_get` and wins the work with `backlog_claim`.
 
-- `resume`: assigned `in_progress` work with `task`, `attemptId`,
-  `sessionId`, `sessionKey`, and `leaseExpiresAt`;
-- `start`: already-offered wakes plus queued wakes admitted into free slots;
-- `free`: remaining capacity after active and offered work.
+## Testing
 
-The harness resumes the same attempt, never re-claims an `in_progress` item.
-Its first action is `backlog_update` with the returned `attemptId`; a stale
-attempt gets `stale_claim`. Only an expired lease returns the item to `ready`,
-where normal wake and claim apply.
+`winch dispatch test --harness H [--executor E]` sends:
 
-`backlog_delegate` can carry `childKey` and `visitSeq`. A retry of the same pair
-returns the existing child; a higher `visitSeq` starts a new round. The parent
-waits on all children, and the last child offered moves `current_child_key`.
-`backlog_append` wakes the epic creator, not the task assignee.
+    {"type":"ping","harness":"H","executorId":"E","at":1730000000000}
+
+Both bundled receivers answer `200 {"ok":true,"test":true}`. A custom receiver
+may do the same, or return any 2xx. The command reports each endpoint's status
+and exits non-zero if any endpoint fails.
+
+## Receiver requirements
+
+- Accept `POST` on a stable URL reachable from the winch server.
+- Require the executor bearer; reject a mismatched or missing one.
+- Return 2xx before starting long work, and deduplicate on `admissionId`.
+- Register on boot and re-register after an address change.
+- Call `POST /dispatch/recover` on boot; see
+  [Restart recovery](dispatch.md#restart-recovery).

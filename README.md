@@ -263,7 +263,8 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | --- | --- |
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
 | Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
-| Dispatch, webhooks, restart recovery | [Dispatch and wake](docs/webhooks.md) |
+| Dispatch routing, queue, recovery | [Dispatch and recovery](docs/dispatch.md) |
+| Executor webhook contract and CLI | [Dispatch webhooks](docs/webhooks.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
 
@@ -321,7 +322,7 @@ new row to all connected clients as JSON text frames:
   title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
   assignee},"actor":"...","note":"..."}` per insert, in id order.
 - Dispatch wakes are not frames on this stream. Executors register over HTTP
-  and receive wakes at their own endpoint. See [Dispatch and wake](docs/webhooks.md).
+  and receive wakes at their own endpoint. See [Dispatch and recovery](docs/dispatch.md) and [Dispatch webhooks](docs/webhooks.md).
 
 Kinds on the wire come in three families - `task.*` for task lifecycle,
 `gate.*` for gate lifecycle, `release.*` for shipment - each declared by its
