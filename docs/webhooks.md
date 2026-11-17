@@ -1,7 +1,8 @@
 # Dispatch and wake
 
-`winch serve --ws` now serves two things: the read-only event stream and the
-HTTP dispatch endpoints. Wakes leave over executor webhooks, not the socket.
+Start the long-lived server with `winch serve --ws`. Despite the flag name, the
+process serves two things: the read-only WebSocket event stream and the HTTP
+dispatch endpoints. Wakes leave over executor webhooks, not the socket.
 
 - The server routes `task.assigned`, `story.assigned`, `task.restored`,
   `task.appended` and `epic.completed` into `admission_queue`.
