@@ -35,14 +35,10 @@ carries no explicit extensions path; the browser-lease extension lives at
    `@igorjpimenta/winch` as a dependency): `openclaw plugins install
    @igorjpimenta/winch-openclaw`. From a checkout instead: copy or symlink
    `plugins/openclaw/winch/` into `~/.openclaw/extensions/winch/`.
-   Then set `webhookBearer` (any secret) in the extension config —
-   `webhookPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
-   port isn't detectable. On boot the plugin registers its own route in
-   winch (`winch webhook set` + `test`) and logs the result — no manual
-   step unless it warns you with the exact command. Opt out with
-   `webhookAutoregister: false`. Multi-gateway setups: set
-   `webhookHarness` per gateway to match its winch MCP entry's
-   `WINCH_HARNESS`.
+   Set `dispatchPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
+   port isn't detectable, and `dispatchHarness` if the winch MCP entry uses a
+   harness other than `openclaw`. The plugin generates its executor id and
+   bearer, persists them, and registers its wake route on boot.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -76,21 +72,14 @@ returns `undefined`; the call reaches the server unstamped and is refused
 An assigned task is inert until someone starts the assignee's session, and a
 worker must never receive a hand-written brief: the record is the spec.
 
-With `WINCH_DISPATCH_MODE=core` (the default) the server routes and the plugin
-only accepts wake offers: it sends `hello` with `executorId` + `harness`, then
-`wake_accept` for an offer and starts the assigned agent on `wake_granted`.
-Config: `dispatchEnabled` (default true), `dispatchHarness` (must match the
-harness the worker claims under; default `webhookHarness` or `openclaw`).
-
-In `WINCH_DISPATCH_MODE=plugin` the plugin routes events itself: it follows
-`winch serve --ws` (config `dispatchWsUrl`, default
-`ws://127.0.0.1:38291`), and for each routable row starts a one-shot agent
-session whose message is just the opaque item id; the row's `kind` says whether
-to claim, break down, or review. The session is started through the gateway's
-own CLI entry (`agent --session-key agent:<agent>:winch:<id>`), because the
-host only lets bundled plugins schedule turns in-process. Plugin-mode config:
-`dispatchPlanner` (fallback: atlas), `dispatchStatePath` (reviewed epics across
-restarts).
+The winch server routes and the plugin receives. On boot the plugin registers
+`POST /api/winch/dispatch` and reconciles once; every
+`dispatchReconcileMs` (default 30s) it calls `POST /dispatch/recover` and
+resumes assigned `in_progress` work. A wake carries the opaque item id, or a
+`resume` wake carries the task id and `attemptId`; the row's `kind` says
+whether to claim, break down, or review. The session is started through the
+gateway's own CLI entry (`agent --session-key agent:<agent>:winch:<id>`),
+because the host only lets bundled plugins schedule turns in-process.
 
 Routing, one row per decision:
 
@@ -118,43 +107,20 @@ Two more rows matter to the dispatcher:
   tasks (which reopens the epic) or reports it done. Act on each marker once,
   not on every replay.
 
-Dispatch is event-driven, never polled: `serve --ws` replays backlog history
-on connect (`{"type":"history"}`), so a restarted gateway catches up without a
-timer. In core mode the admission queue is the one-winner guard; in plugin mode
-a task wake is suppressed for 35 minutes and each `epic.completed` marker is
-reviewed once (the last reviewed event id is remembered per epic in
-`dispatchStatePath`). Claim leases remain the work-level guard in both modes.
+Dispatch is delivered by HTTP, not polled. `202` means the receiver accepted
+the request; the agent's `backlog_claim` is the one-winner guard, so duplicate
+wakes are safe. The admission queue holds an offer until it is claimed, closes,
+or expires; failed deliveries and expired offers requeue with backoff.
+Append/review wakes are one-shot. Claim leases remain the work-level guard.
 
-## Claim webhook (plugin mode: wake on attribution)
+## Restart recovery
 
-Claim webhooks are the `WINCH_DISPATCH_MODE=plugin` path. In core mode the same
-handoff arrives as a wake offer on the event stream.
-
-Polling `backlog_claim` leaves an idle agent waiting for its next heartbeat.
-Instead, winch can push the handoff the moment a claim lands and the plugin
-opens a **fresh session** for the task:
-
-1. On the plugin: set `webhookBearer` (any secret) in the extension config —
-   `~/.openclaw/openclaw.json` → the extension's config. The route
-   `POST /api/winch/claimed` stays disarmed (503) until set.
-2. On winch: register the callback URL. Persistent (survives restarts,
-   checked first at claim time) — `winch webhook set --harness openclaw
-   --url http://<gateway-host>:<port>/api/winch/claimed --bearer <same
-   secret>` — then verify with `winch webhook test --harness openclaw`
-   (the plugin answers `{ok:true,test:true}` without waking anyone).
-   Ephemeral alternative: `WINCH_CLAIM_WEBHOOK_URL` (+ `_BEARER`) for one
-   harness, or `WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…","bearer":"…"}}'`
-   per harness (or the `--config` equivalents). Nothing registered anywhere
-   = no-op; claims behave exactly as before.
-3. On claim, winch POSTs `{event:"task.claimed", task, session, handoff}`
-   (see `src/claim-webhook.js`); the plugin verifies the bearer, then
-   `scheduleSessionTurn`s a one-shot turn (`deleteAfterRun`, tag
-   `winch-claim`) in session `winch-claim-<item-id>` carrying the receiver
-   prompt, and injects a pointer into the claiming session. If the fresh
-   session fails, the turn falls back to the claiming session; if scheduling
-   is unavailable, the claim parks in a pending queue (4h TTL) drained by
-   the heartbeat hook — the agent's next natural wake carries the handoff.
-   Delivery never fails the claim (bounded 3s timeout, failures are warnings).
+The core query is `POST /dispatch/recover`; it returns assigned `in_progress`
+work with `attemptId`, `sessionId`, `sessionKey` and lease expiry. The plugin
+dedupes by task id and resumes the same attempt. Its first action is
+`backlog_update` with the returned `attemptId`; a stale attempt gets
+`stale_claim`, and only an expired lease returns the item to `ready` for a
+normal wake and claim.
 
 ## opencode
 
@@ -173,25 +139,20 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 
 ### Auto-wake dispatch (opencode)
 
-The opencode companion ships the same event-driven client as openclaw
-(`dispatch.js`). In core mode it accepts wake offers; in plugin mode it follows
-`winch serve --ws` (default `ws://127.0.0.1:38291`), replays history on
-connect, and routes each row by kind:
+The opencode companion ships its own dispatch receiver
+(`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, generates
+a stable executor id and bearer, registers the listener with winch, and calls
+`POST /dispatch/recover` on startup and on its reconcile interval.
 
-- `task.assigned` → assignee (if ready)
-- `story.assigned` → story owner (break down)
-- `task.appended` → epic creator (route new work)
-- `task.restored` → existing assignee
-- `task.completed` / `task.cancelled` → unblocked dependents
-- `epic.completed` → epic creator (once per marker)
+A wake carries the opaque item id; the plugin starts a claimable `opencode run`
+session. Resume wakes carry the task id and `attemptId`, so the prompt fences
+the session with `backlog_update` and `backlog_done` and never re-claims an
+`in_progress` item. Duplicate wakes are harmless because `backlog_claim` is
+the guard; the core treats `202` as delivery, not acceptance.
 
-Routing is the record alone: a wake carries nothing but the item id, and the
-agent reads it with `backlog_get`. In plugin mode in-flight wakes are
-suppressed for 35 minutes, reviewed epics are remembered in
-`~/.opencode/state/winch-plugin-dispatch.json`, and a null assignee/creator dies
-loudly on the dispatch layer (no wake, no retry) — a later assignment emits a
-new row. No planner agent is hardcoded; the fallback planner is supplied by the
-caller when needed.
+The plugin config mirrors OpenClaw: `dispatchEnabled`, `dispatchUrl`,
+`dispatchHarness`, `dispatchReconcileMs`, `dispatchStatePath`, and a port for
+the loopback listener.
 
 ### Local (stdio) — the strong shape
 

@@ -72,17 +72,18 @@ them from the running server.
 - The **MCP server** exposes the whole backlog as tools over stdio (one pipe per
   harness) or streamable HTTP (one shared daemon). Identity is stamped at the
   transport edge.
-- The **Event stream** (`winch serve --ws`) is the dispatch channel: it replays
-  recent history, holds wakes in `admission_queue`, and offers each one to a
-  connected executor. Claim webhooks are the legacy plugin-mode path.
+- The **Event stream** (`winch serve --ws`) is a read-only feed of backlog
+  events. Dispatch wakes leave over HTTP webhooks, coordinated through
+  `admission_queue` and accepted by the agent's MCP `backlog_claim`.
 - **Harness adapters** (`@igorjpimenta/winch-openclaw`, `@igorjpimenta/winch-opencode`)
-  stamp identity, checkpoint on turn end (OpenClaw), and accept wake offers over
-  the event stream.
+  stamp identity, checkpoint on turn end (OpenClaw), receive dispatch webhooks
+  on a plugin-local listener, and reconcile assigned `in_progress` work after a
+  restart.
 
     harness agent --MCP (stdio | HTTP + X-Winch-Harness)--> MCP server --> SQLite store
-                                                              |  event stream / admission
+                                                              |  dispatch webhook
                                                               v
-                                                        wake offer -> idle harness agent
+                                                        wake -> plugin listener -> agent
 
 ## Identity
 
@@ -103,38 +104,39 @@ stamping automatically. Full contract, per-dimension table and adapter setup:
 
 ## Dispatch
 
-`winch serve --ws` is the dispatch channel. With `WINCH_DISPATCH_MODE=core`
-(the default), the server is the single scheduler:
+`winch serve --ws` hosts the store, the read-only event stream and the HTTP
+dispatch endpoints. The server is the single scheduler:
 
 - It routes `task.assigned`, `story.assigned`, `task.restored`, `task.appended`
   (to the epic creator) and `epic.completed` (to the epic creator).
-- It writes each wake to `admission_queue`, then offers it to connected
-  executors as a `wake` frame. One gateway accepts and gets `wake_granted`; the
-  others get `wake_taken`, so two gateways cannot start the same turn.
-- An offer reserves capacity until it is claimed, closes, or expires. Rejected
-  connections and expired offers requeue with backoff; append/review wakes are
+- It writes each wake to `admission_queue`, then POSTs it to every registered
+  executor for that harness. `202` means the receiver accepted the request;
+  the agent's `backlog_claim` is the work guard, so duplicate wakes are safe.
+- An offer reserves capacity until it is claimed, closes, or expires. Failed
+  deliveries and expired offers requeue with backoff; append/review wakes are
   one-shot and end on their TTL.
 - Caps are per harness (`WINCH_DISPATCH_HARNESS_MAX`) and global
-  (`WINCH_DISPATCH_GLOBAL_MAX`). `WINCH_DISPATCH_PLANNER` skips the planner's
-  own rows.
+  (`WINCH_DISPATCH_GLOBAL_MAX`).
+
+`POST /dispatch/recover` returns assigned `in_progress` work with its
+`attemptId`, so a restarted harness resumes that attempt instead of
+re-claiming it. Its first call is `backlog_update` with the returned
+`attemptId`; a stale attempt gets `stale_claim`. Expired leases return work to
+`ready` through the normal sweep.
 
 `backlog_delegate` accepts an optional `childKey` and `visitSeq`. Retrying the
 same pair returns the same child; a new `visitSeq` starts a new round. The
 parent waits on every child, and `current_child_key` records the last child
 offered. `backlog_append` wakes the epic creator, not the task assignee.
 
-Set `WINCH_DISPATCH_MODE=plugin` to keep the older adapter-side routing and
-claim webhooks during rollback. The mode is a single switch; both sides read it
-from the `welcome` frame.
-
 ## Harnesses
 
 An adapter attaches to an existing order; it never creates work.
 
 **OpenClaw** - `@igorjpimenta/winch-openclaw` stamps `_meta.winch`,
-checkpoints on turn end, resumes from the latest checkpoint, and accepts wake
-offers on the event stream. It receives claim webhooks at
-`POST /api/winch/claimed` only in plugin dispatch mode.
+checkpoints on turn end, resumes from the latest checkpoint, receives dispatch
+wakes at `POST /api/winch/dispatch`, and reconciles `in_progress` attempts
+after a restart.
 
     openclaw plugins install npm:@igorjpimenta/winch-openclaw@latest
 
@@ -201,9 +203,8 @@ Or via the CLI:
     opencode plugin add @igorjpimenta/winch-opencode
 
 Automatic checkpoint/resume is not part of the OpenCode adapter; the agent uses
-the winch MCP tools directly. In core dispatch mode the adapter accepts wake
-offers and starts a claimable session with `opencode run`; in plugin mode the
-legacy claim webhook does the same.
+the winch MCP tools directly. The plugin listens for dispatch wakes on a
+loopback endpoint and starts a claimable session with `opencode run`.
 
 ## MCP tools
 
@@ -262,7 +263,7 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | --- | --- |
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
 | Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
-| Dispatch, wake offers, legacy claim webhooks | [Dispatch and wake](docs/webhooks.md) |
+| Dispatch, webhooks, restart recovery | [Dispatch and wake](docs/webhooks.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
 
@@ -277,9 +278,8 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `next` | list the current ready queue |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers |
 | `merge-detect [--dry-run]` | apply merged/closed PR outcomes |
-| `webhook set --harness H --url U [--bearer B]` | register a harness callback URL (checked first at claim) |
-| `webhook list` / `webhook remove --harness H` | inspect / drop registered callback URLs |
-| `webhook test --harness H` | POST a test ping to the harness target |
+| `dispatch list` | list registered executor webhooks |
+| `dispatch remove --harness H --executor E` | drop an executor webhook |
 | `serve --ws --port N [--host H]` | stream store events over WebSocket |
 
 ## Deploy (any server)
@@ -313,16 +313,13 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
 unless `--host` says otherwise) tails the `item_events` ledger and broadcasts every
 new row to all connected clients as JSON text frames:
 
-- `{"type":"welcome","payload":"v3","lastEventId":N,"dispatchMode":"core|plugin",
-  "requiresHello":bool}` on connect, then `{"type":"history","events":[...]}`
-  (newest 200), then
+- `{"type":"welcome","payload":"v3","lastEventId":N}` on connect, then
+  `{"type":"history","events":[...]}` (newest 200), then
 - `{"type":"event","kind":"task.completed","id":N,"at":T,"item":{id,kind,
   title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
   assignee},"actor":"...","note":"..."}` per insert, in id order.
-- In core dispatch mode an executor sends `{"type":"hello","executorId":...,
-  "harness":...}`, receives `hello_ok`, then accepts a `wake` with
-  `{"type":"wake_accept","admissionId":...}` and receives `wake_granted` or
-  `wake_taken`. See [Dispatch and wake](docs/webhooks.md).
+- Dispatch wakes are not frames on this stream. Executors register over HTTP
+  and receive wakes at their own endpoint. See [Dispatch and wake](docs/webhooks.md).
 
 Kinds on the wire come in three families - `task.*` for task lifecycle,
 `gate.*` for gate lifecycle, `release.*` for shipment - each declared by its
@@ -360,7 +357,7 @@ Schema lives in `src/schema.js` as Drizzle tables. The schema is one recursive
 `items` tree (`kind` = epic/story/task, `parent_id` for nesting), with
 `item_state`, `item_tags`, `item_edges`, `attempts`, `work_sessions`,
 `artifacts`, `item_events`, `admission_queue`, `admission_attempts` and
-`harness_webhooks`. Item ids are opaque; `kind`
+`dispatch_webhooks`. Item ids are opaque; `kind`
 is the discriminator, never an id prefix. `npm run db:generate`
 turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
 migrations on open, and `npm run db:migrate` does the same explicitly for a
@@ -392,7 +389,7 @@ Tuning knobs are declared the way the harness is - and none of them is
 required. Precedence per knob: per-call `_meta.winch.config` > constructor
 `{ config }` (`createStore`, `--config JSON|PATH` on `mcp`/`serve`/`watch`)
 > `WINCH_*` env > code default. Every knob has a default, so a server with no
-overrides starts on core dispatch. Malformed values refuse (bad key named) at startup
+overrides starts with dispatch enabled. Malformed values refuse (bad key named) at startup
 for construction config, per call for meta overlay; unknown explicit keys
 refuse as likely typos, unknown meta keys are ignored for forward compat.
 
@@ -402,13 +399,11 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` (`"24h,72h"`, `ms|s|m|h|d` suffixes) | 24h / 72h |
 | WS port / history / poll / sweep | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` / `WINCH_WS_SWEEP_MS` | 38291 / 200 / 1000 / 30000 ms |
-| Dispatch mode | `WINCH_DISPATCH_MODE` (`core` or `plugin`) | `core` |
-| Dispatch planner / caps | `WINCH_DISPATCH_PLANNER` / `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | unset / 8 / 16 |
+| Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
 | Offer TTL / backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
+| Dispatch webhook timeout | `WINCH_DISPATCH_WEBHOOK_TIMEOUT_MS` | 3000 ms |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | DB path | `WINCH_DB` | `~/.winch/store.sqlite` |
-| Claim webhook URL / bearer / timeout | `WINCH_CLAIM_WEBHOOK_URL` / `WINCH_CLAIM_WEBHOOK_BEARER` / `WINCH_CLAIM_WEBHOOK_TIMEOUT_MS` | unset / unset / 3000 ms |
-| Claim webhooks per harness (map) | `WINCH_CLAIM_WEBHOOKS` (`{"openclaw":{"url":"...","bearer":"..."}}`) | `{}` (falls back to single URL) |
 | Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
