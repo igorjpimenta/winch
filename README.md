@@ -278,8 +278,10 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `next` | list the current ready queue |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers |
 | `merge-detect [--dry-run]` | apply merged/closed PR outcomes |
-| `dispatch list` | list registered executor webhooks |
+| `dispatch set --harness H --url U [--bearer B] [--executor E]` | register or replace a manual executor webhook; a bearer is generated and printed when omitted |
+| `dispatch list [--harness H]` | list registered executor webhooks |
 | `dispatch remove --harness H --executor E` | drop an executor webhook |
+| `dispatch test --harness H [--executor E]` | POST a ping to registered executor webhooks |
 | `serve --ws --port N [--host H]` | stream store events over WebSocket |
 
 ## Deploy (any server)

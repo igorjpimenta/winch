@@ -56,6 +56,14 @@ test("receiver rejects a bad bearer and accepts a wake", async () => {
   await handler(bad, badRes);
   assert.equal(badRes.statusCode, 401);
 
+  const pingReq = Readable.from([JSON.stringify({ type: "ping" })]);
+  pingReq.method = "POST";
+  pingReq.headers = { authorization: "Bearer secret" };
+  const pingRes = { statusCode: 0, body: "", setHeader() {}, end(body) { this.body = body; } };
+  await handler(pingReq, pingRes);
+  assert.equal(pingRes.statusCode, 200);
+  assert.equal(calls.length, 0);
+
   const req = Readable.from([JSON.stringify({ type: "wake", admissionId: "ADM-1", itemId: "TASK-1", agent: "worker", kind: "task" })]);
   req.method = "POST";
   req.headers = { authorization: "Bearer secret" };

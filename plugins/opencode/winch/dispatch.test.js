@@ -52,6 +52,14 @@ test("listener registers with core and accepts a wake", async () => {
     assert.equal(registrations[0].harness, "opencode");
     assert.match(registrations[0].url, /^http:\/\/127\.0\.0\.1:\d+\/wake$/);
     const state = loadExecutorState(statePath);
+    const ping = await fetch(registrations[0].url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${state.bearer}`, "content-type": "application/json" },
+      body: JSON.stringify({ type: "ping" }),
+    });
+    assert.equal(ping.status, 200);
+    assert.equal(calls.length, 0);
+
     const res = await fetch(registrations[0].url, {
       method: "POST",
       headers: { authorization: `Bearer ${state.bearer}`, "content-type": "application/json" },

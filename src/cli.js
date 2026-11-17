@@ -3,6 +3,7 @@
 // ~/.winch/store.sqlite.
 
 import { readFileSync } from "node:fs";
+import crypto from "node:crypto";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store/index.js";
@@ -50,13 +51,21 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
+  dispatch set --harness H --url U [--bearer B] [--executor E] [--timeout-ms N]
+                                           register or replace an executor endpoint
   dispatch list [--harness H]             list registered executor endpoints
   dispatch remove --harness H --executor E
-                                           drop an executor endpoint`;
+                                           drop an executor endpoint
+  dispatch test --harness H [--executor E]
+                                           POST a ping to registered executor endpoints`;
 
 function fail(msg, code = 2) {
   console.error(msg);
   process.exit(code);
+}
+
+function manualExecutorId(url) {
+  return `manual-${crypto.createHash("sha256").update(String(url)).digest("hex").slice(0, 12)}`;
 }
 
 export async function runCli(argv) {
@@ -232,23 +241,67 @@ export async function runCli(argv) {
 
     case "dispatch": {
       const [sub, ...subRest] = rest;
-      if (!["list", "remove"].includes(sub)) {
-        fail("usage: winch dispatch (list|remove) …");
+      if (!["set", "list", "remove", "test"].includes(sub)) {
+        fail("usage: winch dispatch (set|list|remove|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
-        options: { harness: { type: "string" }, executor: { type: "string" } },
+        options: {
+          harness: { type: "string" },
+          url: { type: "string" },
+          bearer: { type: "string" },
+          executor: { type: "string" },
+          "timeout-ms": { type: "string" },
+          config: { type: "string" },
+        },
       });
-      const store = openStore();
+      const store = openStore(loadConfig(values));
       try {
         if (sub === "list") {
           console.log(JSON.stringify(store.dispatch.list({ harness: values.harness ?? null }).map((r) => ({ ...r, bearer: "<set>" })), null, 2));
           return;
         }
-        if (!values.harness || !values.executor) fail("winch dispatch remove requires --harness H --executor E");
-        const removed = store.dispatch.remove({ harness: values.harness, executorId: values.executor });
-        if (!removed) fail(`no dispatch endpoint for ${values.harness}/${values.executor}`, 1);
-        console.log(JSON.stringify({ removed: `${values.harness}/${values.executor}` }));
+        if (sub === "set") {
+          if (!values.harness || !values.url) fail("winch dispatch set requires --harness H --url U");
+          const timeoutMs = values["timeout-ms"] !== undefined ? Number(values["timeout-ms"]) : null;
+          if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+            fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
+          }
+          const generated = !values.bearer;
+          const bearer = values.bearer ?? crypto.randomBytes(32).toString("hex");
+          const executorId = values.executor ?? manualExecutorId(values.url);
+          const row = store.dispatch.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
+          console.log(JSON.stringify({ ...row, bearer: generated ? bearer : "<set>" }, null, 2));
+          return;
+        }
+        if (sub === "remove") {
+          if (!values.harness || !values.executor) fail("winch dispatch remove requires --harness H --executor E");
+          const removed = store.dispatch.remove({ harness: values.harness, executorId: values.executor });
+          if (!removed) fail(`no dispatch endpoint for ${values.harness}/${values.executor}`, 1);
+          console.log(JSON.stringify({ removed: `${values.harness}/${values.executor}` }));
+          return;
+        }
+        if (!values.harness) fail("winch dispatch test requires --harness H");
+        const rows = store.dispatch.list({ harness: values.harness })
+          .filter((r) => !values.executor || r.executorId === values.executor);
+        if (!rows.length) fail(`no dispatch endpoint for ${values.harness}${values.executor ? `/${values.executor}` : ""}`, 1);
+        const results = await Promise.all(rows.map(async (row) => {
+          const timeoutMs = row.timeoutMs ?? store.config.dispatchWebhookTimeoutMs ?? 3000;
+          try {
+            const res = await fetch(row.url, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${row.bearer}` },
+              body: JSON.stringify({ type: "ping", harness: row.harness, executorId: row.executorId, at: Date.now() }),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            const text = await res.text().catch(() => "");
+            return { harness: row.harness, executorId: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
+          } catch (err) {
+            return { harness: row.harness, executorId: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
+          }
+        }));
+        console.log(JSON.stringify(results, null, 2));
+        if (results.some((r) => !r.ok)) process.exitCode = 1;
       } finally {
         store.close();
       }

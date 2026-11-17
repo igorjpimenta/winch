@@ -51,8 +51,8 @@ export async function deliverWake(store, row, { config = store.config, logger = 
   }
 
   const payload = wakePayload(row, { offerMs: config.dispatchOfferMs });
-  const timeoutMs = config.dispatchWebhookTimeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const results = await Promise.all(endpoints.map((endpoint) => postWake(endpoint, payload, timeoutMs)));
+  const fallbackTimeoutMs = config.dispatchWebhookTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const results = await Promise.all(endpoints.map((endpoint) => postWake(endpoint, payload, endpoint.timeoutMs ?? fallbackTimeoutMs)));
   const delivered = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
   for (const r of failed) {

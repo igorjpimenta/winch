@@ -26,9 +26,19 @@ wakes on `POST /wake`, and registers its URL:
     {"harness":"openclaw","executorId":"openclaw-…","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
 
 The core stores the target in `dispatch_webhooks`, keyed by
-`(harness, executor_id)`. `winch dispatch list` and
-`winch dispatch remove --harness H --executor E` inspect or drop a target.
-The bearer is sent as `Authorization: Bearer …` on every wake.
+`(harness, executor_id)`. Adapters register themselves; a manually managed
+endpoint can be registered or replaced from the CLI:
+
+    winch dispatch set --harness H --url U [--bearer B] [--executor E] [--timeout-ms N]
+    winch dispatch list [--harness H]
+    winch dispatch remove --harness H --executor E
+    winch dispatch test --harness H [--executor E]
+
+`dispatch set` derives a stable `manual-<hash>` executor id from the URL when
+`--executor` is omitted. If `--bearer` is omitted it generates one and prints it
+once; later `list` output masks it. `dispatch test` sends
+`{"type":"ping"}` and reports each endpoint's status. The bearer is sent as
+`Authorization: Bearer …` on every wake.
 
 ## Restart recovery
 

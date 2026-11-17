@@ -150,6 +150,10 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, wake, s
     }
     const body = await readJson(req, res);
     if (body === undefined) return;
+    if (body?.type === "ping") {
+      json(res, 200, { ok: true, test: true });
+      return;
+    }
     if (body?.type !== "wake" || !body.admissionId || !body.itemId || !body.agent) {
       json(res, 400, { error: "wake payload requires admissionId, itemId, agent" });
       return;
