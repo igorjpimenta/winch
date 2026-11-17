@@ -10,4 +10,5 @@ CREATE TABLE `dispatch_webhooks` (
 	PRIMARY KEY(`harness`, `executor_id`)
 );
 --> statement-breakpoint
-CREATE INDEX `idx_dispatch_webhooks_harness` ON `dispatch_webhooks` (`harness`,`last_seen_at`);
+CREATE INDEX `idx_dispatch_webhooks_harness` ON `dispatch_webhooks` (`harness`,`last_seen_at`);--> statement-breakpoint
+DROP TABLE `harness_webhooks`;

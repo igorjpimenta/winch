@@ -1,1 +1,0 @@
-DROP TABLE `harness_webhooks`;
