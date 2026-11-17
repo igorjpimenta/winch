@@ -16,6 +16,18 @@ test("update heartbeats and appends a progress event", async () => {
   assert.match(ev.note, /half way/);
 });
 
+test("attemptId fences a stale heartbeat out of a newer attempt", async () => {
+  const { task } = h.seedReadyTask({ assigned: "atlas" });
+  await h.call("backlog_claim", { taskId: task.id });
+  const live = h.store.attempt.list({ itemId: task.id, live: true })[0];
+  const stale = await h.call("backlog_update", { taskId: task.id, attemptId: "attempt-stale" });
+  assert.equal(stale.details.reason, "stale_claim");
+  const ok = await h.call("backlog_update", { taskId: task.id, attemptId: live.id, progressSummary: "resumed" });
+  assert.equal(ok.details.status, "ok");
+  const done = await h.call("backlog_done", { taskId: task.id, attemptId: live.id, resultSummary: "resumed and closed" });
+  assert.equal(done.details.status, "ok");
+});
+
 test("update rejects an unclaimed task", async () => {
   const { task } = h.seedReadyTask();
   assert.equal((await h.call("backlog_update", { taskId: task.id })).details.reason, "not_claimed");
@@ -86,6 +98,18 @@ test("the epic closes only when its last story does", async () => {
   }
   assert.equal(h.store.epic.get(epic.id).status, "done");
   assert.equal(h.store.db.prepare("SELECT * FROM item_events WHERE kind='epic.completed' AND note=?").all(epic.id).length, 1);
+});
+
+test("attemptId fences a stale block", async () => {
+  const { task } = h.seedReadyTask({ assigned: "atlas" });
+  await h.call("backlog_claim", { taskId: task.id });
+  const live = h.store.attempt.list({ itemId: task.id, live: true })[0];
+  const stale = await h.call("backlog_block", { taskId: task.id, attemptId: "attempt-stale", reason: "stale" });
+  assert.equal(stale.details.reason, "stale_claim");
+  assert.equal(h.store.task.get(task.id).status, "in_progress");
+  const ok = await h.call("backlog_block", { taskId: task.id, attemptId: live.id, reason: "blocked live" });
+  assert.equal(ok.details.status, "ok");
+  assert.equal(h.store.task.get(task.id).status, "blocked");
 });
 
 test("block records a reason and an optional dependency", async () => {

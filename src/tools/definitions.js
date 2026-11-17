@@ -280,6 +280,7 @@ export const TOOL_DEFS = [
         required: ["taskId"],
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
+          attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
           heartbeat: { type: "boolean", description: "Refresh liveness (default true)." },
           progressSummary: { type: "string", description: "One-line progress note for the audit trail." },
           comment: { type: "string", description: "Freeform note appended as an audit event." },
@@ -298,6 +299,7 @@ export const TOOL_DEFS = [
         required: ["taskId", "resultSummary"],
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
+          attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
           resultSummary: { type: "string", description: "One-paragraph outcome (success or failure)." },
           artifacts: { type: "array", items: { type: "string" }, description: "Paths/URLs of produced artifacts (diff, doc, PR)." },
         },
@@ -315,6 +317,7 @@ export const TOOL_DEFS = [
         required: ["taskId", "reason"],
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
+          attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
           reason: { type: "string", description: "Why the task cannot proceed." },
           gateType: { type: "string", description: "Human gate being opened (roadmap|architecture|release|custom) — stamps gate_type; resume clears it." },
           blockedBy: {
