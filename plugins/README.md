@@ -76,15 +76,21 @@ returns `undefined`; the call reaches the server unstamped and is refused
 An assigned task is inert until someone starts the assignee's session, and a
 worker must never receive a hand-written brief: the record is the spec.
 
-The plugin does this itself: it follows `winch serve --ws` (config
-`dispatchWsUrl`, default `ws://127.0.0.1:38291`), and for each routable row
-starts a one-shot agent session whose message is just the opaque item id; the
-row's `kind` says whether to claim, break down, or review. The session is started
-through the gateway's own CLI entry (`agent --session-key
-agent:<agent>:winch:<id>`), because the host only lets bundled plugins schedule
-turns in-process. Config: `dispatchEnabled`
-(default true), `dispatchPlanner` (fallback: atlas), `dispatchStatePath`
-(reviewed epics across restarts).
+With `WINCH_DISPATCH_MODE=core` (the default) the server routes and the plugin
+only accepts wake offers: it sends `hello` with `executorId` + `harness`, then
+`wake_accept` for an offer and starts the assigned agent on `wake_granted`.
+Config: `dispatchEnabled` (default true), `dispatchHarness` (must match the
+harness the worker claims under; default `webhookHarness` or `openclaw`).
+
+In `WINCH_DISPATCH_MODE=plugin` the plugin routes events itself: it follows
+`winch serve --ws` (config `dispatchWsUrl`, default
+`ws://127.0.0.1:38291`), and for each routable row starts a one-shot agent
+session whose message is just the opaque item id; the row's `kind` says whether
+to claim, break down, or review. The session is started through the gateway's
+own CLI entry (`agent --session-key agent:<agent>:winch:<id>`), because the
+host only lets bundled plugins schedule turns in-process. Plugin-mode config:
+`dispatchPlanner` (fallback: atlas), `dispatchStatePath` (reviewed epics across
+restarts).
 
 Routing, one row per decision:
 
@@ -114,12 +120,15 @@ Two more rows matter to the dispatcher:
 
 Dispatch is event-driven, never polled: `serve --ws` replays backlog history
 on connect (`{"type":"history"}`), so a restarted gateway catches up without a
-timer. A task wake is suppressed for 35 minutes; each `epic.completed` marker is
+timer. In core mode the admission queue is the one-winner guard; in plugin mode
+a task wake is suppressed for 35 minutes and each `epic.completed` marker is
 reviewed once (the last reviewed event id is remembered per epic in
-`dispatchStatePath`). The claim lease remains the real guard against double
-work.
+`dispatchStatePath`). Claim leases remain the work-level guard in both modes.
 
-## Claim webhook (wake on attribution)
+## Claim webhook (plugin mode: wake on attribution)
+
+Claim webhooks are the `WINCH_DISPATCH_MODE=plugin` path. In core mode the same
+handoff arrives as a wake offer on the event stream.
 
 Polling `backlog_claim` leaves an idle agent waiting for its next heartbeat.
 Instead, winch can push the handoff the moment a claim lands and the plugin
@@ -164,10 +173,10 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 
 ### Auto-wake dispatch (opencode)
 
-The opencode companion ships the same event-driven dispatcher as openclaw
-(`dispatch.js`): it follows `winch serve --ws` (default
-`ws://127.0.0.1:38291`), replays history on connect, and routes each row by
-kind:
+The opencode companion ships the same event-driven client as openclaw
+(`dispatch.js`). In core mode it accepts wake offers; in plugin mode it follows
+`winch serve --ws` (default `ws://127.0.0.1:38291`), replays history on
+connect, and routes each row by kind:
 
 - `task.assigned` → assignee (if ready)
 - `story.assigned` → story owner (break down)
@@ -177,11 +186,12 @@ kind:
 - `epic.completed` → epic creator (once per marker)
 
 Routing is the record alone: a wake carries nothing but the item id, and the
-agent reads it with `backlog_get`. In-flight wakes are suppressed for 35
-minutes, reviewed epics are remembered in `~/.opencode/state/winch-plugin-dispatch.json`,
-and a null assignee/creator dies loudly on the dispatch layer (no wake, no
-retry) — a later assignment emits a new row. No planner agent is hardcoded;
-the fallback planner is supplied by the caller when needed.
+agent reads it with `backlog_get`. In plugin mode in-flight wakes are
+suppressed for 35 minutes, reviewed epics are remembered in
+`~/.opencode/state/winch-plugin-dispatch.json`, and a null assignee/creator dies
+loudly on the dispatch layer (no wake, no retry) — a later assignment emits a
+new row. No planner agent is hardcoded; the fallback planner is supplied by the
+caller when needed.
 
 ### Local (stdio) — the strong shape
 

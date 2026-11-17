@@ -71,5 +71,37 @@ test("terminal, already-blocked and unassigned parents behave", async () => {
   assert.equal(h.store.task.get(unassigned.id).status, "blocked");
 
   const again = await h.call("backlog_delegate", { taskId: unassigned.id, agent: "worker", title: "more" });
-  assert.equal(again.details.reason, "rejected");
+  assert.equal(again.details.status, "ok", "a dependency-blocked parent accepts a parallel child");
+  assert.equal(h.store.task.get(unassigned.id).status, "blocked");
+  assert.equal(h.store.item.children(unassigned.id).length, 2);
+
+  const plain = h.seedReadyTask().task;
+  h.store.task.claim({ id: plain.id, agentId: "atlas", harness: "test" });
+  h.store.task.openGate({ id: plain.id, gateType: "architecture", reason: "test", actor: "atlas" });
+  const refused = await h.call("backlog_delegate", { taskId: plain.id, agent: "worker", title: "child" });
+  assert.equal(refused.details.reason, "rejected", "a non-dependency block is not a fan-out parent");
+});
+
+test("childKey makes delegation retry-safe and visitSeq starts a new round", async () => {
+  const { task } = h.seedReadyTask();
+  const first = await h.call("backlog_delegate", { taskId: task.id, agent: "worker", title: "docs", childKey: "docs" });
+  assert.equal(first.details.status, "ok");
+  const second = await h.call("backlog_delegate", { taskId: task.id, agent: "worker", title: "docs", childKey: "docs" });
+  assert.equal(second.details.status, "ok");
+  assert.equal(second.details.reused, true);
+  assert.equal(second.details.childId, first.details.childId);
+
+  const third = await h.call("backlog_delegate", { taskId: task.id, agent: "worker", title: "docs again", childKey: "docs", visitSeq: 1 });
+  assert.equal(third.details.status, "ok");
+  assert.notEqual(third.details.childId, first.details.childId);
+
+  const child = h.store.task.get(first.details.childId);
+  assert.equal(child.child_key, "docs");
+  assert.equal(child.visit_seq, 0);
+  assert.equal(child.state_json.fanout.parentSessionId, h.store.session.forItem(task.id).find((s) => s.external_session_id === ATLAS.session).id);
+
+  assert.equal((await h.call("backlog_claim", { taskId: child.id }, WORKER)).details.status, "ok");
+  const session = h.store.session.forItem(child.id).find((s) => s.external_session_id === WORKER.session);
+  assert.equal(session.kind, "fanout");
+  assert.equal(session.parent_session_id, child.state_json.fanout.parentSessionId);
 });

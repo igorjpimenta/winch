@@ -1,7 +1,7 @@
 {
   "id": "winch",
   "name": "Winch",
-  "description": "Stamps _meta.winch onto tool calls, receives claim webhooks, and wakes agents from the winch event stream.",
+  "description": "Stamps _meta.winch onto tool calls, accepts wake offers from the winch event stream, and keeps claim webhooks as the plugin-mode fallback.",
   "enabledByDefault": true,
   "activation": {
     "onStartup": true
@@ -32,7 +32,7 @@
       },
       "dispatchEnabled": {
         "type": "boolean",
-        "description": "Wake agents from winch events (assignments, appended work, epic reviews). Default true."
+        "description": "Accept wake offers from winch and route plugin-mode events (assignments, appended work, epic reviews). Default true."
       },
       "dispatchWsUrl": {
         "type": "string",
@@ -41,6 +41,10 @@
       "dispatchPlanner": {
         "type": "string",
         "description": "Fallback planner for rows without a recorded creator (default: atlas)."
+      },
+      "dispatchHarness": {
+        "type": "string",
+        "description": "Harness name sent in the executor hello; must match WINCH_HARNESS. Default: webhookHarness or openclaw."
       },
       "dispatchStatePath": {
         "type": "string",

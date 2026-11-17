@@ -1,7 +1,7 @@
 {
   "name": "@igorjpimenta/winch-openclaw",
   "version": "2026.11.13-beta.1",
-  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives claim webhooks, and wakes agents from the winch event stream.",
+  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, accepts wake offers from the winch event stream, and keeps claim webhooks as the plugin-mode fallback.",
   "license": "MIT",
   "type": "module",
   "repository": {

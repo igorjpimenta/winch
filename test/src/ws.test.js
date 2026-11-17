@@ -80,7 +80,7 @@ test("subscriber gets welcome + history, then live rows", async () => {
   const ws = await connect(srv.port);
   const [welcome, history] = await collect(ws, 2);
   assert.equal(welcome.type, "welcome");
-  assert.equal(welcome.payload, "v2");
+  assert.equal(welcome.payload, "v3");
   assert.equal(typeof welcome.lastEventId, "number");
   assert.equal(history.type, "history");
   assert.ok(history.events.length >= 1);

@@ -180,7 +180,7 @@ test("backlog_claim POSTs handoff on claim when configured", async () => {
   });
   await new Promise((res) => server.listen(0, "127.0.0.1", res));
   const url = `http://127.0.0.1:${server.address().port}/hook`;
-  const { dir, store } = freshStore({ claimWebhookUrl: url, claimWebhookBearer: "s3cret" });
+  const { dir, store } = freshStore({ claimWebhookUrl: url, claimWebhookBearer: "s3cret", dispatchMode: "plugin" });
   try {
     seed(store);
     const { handle } = createToolHandlers(store, null);

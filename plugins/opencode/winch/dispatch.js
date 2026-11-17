@@ -9,11 +9,13 @@
 //   task.appended    → the epic's creator, to route the new work
 //   epic.completed   → the epic's creator, to review the delivery
 //
-// Dispatch is event-driven: the client connects to `winch serve --ws`, which
-// replays recent history on connect, so a restart catches up without a timer.
-// Claim leases remain the only guard against double work.
+// Dispatch is event-driven: the client connects to `winch serve --ws`. In core
+// mode the server's admission queue owns the one-winner guard; in plugin mode
+// the router's in-flight map only de-dupes replay and claim leases remain the
+// guard against double work.
 
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -151,10 +153,84 @@ export function defaultStatePath() {
   return path.join(os.homedir(), ".opencode", "state", "winch-plugin-dispatch.json");
 }
 
-export function startDispatchClient({ url = DEFAULT_WS_URL, router, logger = null }) {
+export function startDispatchClient({ url = DEFAULT_WS_URL, router = null, wake = null, harness = null, executorId = randomUUID(), logger = null } = {}) {
   let ws = null;
   let stopped = false;
   let retry = null;
+  let mode = "unknown";
+  const offers = new Map();
+  const started = new Set();
+  const startedOrder = [];
+
+  function rememberStart(id) {
+    started.add(id);
+    startedOrder.push(id);
+    if (startedOrder.length > 500) started.delete(startedOrder.shift());
+  }
+
+  function begin(frame) {
+    const id = frame?.admissionId;
+    if (!id || started.has(id)) return;
+    offers.delete(id);
+    if (typeof wake !== "function") {
+      logger?.warn?.(`winch: wake_granted ${id} but no wake callback is configured`);
+      return;
+    }
+    rememberStart(id);
+    Promise.resolve(wake({
+      agent: frame.agent,
+      message: frame.itemId,
+      kind: frame.kind,
+      admissionId: id,
+    })).catch((e) => {
+      started.delete(id);
+      logger?.warn?.(`winch: wake failed for ${frame.itemId}: ${e?.message ?? e}`);
+    });
+  }
+
+  function send(obj) {
+    if (!ws || ws.readyState !== 1) return;
+    try { ws.send(JSON.stringify(obj)); } catch { /* reconnect owns it */ }
+  }
+
+  function handle(frame) {
+    if (!frame || typeof frame !== "object") return;
+    switch (frame.type) {
+      case "welcome":
+        mode = frame.dispatchMode === "core" ? "core" : "plugin";
+        if (mode === "core") {
+          if (!harness) logger?.warn?.("winch: dispatch mode is core but no harness is configured; wake offers will be ignored");
+          else send({ type: "hello", executorId, harness });
+        } else if (!router) {
+          logger?.warn?.("winch: dispatch mode is plugin but no router is configured");
+        }
+        break;
+      case "event":
+        if (mode !== "core") router?.handle(frame);
+        break;
+      case "history":
+        if (mode !== "core" && Array.isArray(frame.events)) {
+          for (const ev of frame.events) router?.handle(ev);
+        }
+        break;
+      case "wake":
+        if (mode !== "core") break;
+        offers.set(frame.admissionId, frame);
+        send({ type: "wake_accept", admissionId: frame.admissionId, executorId });
+        break;
+      case "wake_granted":
+        if (mode === "core") begin(frame);
+        break;
+      case "wake_taken":
+        offers.delete(frame.admissionId);
+        break;
+      case "hello_rejected":
+        logger?.warn?.(`winch: executor rejected: ${frame.reason ?? "unknown"}`);
+        break;
+      default:
+        break;
+    }
+  }
 
   const connect = () => {
     if (stopped) return;
@@ -167,12 +243,10 @@ export function startDispatchClient({ url = DEFAULT_WS_URL, router, logger = nul
       } catch {
         return;
       }
-      if (frame.type === "event") return router.handle(frame);
-      if (frame.type === "history" && Array.isArray(frame.events)) {
-        for (const ev of frame.events) router.handle(ev);
-      }
+      handle(frame);
     });
     ws.addEventListener("close", () => {
+      offers.clear();
       if (stopped) return;
       retry = setTimeout(connect, 2000);
     });
@@ -186,5 +260,8 @@ export function startDispatchClient({ url = DEFAULT_WS_URL, router, logger = nul
       if (retry) clearTimeout(retry);
       try { ws?.close(); } catch {}
     },
+    get mode() { return mode; },
+    get offers() { return offers.size; },
+    get executorId() { return executorId; },
   };
 }

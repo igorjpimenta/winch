@@ -3,15 +3,19 @@
 Tuning knobs are declared the way the harness is - and none of them is
 required. Precedence per knob: per-call `_meta.winch.config` > constructor
 `{ config }` (`createStore`, `--config JSON|PATH` on `mcp`/`serve`/`watch`)
-> `WINCH_*` env > code default. An undeclared server behaves exactly like
-the old hardcoded one.
+> `WINCH_*` env > code default. Every knob has a default, so a server with no
+overrides starts on core dispatch.
 
 | knob | env | default |
 |---|---|---|
 | Claim lease | `WINCH_LEASE_SECONDS` | 1800 (30 min) |
 | Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` | 24h / 72h |
-| WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
+| WS port / history / poll / sweep | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` / `WINCH_WS_SWEEP_MS` | 38291 / 200 / 1000 / 30000 ms |
+| Dispatch mode | `WINCH_DISPATCH_MODE` (`core` or `plugin`) | `core` |
+| Dispatch planner | `WINCH_DISPATCH_PLANNER` | unset (route every creator) |
+| Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
+| Offer TTL / base backoff / max backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | DB path | `WINCH_DB` | `~/.winch/store.sqlite` |
 | Claim webhook URL / bearer / timeout | `WINCH_CLAIM_WEBHOOK_URL` / `WINCH_CLAIM_WEBHOOK_BEARER` / `WINCH_CLAIM_WEBHOOK_TIMEOUT_MS` | unset / unset / 3000 ms |

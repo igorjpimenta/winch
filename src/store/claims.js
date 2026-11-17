@@ -29,7 +29,10 @@ export function createClaimMethods({ core, apis }) {
              AND assignee_agent=? AND assignee_harness=?
         `).run(h, agentId, t, id, agentId, h);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
-        const sess = ensureSession({ harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim" });
+        const parentSessionId = row.state_json?.fanout?.parentSessionId ?? null;
+        const sess = ensureSession({
+          harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim", parentSessionId,
+        });
         const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds });
         const eventId = appendEvent({
           itemId: id, attemptId: attempt.id, sessionId: sess.id,

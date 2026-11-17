@@ -1,22 +1,31 @@
-// events-ws.js — dumb event pipe over WebSocket. Tails the item_events ledger and
-// broadcasts every new row to all connected clients, verbatim. No
-// interpretation, no filtering, no notify logic: a gate opening is just
-// another row, and what it means — ping, dashboard card, digest line — is the
-// subscriber's decision.
+// events-ws.js — event pipe and dispatch transport over WebSocket. Tails the
+// item_events ledger and broadcasts every new row verbatim; in core dispatch
+// mode it also turns routable rows into queued wake offers and admits executors.
 //
-// Wire protocol (JSON text frames, server → client only):
-//   {"type":"welcome","lastEventId":N}    on connect (current max row id)
-//   {"type":"history","events":[...]}     backlog of envelopes, oldest-first
-//   {"type":"event","event":{...}}        one envelope per new row, in id order
+// Wire protocol (JSON text frames):
+//   server → client:
+//     {"type":"welcome","payload":"v3","lastEventId":N,"dispatchMode":"core|plugin","requiresHello":bool}
+//     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
+//     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
+//     {"type":"hello_ok",...}             executor registered
+//     {"type":"wake","admissionId":...,...}
+//     {"type":"wake_granted","admissionId":...,...}
+//     {"type":"wake_taken","admissionId":...,"reason":...}
+//   client → server:
+//     {"type":"hello","executorId":...,"harness":...}
+//     {"type":"wake_accept","admissionId":...,"executorId":...}
+//
 // Clients track their own seen state: reconnecting replays history, so a
-// missed frame costs a re-read, never a lost event. No auth in-process —
-// bind localhost, or put a bearer-checked reverse proxy in front.
+// missed frame costs a re-read, never a lost event. The admission queue is the
+// one-winner guard; claim leases remain the work-level guard. No auth
+// in-process — bind localhost, or put a bearer-checked reverse proxy in front.
 
 import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
 import { readyTasks } from "./ready-queue.js";
 import { HUMAN_AGENT } from "./reserved.js";
+import { observe, tick as dispatchTick } from "./dispatch.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -93,11 +102,14 @@ export function toEventMessage(store, row) {
   const task = itemKind === "task" ? item : null;
   const story = itemKind === "story" ? item : task?.story_id ? store.story.get(task.story_id) : null;
   const epic = itemKind === "epic" ? item : story?.epic_id ? store.epic.get(story.epic_id) : item?.epic_id ? store.epic.get(item.epic_id) : null;
+  const actorSession = row.session_id ? store.session.get(row.session_id) : null;
   return {
     type: "event",
     kind: kindForEvent(row),
     id: row.id,
     at: row.created_at,
+    fromStatus: row.from_status ?? null,
+    toStatus: row.to_status,
     // Normalised item: a dispatcher routes assignment and review wakes without
     // knowing which level the row is about.
     item: item
@@ -107,13 +119,16 @@ export function toEventMessage(store, row) {
           title: item.title,
           status: item.status,
           assigned: item.assignee_agent ?? null,
+          assigneeHarness: item.assignee_harness ?? null,
           createdBy: item.created_by ?? null,
         }
       : null,
     epicId: epic?.id ?? null,
     epicCreatedBy: epic?.created_by ?? null,
+    epicAssigneeHarness: epic?.assignee_harness ?? null,
     storyId: story?.id ?? null,
     storyAssigned: story?.assignee_agent ?? null,
+    storyAssigneeHarness: story?.assignee_harness ?? null,
     // Work that a close just made claimable: a dispatcher wakes these without
     // recomputing the dependency graph. Structural readiness only: capability
     // tags are the claimant's business, so a tagged task must still appear.
@@ -134,16 +149,20 @@ export function toEventMessage(store, row) {
         }
       : null,
     actor: row.actor,
+    actorHarness: actorSession?.harness ?? null,
     note: row.note,
   };
 }
 
 export function startEventServer({ store, port = null, host = "127.0.0.1", intervalMs = null, historyLimit = null, logger } = {}) {
   const cfg = store.config ?? {};
+  const coreMode = (cfg.dispatchMode ?? "core") === "core";
   const listenPort = port ?? cfg.wsPort ?? DEFAULT_WS_PORT;
   const pollMs = intervalMs ?? cfg.wsIntervalMs ?? 1000;
   const histLimit = historyLimit ?? cfg.wsHistoryLimit ?? HISTORY_LIMIT;
-  const clients = new Set();
+  const clients = new Map();
+  const executors = new Map();
+  let closing = false;
   let cursor = lastEventId(store);
   // The ws service is the only long-lived process winch guarantees, so it also
   // sweeps expired leases; without this a crashed worker holds its task until
@@ -153,15 +172,125 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
     ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
     : null;
   sweeper?.unref?.();
+  if (coreMode) {
+    store.admission.resetOffers();
+    // The queue survives a server restart; events written while it was down
+    // do not. Replay from the last admitted event, bounded to the history
+    // window on a fresh core store so an old ledger cannot replay everything.
+    let since = store.admission.lastEventId();
+    if (!since) since = Math.max(0, cursor - histLimit);
+    for (;;) {
+      const rows = eventsSince(store, since, histLimit);
+      if (!rows.length) break;
+      for (const row of rows) observe(store, toEventMessage(store, row), Date.now());
+      since = rows[rows.length - 1].id;
+      if (since >= cursor) break;
+    }
+  }
+
+  function send(socket, obj) {
+    if (socket.destroyed || !socket.writable) return false;
+    try {
+      socket.write(encodeFrame(JSON.stringify(obj)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function broadcast(obj) {
     const frame = encodeFrame(JSON.stringify(obj));
-    for (const sock of [...clients]) {
+    for (const client of [...clients.values()]) {
+      const sock = client.socket;
       if (sock.destroyed || !sock.writable) {
         clients.delete(sock);
         continue;
       }
       sock.write(frame);
+    }
+  }
+
+  function reachableHarnesses() {
+    return [...new Set([...executors.values()].map((c) => c.harness))];
+  }
+
+  function wakeFrame(row) {
+    return {
+      type: "wake",
+      admissionId: row.id,
+      itemId: row.item_id,
+      kind: row.kind,
+      harness: row.harness,
+      agent: row.agent_id,
+      eventId: row.event_id ?? null,
+      offerExpiresAt: Date.now() + cfg.dispatchOfferMs,
+    };
+  }
+
+  function sendWake(row, only = null) {
+    const targets = only
+      ? [only]
+      : [...executors.values()].filter((c) => row.harness === "*" || c.harness === row.harness);
+    for (const client of targets) send(client.socket, wakeFrame(row));
+  }
+
+  function pump() {
+    if (!coreMode) return [];
+    const offered = dispatchTick(store, {
+      at: Date.now(),
+      reachable: reachableHarnesses(),
+      config: cfg,
+    });
+    for (const row of offered) sendWake(row);
+    return offered;
+  }
+
+  function hello(client, msg) {
+    const executorId = String(msg?.executorId ?? "").trim();
+    const harness = String(msg?.harness ?? "").trim();
+    if (!executorId || !harness) {
+      send(client.socket, { type: "hello_rejected", reason: "executorId and harness are required" });
+      return;
+    }
+    const existing = executors.get(executorId);
+    if (existing && existing !== client) {
+      send(client.socket, { type: "hello_rejected", reason: "duplicate executorId" });
+      return;
+    }
+    if (client.executorId && client.executorId !== executorId) executors.delete(client.executorId);
+    client.executorId = executorId;
+    client.harness = harness;
+    executors.set(executorId, client);
+    send(client.socket, {
+      type: "hello_ok",
+      executorId,
+      harness,
+      dispatchMode: cfg.dispatchMode,
+    });
+    if (!coreMode) return;
+    // Replay outstanding offers to a newcomer, then admit whatever is queued.
+    for (const row of store.admission.offers(harness)) sendWake(row, client);
+    pump();
+  }
+
+  function accept(client, msg) {
+    if (!coreMode) return;
+    if (!client.executorId) {
+      send(client.socket, { type: "wake_taken", admissionId: String(msg?.admissionId ?? ""), reason: "hello required" });
+      return;
+    }
+    const admissionId = String(msg?.admissionId ?? "");
+    if (!admissionId) return;
+    const result = store.admission.accept(admissionId, {
+      executorId: client.executorId,
+      harness: client.harness,
+      at: Date.now(),
+      harnessMax: cfg.dispatchHarnessMax,
+    });
+    if (result.granted) {
+      send(client.socket, { ...wakeFrame(result.row), type: "wake_granted" });
+    } else {
+      send(client.socket, { type: "wake_taken", admissionId, reason: result.reason ?? null });
     }
   }
 
@@ -182,17 +311,23 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         "Connection: Upgrade\r\n" +
         `Sec-WebSocket-Accept: ${acceptKey(key)}\r\n\r\n`
     );
-    clients.add(socket);
+    const client = { socket, executorId: null, harness: null, connectedAt: Date.now() };
+    clients.set(socket, client);
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
-      socket.write(encodeFrame(JSON.stringify({ type: "welcome", payload: "v2", lastEventId: cursor })));
-      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) })));
+      send(socket, { type: "welcome", payload: "v3", lastEventId: cursor, dispatchMode: cfg.dispatchMode, requiresHello: coreMode });
+      send(socket, { type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) });
     } catch {
       clients.delete(socket);
     }
 
-    // Client frames are only ever interesting as close/ping; everything else
-    // is consumed and ignored. Mask bit respected when skipping payloads.
+    function text(raw) {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg?.type === "hello") hello(client, msg);
+      else if (msg?.type === "wake_accept") accept(client, msg);
+    }
+
     let buf = Buffer.alloc(0);
     socket.on("data", (chunk) => {
       buf = Buffer.concat([buf, chunk]);
@@ -214,17 +349,43 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
           len = buf.readUInt32BE(6);
           off = 10;
         }
-        if (buf[1] & 0x80) off += 4;
+        if (len > 1024 * 1024) {
+          socket.destroy();
+          return;
+        }
+        const masked = (buf[1] & 0x80) !== 0;
+        let mask = null;
+        if (masked) {
+          if (buf.length < off + 4) return;
+          mask = buf.subarray(off, off + 4);
+          off += 4;
+        }
         if (buf.length < off + len) return;
-        buf = buf.slice(off + len);
+        const payload = Buffer.from(buf.subarray(off, off + len));
+        if (mask && mask.length === 4) {
+          for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+        }
+        buf = buf.subarray(off + len);
         if (opcode === 0x8) {
           socket.destroy();
           return;
         }
-        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
+        if (opcode === 0x9) {
+          socket.write(Buffer.from([0x8a, 0x00]));
+          continue;
+        }
+        if (opcode === 0x1) text(payload.toString("utf8"));
       }
     });
-    const drop = () => clients.delete(socket);
+    const drop = () => {
+      clients.delete(socket);
+      if (closing) return;
+      if (client.executorId && executors.get(client.executorId) === client) {
+        executors.delete(client.executorId);
+        store.admission.requeueExecutor(client.executorId, Date.now());
+        pump();
+      }
+    };
     socket.on("close", drop);
     socket.on("error", drop);
   });
@@ -232,9 +393,15 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   const timer = setInterval(() => {
     try {
       const rows = eventsSince(store, cursor, histLimit);
-      if (!rows.length) return;
-      cursor = rows[rows.length - 1].id;
-      for (const row of rows) broadcast(toEventMessage(store, row));
+      if (rows.length) {
+        cursor = rows[rows.length - 1].id;
+        for (const row of rows) {
+          const msg = toEventMessage(store, row);
+          broadcast(msg);
+          if (coreMode) observe(store, msg, Date.now());
+        }
+      }
+      if (coreMode) pump();
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }
@@ -250,9 +417,10 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         clients: () => clients.size,
         close: () =>
           new Promise((res) => {
+            closing = true;
             clearInterval(timer);
             if (sweeper) clearInterval(sweeper);
-            for (const s of clients) s.destroy();
+            for (const client of clients.values()) client.socket.destroy();
             server.close(() => res());
           }),
       });

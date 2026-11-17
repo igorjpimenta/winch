@@ -34,12 +34,14 @@ export function createClaimTools({ store, logger }) {
               artifacts,
               receiverPrompt: renderReceiverPrompt({ task: claimed, story: c.story, epic: c.epic, artifacts }),
             };
-            await notifyClaim(
-              cfg,
-              claimPayload({ task: claimed, story: c.story, epic: c.epic, artifacts, handoff, identity, sessionKey }),
-              logger,
-              store.webhook.get(identity.harness)
-            );
+            if (cfg.dispatchMode !== "core") {
+              await notifyClaim(
+                cfg,
+                claimPayload({ task: claimed, story: c.story, epic: c.epic, artifacts, handoff, identity, sessionKey }),
+                logger,
+                store.webhook.get(identity.harness)
+              );
+            }
             return ok(
               JSON.stringify({
                 task: claimed,

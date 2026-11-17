@@ -55,8 +55,9 @@ export const TOOL_DEFS = [
       name: "backlog_delegate",
       description:
         "Hand part of a task to another worker without changing the parent's accountable assignee. Creates a child task under the parent, " +
-        "assigns it to `agent`, makes the parent depend on the child, and parks the parent in `blocked`. When the child closes, the parent " +
-        "returns to `ready` for the accountable assignee. Use `agent: \"human\"` for human work; the child carries the reserved human pair.",
+        "assigns it to `agent`, adds it to the parent's dependency wait, and parks the parent in `blocked`. Additional children may be " +
+        "delegated while the parent is dependency-blocked; it returns to `ready` when every child closes. Use `agent: \"human\"` for " +
+        "human work; the child carries the reserved human pair.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -65,6 +66,8 @@ export const TOOL_DEFS = [
           taskId: { type: "string", description: "Parent task item id (opaque). The caller must be its accountable assignee or it must be unassigned." },
           agent: { type: "string", description: "Worker agent that claims and delivers the child. Use `human` for human work." },
           title: { type: "string", description: "Child task title." },
+          childKey: { type: "string", description: "Stable fan-out lane name, e.g. docs. Same parent + key + visitSeq returns the existing child." },
+          visitSeq: { type: "integer", minimum: 0, description: "Fan-out round for this childKey; default 0. A review re-run uses 1." },
           description: { type: "string", description: "Child task description." },
           acceptance: { type: "string", description: "What done means for the child. Defaults to the parent acceptance." },
           capabilities: {

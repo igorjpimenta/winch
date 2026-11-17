@@ -18,10 +18,11 @@ export const DEFAULT_STATUS = { epic: "backlog", story: "backlog", task: "backlo
 export const ITEM_TERMINAL = new Set(["done", "cancelled"]);
 
 export const ITEM_SELECT = `
-  SELECT i.id, i.kind, i.parent_id, i.title, i.description,
+  SELECT i.id, i.kind, i.parent_id, i.child_key, i.visit_seq, i.title, i.description,
          i.acceptance, i.priority, i.size, i.owner_team, i.created_by,
          i.execution_kind, i.execution_args, i.created_at,
-         s.revision, s.status, s.state_json, s.assignee_harness, s.assignee_agent,
+         s.revision, s.status, s.state_json, s.wait_kind, s.current_child_key,
+         s.assignee_harness, s.assignee_agent,
          s.updated_at, s.closed_at, s.deleted_at
     FROM items i JOIN item_state s ON s.item_id = i.id`;
 
@@ -139,19 +140,22 @@ export function createCore({ db, cfg }) {
     return `${kind}.updated`;
   }
 
-  function ensureSession({ harness, agentId, externalSessionId, itemId, kind = "claim" }) {
+  function ensureSession({ harness, agentId, externalSessionId, itemId, kind = "claim", parentSessionId = null }) {
     const existing = db.prepare(
       "SELECT * FROM work_sessions WHERE harness=? AND agent_id=? AND external_session_id=?"
     ).get(harness, agentId, externalSessionId);
     if (existing) {
-      db.prepare("UPDATE work_sessions SET item_id=? WHERE id=?").run(itemId, existing.id);
+      const parent = existing.parent_session_id ?? parentSessionId ?? null;
+      const nextKind = parent ? "fanout" : existing.kind;
+      db.prepare("UPDATE work_sessions SET item_id=?, parent_session_id=?, kind=? WHERE id=?")
+        .run(itemId, parent, nextKind, existing.id);
       return db.prepare("SELECT * FROM work_sessions WHERE id=?").get(existing.id);
     }
     const id = newSessionId();
     db.prepare(`
-      INSERT INTO work_sessions(id, item_id, harness, agent_id, external_session_id, kind, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, itemId, harness, agentId, externalSessionId, kind, now());
+      INSERT INTO work_sessions(id, item_id, harness, agent_id, external_session_id, kind, parent_session_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, itemId, harness, agentId, externalSessionId, parentSessionId ? "fanout" : kind, parentSessionId, now());
     return db.prepare("SELECT * FROM work_sessions WHERE id=?").get(id);
   }
 

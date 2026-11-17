@@ -22,7 +22,7 @@ import { createRouter, defaultStatePath, startDispatchClient, DEFAULT_WS_URL } f
 export default definePluginEntry({
   id: "winch",
   name: "Winch",
-  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller. Receives claim webhooks and opens a fresh session per attributed task.",
+  description: "Stamps _meta.winch (harness/agent/session) onto winch MCP tool calls so the winch server keys claims to the real caller. Accepts wake offers from the winch event stream and opens a fresh session per attributed task; claim webhooks remain the plugin-mode fallback.",
   configSchema: () => ({
     type: "object",
     additionalProperties: true,
@@ -60,6 +60,10 @@ export default definePluginEntry({
       dispatchPlanner: {
         type: "string",
         description: "Fallback planner for rows without a recorded creator (default: atlas).",
+      },
+      dispatchHarness: {
+        type: "string",
+        description: "Harness name sent in the executor hello; must match WINCH_HARNESS. Default: webhookHarness or openclaw.",
       },
       dispatchStatePath: {
         type: "string",
@@ -166,7 +170,13 @@ export default definePluginEntry({
             logger: api.logger,
             wake,
           });
-          dispatch = startDispatchClient({ url: cfg.dispatchWsUrl ?? DEFAULT_WS_URL, router, logger: api.logger });
+          dispatch = startDispatchClient({
+            url: cfg.dispatchWsUrl ?? DEFAULT_WS_URL,
+            router,
+            wake,
+            harness: cfg.dispatchHarness ?? cfg.webhookHarness ?? process.env.WINCH_HARNESS ?? "openclaw",
+            logger: api.logger,
+          });
         },
         stop: async () => {
           dispatch?.close();
