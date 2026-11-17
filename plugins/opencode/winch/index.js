@@ -1,23 +1,7 @@
 import { createWinchHooks } from "./hooks.js";
 import { stampWinchEvent } from "./identity.js";
-import { createRouter, defaultStatePath, startDispatchClient, DEFAULT_WS_URL } from "./dispatch.js";
+import { startDispatch, DEFAULT_DISPATCH_URL, defaultStatePath } from "./dispatch.js";
 import { spawn } from "node:child_process";
-
-function startDispatch({ url, planner, harness, wake, statePath, logger }) {
-  const router = createRouter({
-    wake,
-    planner: planner ?? null,
-    statePath: statePath ?? defaultStatePath(),
-    logger: logger ?? console,
-  });
-  return startDispatchClient({
-    url: url ?? DEFAULT_WS_URL,
-    router,
-    wake,
-    harness,
-    logger: logger ?? console,
-  });
-}
 
 function opencodeWake({ agent, message }) {
   return new Promise((resolve, reject) => {
@@ -36,10 +20,22 @@ function opencodeWake({ agent, message }) {
   });
 }
 
+function start({ cfg, harness, logger }) {
+  const dispatch = startDispatch({
+    baseUrl: cfg.dispatchUrl ?? process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
+    harness,
+    wake: opencodeWake,
+    statePath: cfg.dispatchStatePath ?? process.env.WINCH_DISPATCH_STATE_PATH ?? defaultStatePath(),
+    port: Number(cfg.dispatchPort ?? process.env.WINCH_DISPATCH_PORT ?? 0),
+    reconcileMs: Number(cfg.dispatchReconcileMs ?? process.env.WINCH_DISPATCH_RECONCILE_MS ?? 30000),
+    logger,
+  });
+  dispatch.ready.catch((err) => logger?.warn?.(`winch: dispatch listener failed: ${err?.message ?? err}`));
+  return dispatch;
+}
+
 // One package, two hosts: V1 calls server() and gets the object hooks; V2
-// reads id/setup() and gets the domain hooks. The implementations stay
-// separate — V1 mutates (input, output), V2 mutates one event — but both
-// stamp the same unconditional identity pair.
+// reads id/setup() and gets the domain hooks. Both stamp the same identity pair.
 export default {
   id: "winch-opencode",
   async setup(ctx) {
@@ -51,16 +47,9 @@ export default {
     const ensureDispatch = () => {
       if (dispatch) return;
       const cfg = ctx.options ?? {};
-      if (cfg.dispatchEnabled === false) return;
+      if (cfg.dispatchEnabled === false || process.env.WINCH_DISPATCH_ENABLED === "0") return;
       const harness = cfg.dispatchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
-      dispatch = startDispatch({
-        url: cfg.dispatchWsUrl ?? DEFAULT_WS_URL,
-        planner: cfg.dispatchPlanner ?? null,
-        harness,
-        wake: opencodeWake,
-        statePath: cfg.dispatchStatePath ?? defaultStatePath(),
-        logger: console,
-      });
+      dispatch = start({ cfg, harness, logger: console });
     };
     await ctx.session.hook("context", (event) => {
       if (event?.sessionID && event.agent) agents.set(event.sessionID, event.agent);
@@ -80,14 +69,7 @@ export default {
       if (dispatch) return;
       if (process.env.WINCH_DISPATCH_ENABLED === "0") return;
       const harness = process.env.WINCH_HARNESS ?? "opencode";
-      dispatch = startDispatch({
-        url: process.env.WINCH_DISPATCH_WS_URL ?? DEFAULT_WS_URL,
-        planner: process.env.WINCH_DISPATCH_PLANNER ?? null,
-        harness,
-        wake: opencodeWake,
-        statePath: process.env.WINCH_DISPATCH_STATE_PATH ?? defaultStatePath(),
-        logger: console,
-      });
+      dispatch = start({ cfg: {}, harness, logger: console });
     };
     const origMessage = hooks["chat.message"];
     hooks["chat.message"] = async (input) => {

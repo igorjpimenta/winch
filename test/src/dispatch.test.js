@@ -1,26 +1,28 @@
-// Core dispatch: route rows to admissions, admit under caps, and let exactly
-// one executor win an offer.
+// Core dispatch: route rows to admissions, deliver over HTTP, and recover
+// assigned work after a harness restart.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import http from "node:http";
 import { createStore } from "../../src/store/index.js";
 import { startEventServer, toEventMessage } from "../../src/events-ws.js";
-import { observe, routesForEvent, tick } from "../../src/dispatch.js";
+import { recover, observe, routesForEvent, tick } from "../../src/dispatch.js";
+import { deliverWake } from "../../src/dispatch-webhook.js";
 
-let dir, store, srv, sockets;
+let dir, store, srv, receiver;
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "winch-dispatch-"));
   store = createStore({
     dbPath: path.join(dir, "store.sqlite"),
-    config: { dispatchMode: "core", dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3 },
+    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, dispatchWebhookTimeoutMs: 1000 },
   });
-  sockets = [];
 });
 afterEach(async () => {
-  for (const s of sockets) { try { s.close(); } catch { /* gone */ } }
+  if (receiver) await receiver.close();
+  receiver = undefined;
   if (srv) await srv.close();
   srv = undefined;
   store.close();
@@ -45,6 +47,26 @@ function observeEvent(row) {
   const msg = toEventMessage(store, row);
   observe(store, msg);
   return msg;
+}
+
+async function wakeReceiver({ bearer = "tok" } = {}) {
+  const rows = [];
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => { raw += d; });
+    req.on("end", () => {
+      rows.push({ auth: req.headers.authorization, body: JSON.parse(raw) });
+      res.statusCode = 202;
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}/wake`,
+    bearertoken: bearer,
+    rows,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
 }
 
 test("routes an assignment and an append to the right target", () => {
@@ -94,7 +116,6 @@ test("in_progress activates and done releases the slot", () => {
   const { task, row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  assert.equal(store.admission.accept(offer.id, { executorId: "A", harness: "test" }).granted, true);
   store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s" });
   const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   observeEvent(claimRow);
@@ -122,87 +143,67 @@ test("an expired offer releases capacity and retries with backoff", () => {
   assert.equal(after[0].offers, 2);
 });
 
-function connect(port) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
-    sockets.push(ws);
-    ws.inbox = [];
-    ws.onmessage = (e) => ws.inbox.push(JSON.parse(String(e.data)));
-    const timer = setTimeout(() => reject(new Error("ws open timed out")), 5000);
-    ws.onopen = () => { clearTimeout(timer); resolve(ws); };
-    ws.onerror = (e) => { clearTimeout(timer); reject(new Error(`ws error: ${e?.message ?? "unknown"}`)); };
-  });
-}
-
-function waitFor(ws, pred, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      const i = ws.inbox.findIndex(pred);
-      if (i >= 0) {
-        clearInterval(timer);
-        resolve(ws.inbox.splice(i, 1)[0]);
-      } else if (Date.now() - started > timeoutMs) {
-        clearInterval(timer);
-        reject(new Error(`timed out; inbox=${JSON.stringify(ws.inbox)}`));
-      }
-    }, 10);
-  });
-}
-
-test("two gateways on one harness offer the wake, one accept wins", async () => {
-  srv = await startEventServer({ store, port: 0, intervalMs: 20 });
-  const a = await connect(srv.port);
-  const b = await connect(srv.port);
-  a.send(JSON.stringify({ type: "hello", executorId: "exec-a", harness: "test" }));
-  b.send(JSON.stringify({ type: "hello", executorId: "exec-b", harness: "test" }));
-  await waitFor(a, (f) => f.type === "hello_ok");
-  await waitFor(b, (f) => f.type === "hello_ok");
-
+test("webhook delivery sends the admission id and bearer", async () => {
+  receiver = await wakeReceiver();
+  store.dispatch.upsert({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
   const { row } = seedAssigned();
-  observeEvent(row);
-  const [offerA, offerB] = await Promise.all([
-    waitFor(a, (f) => f.type === "wake"),
-    waitFor(b, (f) => f.type === "wake"),
-  ]);
-  assert.equal(offerA.admissionId, offerB.admissionId);
-  a.send(JSON.stringify({ type: "wake_accept", admissionId: offerA.admissionId, executorId: "exec-a" }));
-  b.send(JSON.stringify({ type: "wake_accept", admissionId: offerA.admissionId, executorId: "exec-b" }));
-  const answers = await Promise.all([
-    waitFor(a, (f) => f.type === "wake_granted" || f.type === "wake_taken"),
-    waitFor(b, (f) => f.type === "wake_granted" || f.type === "wake_taken"),
-  ]);
-  assert.equal(answers.filter((f) => f.type === "wake_granted").length, 1);
-  assert.equal(answers.filter((f) => f.type === "wake_taken").length, 1);
-  assert.equal(store.admission.get(offerA.admissionId).status, "accepted");
-});
-
-test("offering a child moves the parent cursor to its childKey", () => {
-  const { story } = hierarchy();
-  const parent = store.task.create({ storyId: story.id, title: "P", status: "backlog" });
-  const child = store.task.create({
-    storyId: parent.id, title: "docs", status: "backlog", childKey: "docs",
-    assigned: "worker", assigneeHarness: "test",
-  });
-  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(child.id);
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  assert.ok(offer);
-  assert.equal(store.item.get(parent.id).current_child_key, "docs");
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, true);
+  assert.equal(receiver.rows.length, 1);
+  assert.equal(receiver.rows[0].auth, "Bearer tok");
+  assert.equal(receiver.rows[0].body.type, "wake");
+  assert.equal(receiver.rows[0].body.admissionId, offer.id);
+  assert.equal(receiver.rows[0].body.itemId, row.item_id);
+  assert.equal(store.admission.get(offer.id).status, "offered");
 });
 
-test("a server restart catches up on events written while it was down", async () => {
+test("recover returns in-progress resume work and fills free slots", () => {
+  const first = seedAssigned({ agent: "worker" });
+  const second = seedAssigned({ agent: "worker" });
+  observeEvent(first.row);
+  observeEvent(second.row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.task.claim({ id: first.task.id, agentId: "worker", harness: "test", session: "s" });
+  const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(first.task.id);
+  observeEvent(claimRow);
+
+  const result = recover(store, { harness: "test", config: { ...store.config, dispatchHarnessMax: 4 } });
+  assert.equal(result.resume.length, 1);
+  assert.equal(result.resume[0].task.id, first.task.id);
+  assert.ok(result.resume[0].attemptId);
+  assert.ok(result.start.some((r) => r.admissionId === offer.id || r.itemId === second.task.id));
+});
+
+test("register and recover endpoints are available on the server", async () => {
+  receiver = await wakeReceiver();
   srv = await startEventServer({ store, port: 0, intervalMs: 20 });
-  await srv.close();
+  const base = `http://127.0.0.1:${srv.port}`;
+  const reg = await fetch(`${base}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" }),
+  });
+  assert.equal(reg.status, 201);
+
   const { row } = seedAssigned();
-  srv = await startEventServer({ store, port: 0, intervalMs: 20 });
-  const a = await connect(srv.port);
-  a.send(JSON.stringify({ type: "hello", executorId: "exec-restart", harness: "test" }));
-  const offer = await waitFor(a, (f) => f.type === "wake");
-  assert.equal(offer.itemId, row.item_id);
+  observeEvent(row);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(receiver.rows.length >= 1);
+  assert.equal(receiver.rows[0].body.itemId, row.item_id);
+
+  const rec = await fetch(`${base}/dispatch/recover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness: "test", executorId: "exec-a" }),
+  });
+  assert.equal(rec.status, 200);
+  const body = await rec.json();
+  assert.ok(Array.isArray(body.start));
 });
 
-test("a review wake is one-shot: its TTL ends it instead of retrying", () => {
+test("a review wake is one-shot after a successful delivery", () => {
   const epic = store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
   observe(store, {
     type: "event", kind: "epic.completed", id: 999, epicCreatedBy: "atlas",
@@ -210,9 +211,7 @@ test("a review wake is one-shot: its TTL ends it instead of retrying", () => {
   });
   const [offer] = tick(store, { reachable: ["test"] });
   assert.ok(offer);
-  const result = store.admission.accept(offer.id, { executorId: "exec-review", harness: "test" });
-  assert.equal(result.granted, true);
-  assert.equal(store.admission.get(offer.id).status, "accepted");
+  assert.equal(store.admission.get(offer.id).status, "offered");
   assert.equal(store.admission.globalSlotCount(), 1);
   tick(store, { at: Date.now() + 10_000, reachable: [] });
   assert.equal(store.admission.get(offer.id).status, "done");
@@ -228,8 +227,18 @@ test("attempt state is normalized out of the admission queue", () => {
     assert.ok(!columns.includes(gone), `${gone} is not a queue column`);
   }
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM admission_attempts WHERE admission_id=?").get(offer.id).n, 1);
-  store.admission.accept(offer.id, { executorId: "A", harness: "test" });
-  const attempt = store.db.prepare("SELECT * FROM admission_attempts WHERE admission_id=? AND ended_at IS NULL").get(offer.id);
-  assert.equal(attempt.executor_id, "A");
-  assert.ok(attempt.accepted_at);
+});
+
+test("offering a child moves the parent cursor to its childKey", () => {
+  const { story } = hierarchy();
+  const parent = store.task.create({ storyId: story.id, title: "P", status: "backlog" });
+  const child = store.task.create({
+    storyId: parent.id, title: "docs", status: "backlog", childKey: "docs",
+    assigned: "worker", assigneeHarness: "test",
+  });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(child.id);
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  assert.ok(offer);
+  assert.equal(store.item.get(parent.id).current_child_key, "docs");
 });

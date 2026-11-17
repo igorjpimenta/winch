@@ -1,23 +1,16 @@
-// events-ws.js — event pipe and dispatch transport over WebSocket. Tails the
-// item_events ledger and broadcasts every new row verbatim; in core dispatch
-// mode it also turns routable rows into queued wake offers and admits executors.
+// events-ws.js — read-only event pipe plus the HTTP dispatch endpoints.
+// Tails the item_events ledger and broadcasts every new row; dispatch wakes
+// leave over executor webhooks, not this socket.
 //
 // Wire protocol (JSON text frames):
 //   server → client:
-//     {"type":"welcome","payload":"v3","lastEventId":N,"dispatchMode":"core|plugin","requiresHello":bool}
+//     {"type":"welcome","payload":"v3","lastEventId":N}
 //     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
 //     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
-//     {"type":"hello_ok",...}             executor registered
-//     {"type":"wake","admissionId":...,...}
-//     {"type":"wake_granted","admissionId":...,...}
-//     {"type":"wake_taken","admissionId":...,"reason":...}
-//   client → server:
-//     {"type":"hello","executorId":...,"harness":...}
-//     {"type":"wake_accept","admissionId":...,"executorId":...}
 //
 // Clients track their own seen state: reconnecting replays history, so a
-// missed frame costs a re-read, never a lost event. The admission queue is the
-// one-winner guard; claim leases remain the work-level guard. No auth
+// missed frame costs a re-read, never a lost event. The admission queue owns
+// wake delivery and retry; MCP claim remains the work-level guard. No auth
 // in-process — bind localhost, or put a bearer-checked reverse proxy in front.
 
 import http from "node:http";
@@ -25,7 +18,8 @@ import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
 import { readyTasks } from "./ready-queue.js";
 import { HUMAN_AGENT } from "./reserved.js";
-import { observe, tick as dispatchTick } from "./dispatch.js";
+import { observe, recover, tick as dispatchTick } from "./dispatch.js";
+import { deliverWake } from "./dispatch-webhook.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -156,14 +150,13 @@ export function toEventMessage(store, row) {
 
 export function startEventServer({ store, port = null, host = "127.0.0.1", intervalMs = null, historyLimit = null, logger } = {}) {
   const cfg = store.config ?? {};
-  const coreMode = (cfg.dispatchMode ?? "core") === "core";
   const listenPort = port ?? cfg.wsPort ?? DEFAULT_WS_PORT;
   const pollMs = intervalMs ?? cfg.wsIntervalMs ?? 1000;
   const histLimit = historyLimit ?? cfg.wsHistoryLimit ?? HISTORY_LIMIT;
   const clients = new Map();
-  const executors = new Map();
   let closing = false;
   let cursor = lastEventId(store);
+  let pumping = false;
   // The ws service is the only long-lived process winch guarantees, so it also
   // sweeps expired leases; without this a crashed worker holds its task until
   // a human runs the CLI.
@@ -172,20 +165,19 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
     ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
     : null;
   sweeper?.unref?.();
-  if (coreMode) {
-    store.admission.resetOffers();
-    // The queue survives a server restart; events written while it was down
-    // do not. Replay from the last admitted event, bounded to the history
-    // window on a fresh core store so an old ledger cannot replay everything.
-    let since = store.admission.lastEventId();
-    if (!since) since = Math.max(0, cursor - histLimit);
-    for (;;) {
-      const rows = eventsSince(store, since, histLimit);
-      if (!rows.length) break;
-      for (const row of rows) observe(store, toEventMessage(store, row), Date.now());
-      since = rows[rows.length - 1].id;
-      if (since >= cursor) break;
-    }
+
+  store.admission.resetOffers();
+  // The queue survives a server restart; events written while it was down do
+  // not. Replay from the last admitted event, bounded to the history window on
+  // a fresh store so an old ledger cannot replay everything.
+  let since = store.admission.lastEventId();
+  if (!since) since = Math.max(0, cursor - histLimit);
+  for (;;) {
+    const rows = eventsSince(store, since, histLimit);
+    if (!rows.length) break;
+    for (const row of rows) observe(store, toEventMessage(store, row), Date.now());
+    since = rows[rows.length - 1].id;
+    if (since >= cursor) break;
   }
 
   function send(socket, obj) {
@@ -210,93 +202,80 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
     }
   }
 
-  function reachableHarnesses() {
-    return [...new Set([...executors.values()].map((c) => c.harness))];
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      const offered = dispatchTick(store, {
+        at: Date.now(),
+        reachable: store.dispatch.harnesses(),
+        config: cfg,
+      });
+      for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
+    } catch (err) {
+      logger?.warn?.(`winch: dispatch pump failed: ${err?.message ?? err}`);
+    } finally {
+      pumping = false;
+    }
   }
 
-  function wakeFrame(row) {
-    return {
-      type: "wake",
-      admissionId: row.id,
-      itemId: row.item_id,
-      kind: row.kind,
-      harness: row.harness,
-      agent: row.agent_id,
-      eventId: row.event_id ?? null,
-      offerExpiresAt: Date.now() + cfg.dispatchOfferMs,
-    };
+  function json(res, status, body) {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
   }
 
-  function sendWake(row, only = null) {
-    const targets = only
-      ? [only]
-      : [...executors.values()].filter((c) => row.harness === "*" || c.harness === row.harness);
-    for (const client of targets) send(client.socket, wakeFrame(row));
+  async function readJson(req, res) {
+    let size = 0;
+    let raw = "";
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > 1024 * 1024) {
+        json(res, 413, { error: "body too large" });
+        return undefined;
+      }
+      raw += chunk;
+    }
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      json(res, 400, { error: "invalid json body" });
+      return undefined;
+    }
   }
 
-  function pump() {
-    if (!coreMode) return [];
-    const offered = dispatchTick(store, {
-      at: Date.now(),
-      reachable: reachableHarnesses(),
-      config: cfg,
-    });
-    for (const row of offered) sendWake(row);
-    return offered;
-  }
-
-  function hello(client, msg) {
-    const executorId = String(msg?.executorId ?? "").trim();
-    const harness = String(msg?.harness ?? "").trim();
-    if (!executorId || !harness) {
-      send(client.socket, { type: "hello_rejected", reason: "executorId and harness are required" });
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (req.method === "POST" && url.pathname === "/dispatch/register") {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      try {
+        const row = store.dispatch.upsert({
+          harness: body.harness,
+          executorId: body.executorId,
+          url: body.url,
+          bearer: body.bearer,
+          timeoutMs: body.timeoutMs ?? null,
+        });
+        json(res, 201, { ok: true, harness: row.harness, executorId: row.executorId });
+        void pump();
+      } catch (err) {
+        json(res, 400, { error: String(err?.message ?? err) });
+      }
       return;
     }
-    const existing = executors.get(executorId);
-    if (existing && existing !== client) {
-      send(client.socket, { type: "hello_rejected", reason: "duplicate executorId" });
+    if (req.method === "POST" && url.pathname === "/dispatch/recover") {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      try {
+        const result = recover(store, { harness: String(body.harness ?? "").trim(), at: Date.now(), config: cfg });
+        json(res, 200, result);
+      } catch (err) {
+        json(res, 400, { error: String(err?.message ?? err) });
+      }
       return;
     }
-    if (client.executorId && client.executorId !== executorId) executors.delete(client.executorId);
-    client.executorId = executorId;
-    client.harness = harness;
-    executors.set(executorId, client);
-    send(client.socket, {
-      type: "hello_ok",
-      executorId,
-      harness,
-      dispatchMode: cfg.dispatchMode,
-    });
-    if (!coreMode) return;
-    // Replay outstanding offers to a newcomer, then admit whatever is queued.
-    for (const row of store.admission.offers(harness)) sendWake(row, client);
-    pump();
-  }
-
-  function accept(client, msg) {
-    if (!coreMode) return;
-    if (!client.executorId) {
-      send(client.socket, { type: "wake_taken", admissionId: String(msg?.admissionId ?? ""), reason: "hello required" });
-      return;
-    }
-    const admissionId = String(msg?.admissionId ?? "");
-    if (!admissionId) return;
-    const result = store.admission.accept(admissionId, {
-      executorId: client.executorId,
-      harness: client.harness,
-      at: Date.now(),
-      harnessMax: cfg.dispatchHarnessMax,
-    });
-    if (result.granted) {
-      send(client.socket, { ...wakeFrame(result.row), type: "wake_granted" });
-    } else {
-      send(client.socket, { type: "wake_taken", admissionId, reason: result.reason ?? null });
-    }
-  }
-
-  const server = http.createServer((req, res) => {
-    res.writeHead(404, { "content-type": "text/plain" });
-    res.end("winch events: websocket only — connect with an Upgrade request\n");
+    json(res, 404, { error: "not found" });
   });
 
   server.on("upgrade", (req, socket) => {
@@ -311,80 +290,19 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         "Connection: Upgrade\r\n" +
         `Sec-WebSocket-Accept: ${acceptKey(key)}\r\n\r\n`
     );
-    const client = { socket, executorId: null, harness: null, connectedAt: Date.now() };
+    const client = { socket, connectedAt: Date.now() };
     clients.set(socket, client);
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
-      send(socket, { type: "welcome", payload: "v3", lastEventId: cursor, dispatchMode: cfg.dispatchMode, requiresHello: coreMode });
+      send(socket, { type: "welcome", payload: "v3", lastEventId: cursor });
       send(socket, { type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) });
     } catch {
       clients.delete(socket);
     }
 
-    function text(raw) {
-      let msg;
-      try { msg = JSON.parse(raw); } catch { return; }
-      if (msg?.type === "hello") hello(client, msg);
-      else if (msg?.type === "wake_accept") accept(client, msg);
-    }
-
-    let buf = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buf = Buffer.concat([buf, chunk]);
-      for (;;) {
-        if (buf.length < 2) return;
-        const opcode = buf[0] & 0x0f;
-        let len = buf[1] & 0x7f;
-        let off = 2;
-        if (len === 126) {
-          if (buf.length < 4) return;
-          len = buf.readUInt16BE(2);
-          off = 4;
-        } else if (len === 127) {
-          if (buf.length < 10) return;
-          if (buf.readUInt32BE(2) !== 0) {
-            socket.destroy();
-            return;
-          }
-          len = buf.readUInt32BE(6);
-          off = 10;
-        }
-        if (len > 1024 * 1024) {
-          socket.destroy();
-          return;
-        }
-        const masked = (buf[1] & 0x80) !== 0;
-        let mask = null;
-        if (masked) {
-          if (buf.length < off + 4) return;
-          mask = buf.subarray(off, off + 4);
-          off += 4;
-        }
-        if (buf.length < off + len) return;
-        const payload = Buffer.from(buf.subarray(off, off + len));
-        if (mask && mask.length === 4) {
-          for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
-        }
-        buf = buf.subarray(off + len);
-        if (opcode === 0x8) {
-          socket.destroy();
-          return;
-        }
-        if (opcode === 0x9) {
-          socket.write(Buffer.from([0x8a, 0x00]));
-          continue;
-        }
-        if (opcode === 0x1) text(payload.toString("utf8"));
-      }
-    });
     const drop = () => {
       clients.delete(socket);
       if (closing) return;
-      if (client.executorId && executors.get(client.executorId) === client) {
-        executors.delete(client.executorId);
-        store.admission.requeueExecutor(client.executorId, Date.now());
-        pump();
-      }
     };
     socket.on("close", drop);
     socket.on("error", drop);
@@ -398,10 +316,10 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         for (const row of rows) {
           const msg = toEventMessage(store, row);
           broadcast(msg);
-          if (coreMode) observe(store, msg, Date.now());
+          observe(store, msg, Date.now());
         }
       }
-      if (coreMode) pump();
+      void pump();
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }

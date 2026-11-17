@@ -31,7 +31,7 @@ import { createClaimMethods } from "./claims.js";
 import { createGateMethods } from "./gates.js";
 import { createSweepMethods } from "./sweep.js";
 import { createDepApi } from "./deps.js";
-import { createWebhookApi } from "./webhooks.js";
+import { createDispatchWebhookApi } from "./dispatch-webhooks.js";
 import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
 
@@ -61,7 +61,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
   );
 
   apis.dep = createDepApi({ core });
-  apis.webhook = createWebhookApi({ core });
+  apis.dispatch = createDispatchWebhookApi({ core });
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
 
@@ -90,7 +90,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     story: apis.story,
     task: apis.task,
     dep: apis.dep,
-    webhook: apis.webhook,
+    dispatch: apis.dispatch,
     itemKindOf(id) { return apis.item.kindOf(id); },
     close() { db.close(); },
   };

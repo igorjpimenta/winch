@@ -1,7 +1,7 @@
 {
   "name": "@igorjpimenta/winch-openclaw",
   "version": "2026.11.13-beta.1",
-  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, accepts wake offers from the winch event stream, and keeps claim webhooks as the plugin-mode fallback.",
+  "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives HTTP dispatch wakes, and reconciles in-progress work.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -15,8 +15,6 @@
   "files": [
     "index.js",
     "meta.js",
-    "webhook.js",
-    "autoregister.js",
     "dispatch.js",
     "openclaw.plugin.json",
     "README.md"

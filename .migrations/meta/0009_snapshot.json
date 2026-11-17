@@ -1,0 +1,1465 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "a4c9101a-03af-4f7f-b686-692b03000abf",
+  "prevId": "9bcfc5fd-8305-4ca0-9981-dc175356a0e5",
+  "tables": {
+    "admission_attempts": {
+      "name": "admission_attempts",
+      "columns": {
+        "admission_id": {
+          "name": "admission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executor_id": {
+          "name": "executor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "offered_at": {
+          "name": "offered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_admission_attempt_live": {
+          "name": "uq_admission_attempt_live",
+          "columns": [
+            "admission_id"
+          ],
+          "isUnique": true,
+          "where": "\"admission_attempts\".\"ended_at\" IS NULL"
+        },
+        "idx_admission_attempts_executor": {
+          "name": "idx_admission_attempts_executor",
+          "columns": [
+            "executor_id",
+            "ended_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "admission_attempts_admission_id_admission_queue_id_fk": {
+          "name": "admission_attempts_admission_id_admission_queue_id_fk",
+          "tableFrom": "admission_attempts",
+          "tableTo": "admission_queue",
+          "columnsFrom": [
+            "admission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "admission_attempts_admission_id_attempt_no_pk": {
+          "columns": [
+            "admission_id",
+            "attempt_no"
+          ],
+          "name": "admission_attempts_admission_id_attempt_no_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "admission_queue": {
+      "name": "admission_queue",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_admission_live": {
+          "name": "uq_admission_live",
+          "columns": [
+            "item_id",
+            "harness"
+          ],
+          "isUnique": true,
+          "where": "\"admission_queue\".\"ended_at\" IS NULL"
+        },
+        "idx_admission_harness": {
+          "name": "idx_admission_harness",
+          "columns": [
+            "status",
+            "harness",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "idx_admission_global": {
+          "name": "idx_admission_global",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "idx_admission_item": {
+          "name": "idx_admission_item",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "admission_queue_item_id_items_id_fk": {
+          "name": "admission_queue_item_id_items_id_fk",
+          "tableFrom": "admission_queue",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "admission_kind": {
+          "name": "admission_kind",
+          "value": "\"admission_queue\".\"kind\" IN ('task', 'story', 'append', 'review', 'unblocked')"
+        },
+        "admission_status": {
+          "name": "admission_status",
+          "value": "\"admission_queue\".\"status\" IN ('queued', 'offered', 'accepted', 'active', 'done', 'cancelled', 'expired')"
+        }
+      }
+    },
+    "artifacts": {
+      "name": "artifacts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_artifacts_uri": {
+          "name": "uq_artifacts_uri",
+          "columns": [
+            "uri"
+          ],
+          "isUnique": true
+        },
+        "idx_artifacts_item": {
+          "name": "idx_artifacts_item",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": false
+        },
+        "idx_artifacts_attempt": {
+          "name": "idx_artifacts_attempt",
+          "columns": [
+            "attempt_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "artifacts_item_id_items_id_fk": {
+          "name": "artifacts_item_id_items_id_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "artifacts_attempt_id_attempts_id_fk": {
+          "name": "artifacts_attempt_id_attempts_id_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "attempts": {
+      "name": "attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "heartbeat_at": {
+          "name": "heartbeat_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_seconds": {
+          "name": "lease_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(COALESCE(\"heartbeat_at\", \"claimed_at\") + \"lease_seconds\" * 1000)",
+            "type": "virtual"
+          }
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result_json": {
+          "name": "result_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result_summary": {
+          "name": "result_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(json_extract(\"result_json\", '$.summary'))",
+            "type": "virtual"
+          }
+        },
+        "error_type": {
+          "name": "error_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_record_json": {
+          "name": "gate_record_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_type": {
+          "name": "gate_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(json_extract(\"gate_record_json\", '$.type'))",
+            "type": "virtual"
+          }
+        }
+      },
+      "indexes": {
+        "uq_attempt_item_no": {
+          "name": "uq_attempt_item_no",
+          "columns": [
+            "item_id",
+            "attempt_no"
+          ],
+          "isUnique": true
+        },
+        "idx_attempt_session": {
+          "name": "idx_attempt_session",
+          "columns": [
+            "session_id"
+          ],
+          "isUnique": false
+        },
+        "uq_attempt_live": {
+          "name": "uq_attempt_live",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": true,
+          "where": "\"attempts\".\"ended_at\" IS NULL"
+        },
+        "idx_attempts_expiry": {
+          "name": "idx_attempts_expiry",
+          "columns": [
+            "status",
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "attempts_item_id_items_id_fk": {
+          "name": "attempts_item_id_items_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "attempts_session_id_work_sessions_id_fk": {
+          "name": "attempts_session_id_work_sessions_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "work_sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "attempts_status": {
+          "name": "attempts_status",
+          "value": "\"attempts\".\"status\" IN ('claimed', 'running', 'gated', 'done', 'failed', 'released', 'cancelled')"
+        }
+      }
+    },
+    "dispatch_webhooks": {
+      "name": "dispatch_webhooks",
+      "columns": {
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executor_id": {
+          "name": "executor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bearer": {
+          "name": "bearer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_dispatch_webhooks_harness": {
+          "name": "idx_dispatch_webhooks_harness",
+          "columns": [
+            "harness",
+            "last_seen_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "dispatch_webhooks_harness_executor_id_pk": {
+          "columns": [
+            "harness",
+            "executor_id"
+          ],
+          "name": "dispatch_webhooks_harness_executor_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "harness_webhooks": {
+      "name": "harness_webhooks",
+      "columns": {
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bearer": {
+          "name": "bearer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "item_edges": {
+      "name": "item_edges",
+      "columns": {
+        "from_item_id": {
+          "name": "from_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "to_item_id": {
+          "name": "to_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'depends_on'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_edges_from": {
+          "name": "idx_edges_from",
+          "columns": [
+            "from_item_id"
+          ],
+          "isUnique": false
+        },
+        "idx_edges_to": {
+          "name": "idx_edges_to",
+          "columns": [
+            "to_item_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "item_edges_from_item_id_items_id_fk": {
+          "name": "item_edges_from_item_id_items_id_fk",
+          "tableFrom": "item_edges",
+          "tableTo": "items",
+          "columnsFrom": [
+            "from_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "item_edges_to_item_id_items_id_fk": {
+          "name": "item_edges_to_item_id_items_id_fk",
+          "tableFrom": "item_edges",
+          "tableTo": "items",
+          "columnsFrom": [
+            "to_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "item_edges_from_item_id_to_item_id_kind_pk": {
+          "columns": [
+            "from_item_id",
+            "to_item_id",
+            "kind"
+          ],
+          "name": "item_edges_from_item_id_to_item_id_kind_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "item_edges_kind": {
+          "name": "item_edges_kind",
+          "value": "\"item_edges\".\"kind\" IN ('depends_on')"
+        }
+      }
+    },
+    "item_events": {
+      "name": "item_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_item_events_item": {
+          "name": "idx_item_events_item",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": false
+        },
+        "idx_item_events_created": {
+          "name": "idx_item_events_created",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "item_events_item_id_items_id_fk": {
+          "name": "item_events_item_id_items_id_fk",
+          "tableFrom": "item_events",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "item_events_attempt_id_attempts_id_fk": {
+          "name": "item_events_attempt_id_attempts_id_fk",
+          "tableFrom": "item_events",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "item_events_session_id_work_sessions_id_fk": {
+          "name": "item_events_session_id_work_sessions_id_fk",
+          "tableFrom": "item_events",
+          "tableTo": "work_sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "item_state": {
+      "name": "item_state",
+      "columns": {
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state_json": {
+          "name": "state_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "wait_kind": {
+          "name": "wait_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(json_extract(\"state_json\", '$.wait.kind'))",
+            "type": "virtual"
+          }
+        },
+        "current_child_key": {
+          "name": "current_child_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(json_extract(\"state_json\", '$.currentChildKey'))",
+            "type": "virtual"
+          }
+        },
+        "assignee_harness": {
+          "name": "assignee_harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "assignee_agent": {
+          "name": "assignee_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_state_ready": {
+          "name": "idx_state_ready",
+          "columns": [
+            "status",
+            "assignee_harness",
+            "assignee_agent"
+          ],
+          "isUnique": false
+        },
+        "idx_state_updated": {
+          "name": "idx_state_updated",
+          "columns": [
+            "updated_at"
+          ],
+          "isUnique": false
+        },
+        "idx_state_deleted": {
+          "name": "idx_state_deleted",
+          "columns": [
+            "deleted_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "item_state_item_id_items_id_fk": {
+          "name": "item_state_item_id_items_id_fk",
+          "tableFrom": "item_state",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "item_state_status": {
+          "name": "item_state_status",
+          "value": "\"item_state\".\"status\" IN ('backlog', 'ready', 'in_progress', 'blocked', 'review', 'done', 'cancelled')"
+        },
+        "item_state_assignment_pair": {
+          "name": "item_state_assignment_pair",
+          "value": "(\"item_state\".\"assignee_harness\" IS NULL) = (\"item_state\".\"assignee_agent\" IS NULL)"
+        },
+        "item_state_human_pair": {
+          "name": "item_state_human_pair",
+          "value": "(\"item_state\".\"assignee_agent\" IS 'human') = (\"item_state\".\"assignee_harness\" IS 'human_in_the_loop')"
+        },
+        "item_state_ready_assigned": {
+          "name": "item_state_ready_assigned",
+          "value": "\"item_state\".\"status\" <> 'ready' OR (\"item_state\".\"assignee_harness\" IS NOT NULL AND \"item_state\".\"assignee_agent\" IS NOT NULL)"
+        }
+      }
+    },
+    "item_tags": {
+      "name": "item_tags",
+      "columns": {
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tag": {
+          "name": "tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_tags_tag": {
+          "name": "idx_tags_tag",
+          "columns": [
+            "tag"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "item_tags_item_id_items_id_fk": {
+          "name": "item_tags_item_id_items_id_fk",
+          "tableFrom": "item_tags",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "item_tags_item_id_tag_pk": {
+          "columns": [
+            "item_id",
+            "tag"
+          ],
+          "name": "item_tags_item_id_tag_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "items": {
+      "name": "items",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "child_key": {
+          "name": "child_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "visit_seq": {
+          "name": "visit_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "acceptance": {
+          "name": "acceptance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "priority": {
+          "name": "priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 50
+        },
+        "size": {
+          "name": "size",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "owner_team": {
+          "name": "owner_team",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "execution_kind": {
+          "name": "execution_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'manual'"
+        },
+        "execution_args": {
+          "name": "execution_args",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_items_child": {
+          "name": "uq_items_child",
+          "columns": [
+            "parent_id",
+            "child_key",
+            "visit_seq"
+          ],
+          "isUnique": true,
+          "where": "\"items\".\"child_key\" IS NOT NULL"
+        },
+        "idx_items_parent": {
+          "name": "idx_items_parent",
+          "columns": [
+            "parent_id"
+          ],
+          "isUnique": false
+        },
+        "idx_items_kind_created": {
+          "name": "idx_items_kind_created",
+          "columns": [
+            "kind",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "items_parent_id_items_id_fk": {
+          "name": "items_parent_id_items_id_fk",
+          "tableFrom": "items",
+          "tableTo": "items",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "items_kind": {
+          "name": "items_kind",
+          "value": "\"items\".\"kind\" IN ('epic', 'story', 'task')"
+        },
+        "items_execution_kind": {
+          "name": "items_execution_kind",
+          "value": "\"items\".\"execution_kind\" IN ('pipeclaw', 'subagent', 'cli', 'gate', 'manual')"
+        },
+        "items_root": {
+          "name": "items_root",
+          "value": "(\"items\".\"kind\" = 'epic' AND \"items\".\"parent_id\" IS NULL) OR (\"items\".\"kind\" <> 'epic' AND \"items\".\"parent_id\" IS NOT NULL)"
+        }
+      }
+    },
+    "work_sessions": {
+      "name": "work_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "external_session_id": {
+          "name": "external_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(\"harness\" || ':' || \"agent_id\" || ':' || \"external_session_id\")",
+            "type": "virtual"
+          }
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'claim'"
+        },
+        "parent_session_id": {
+          "name": "parent_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_sessions_identity": {
+          "name": "uq_sessions_identity",
+          "columns": [
+            "harness",
+            "agent_id",
+            "external_session_id"
+          ],
+          "isUnique": true
+        },
+        "idx_sessions_item": {
+          "name": "idx_sessions_item",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": false
+        },
+        "idx_sessions_parent": {
+          "name": "idx_sessions_parent",
+          "columns": [
+            "parent_session_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "work_sessions_item_id_items_id_fk": {
+          "name": "work_sessions_item_id_items_id_fk",
+          "tableFrom": "work_sessions",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "work_sessions_parent_session_id_work_sessions_id_fk": {
+          "name": "work_sessions_parent_session_id_work_sessions_id_fk",
+          "tableFrom": "work_sessions",
+          "tableTo": "work_sessions",
+          "columnsFrom": [
+            "parent_session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "work_sessions_kind": {
+          "name": "work_sessions_kind",
+          "value": "\"work_sessions\".\"kind\" IN ('claim', 'review', 'system', 'fanout')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

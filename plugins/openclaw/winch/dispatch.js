@@ -1,280 +1,212 @@
-// dispatch.js — turn winch events into agent wakes, inside the gateway.
+// dispatch.js — receive wake webhooks and reconcile in-progress work.
 //
-// One rule: the record is the brief. A wake carries nothing but the opaque
-// item id; the agent reads it with backlog_get. Routing is
-// decided by the row itself:
-//
-//   task.assigned    → the assignee, to claim and deliver
-//   story.assigned   → the story assignee, to break it into tasks
-//   task.appended    → the epic's creator, to route the new work
-//   epic.completed   → the epic's creator, to review the delivery
-//
-// Dispatch is event-driven: the client connects to `winch serve --ws`. In core
-// mode the server's admission queue owns the one-winner guard; in plugin mode
-// the router's in-flight map only de-dupes replay and claim leases remain the
-// guard against double work.
+// The gateway owns the HTTP route; winch POSTs { type: "wake", ... } and gets
+// 202 immediately. A wake only starts a turn: the agent's MCP claim is the
+// work guard, so duplicate delivery is harmless.
 
 import fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-export const DEFAULT_WS_URL = "ws://127.0.0.1:38291";
-// A wake for an item is not repeated inside this window; the work itself has
-// its own lease, this only avoids duplicate turns for one assignment row.
+export const ROUTE_PATH = "/api/winch/dispatch";
+const MAX_BODY_BYTES = 1024 * 1024;
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
 
-export function wakeFor(ev, { planner = "atlas" } = {}) {
-  const id = ev?.item?.id ?? ev?.task?.id ?? null;
-  if (!id) return null;
-  switch (ev.kind) {
-    case "task.assigned": {
-      // History replay reaches here on connect: a closed or claimed task must
-      // not wake anyone just because its assignment row is recent.
-      if (ev.item?.status && ev.item.status !== "ready") return null;
-      const agent = ev.item?.assigned ?? ev.task?.assignee ?? null;
-      if (!agent || agent === planner) return null;
-      return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
+function readJson(req, res) {
+  return (async () => {
+    let size = 0;
+    let raw = "";
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        res.statusCode = 413;
+        res.end(JSON.stringify({ error: "body too large" }));
+        return undefined;
+      }
+      raw += chunk;
     }
-    case "story.assigned": {
-      if (ev.item?.status && !["ready", "in_progress", "backlog"].includes(ev.item.status)) return null;
-      const agent = ev.item?.assigned ?? null;
-      if (!agent) return null;
-      return { agent, sessionKey: `winch-story-${id}`, message: id, kind: "story" };
-    }
-    case "task.restored": {
-      // Restoring brings work back without an assignment row; the assignee it
-      // already had must be woken or the task sits until something else fires.
-      if (ev.item?.status && ev.item.status !== "ready") return null;
-      const agent = ev.item?.assigned ?? null;
-      if (!agent || agent === planner) return null;
-      return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "task" };
-    }
-    case "task.appended": {
-      if (ev.item?.status && ev.item.status !== "ready") return null;
-      const agent = ev.epicCreatedBy ?? planner;
-      return { agent, sessionKey: `winch-task-${id}`, message: id, kind: "append" };
-    }
-    case "epic.completed": {
-      if (ev.item?.kind !== "epic") return null;
-      const agent = ev.epicCreatedBy ?? planner;
-      return { agent, sessionKey: `winch-epic-${id}`, message: id, kind: "review", eventId: ev.id ?? null };
-    }
-    default:
-      return null;
-  }
-}
-
-export function createRouter({ wake, planner, now = Date.now, statePath = null, logger = null }) {
-  const inflight = new Map();
-  const reviewedIds = readReviewed(statePath); // epicId -> last reviewed event id
-  // Rows are replayed on every reconnect; each row is acted on once, while a
-  // later row about the same task may still wake it again.
-  const seenRows = new Set();
-  const seenOrder = [];
-
-  function rememberReview(epicId, eventId) {
-    reviewedIds[epicId] = eventId ?? 0;
-    if (!statePath) return;
+    if (!raw) return {};
     try {
-      fs.mkdirSync(path.dirname(statePath), { recursive: true });
-      const entries = Object.entries(reviewedIds).slice(-500);
-      fs.writeFileSync(statePath, JSON.stringify({ reviewedEpics: Object.fromEntries(entries) }));
-    } catch (e) {
-      logger?.warn?.(`winch: review state not written: ${e?.message ?? e}`);
+      return JSON.parse(raw);
+    } catch {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "invalid json body" }));
+      return undefined;
     }
-  }
-
-  function send(route) {
-    const key = `${route.kind}:${route.message}`;
-    if (route.kind === "review") {
-      // A later marker for the same epic is a new review cycle.
-      const last = reviewedIds[route.message] ?? 0;
-      if (route.eventId != null && route.eventId <= last) return null;
-      rememberReview(route.message, route.eventId);
-    } else {
-      const seen = inflight.get(key);
-      if (seen && now() - seen < INFLIGHT_TTL_MS) return null;
-      inflight.set(key, now());
-      for (const [k, at] of inflight) if (now() - at > INFLIGHT_TTL_MS) inflight.delete(k);
-    }
-    logger?.info?.(`winch: waking ${route.agent} for ${route.message} (${route.kind})`);
-    Promise.resolve(wake(route)).catch((e) => logger?.warn?.(`winch: wake failed: ${e?.message ?? e}`));
-    return route;
-  }
-
-  return {
-    handle(ev) {
-      if (ev?.id != null && seenRows.has(ev.id)) return null;
-      let acted = false;
-      // A close can make already-assigned tasks claimable; the envelope names
-      // them so no subscriber has to recompute the dependency graph.
-      for (const u of ev?.unblocked ?? []) {
-        if (!u?.id) continue;
-        if (!u?.assigned) { logger?.warn?.(`winch: unblocked task ${u.id} has no assignee; cannot wake`); continue; }
-        if (u.assigned === planner) continue;
-        // An earlier wake may have been refused as not-ready; that suppression
-        // must not outlive the event that made the task claimable.
-        inflight.delete(`task:${u.id}`);
-        if (send({ agent: u.assigned, sessionKey: `winch-task-${u.id}`, message: u.id, kind: "task" })) acted = true;
-      }
-      const route = wakeFor(ev, { planner });
-      if (route === null && ev?.item?.id && (ev.kind === "task.assigned" || ev.kind === "story.assigned" || ev.kind === "task.restored" || ev.kind === "task.appended" || ev.kind === "epic.completed")) {
-        const hasAgent = ev.kind === "task.appended" || ev.kind === "epic.completed"
-          ? (ev.epicCreatedBy ?? planner)
-          : (ev.item?.assigned ?? ev.task?.assignee);
-        if (!hasAgent) {
-          logger?.warn?.(`winch: ${ev.kind} for ${ev.item.id} has no assignee/creator; dies (no wake)`);
-          // A null assignee/creator can never become routable on replay; mark
-          // seen so the row does not spam the log. A later assignment emits a
-          // new row that carries the real agent.
-          if (ev?.id != null) {
-            seenRows.add(ev.id);
-            seenOrder.push(ev.id);
-            if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
-          }
-        }
-      }
-      if (route && send(route)) acted = true;
-      // A row is remembered only once it caused a wake: an unroutable row (an
-      // older envelope, a filter hit) must stay retryable on the next replay.
-      if (acted && ev?.id != null) {
-        seenRows.add(ev.id);
-        seenOrder.push(ev.id);
-        if (seenOrder.length > 500) seenRows.delete(seenOrder.shift());
-      }
-      return route ?? null;
-    },
-  };
+  })();
 }
 
-function readReviewed(statePath) {
-  if (!statePath) return {};
-  try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    const value = parsed?.reviewedEpics;
-    if (Array.isArray(value)) return Object.fromEntries(value.map((id) => [id, 0]));
-    return value && typeof value === "object" ? value : {};
-  } catch {
-    return {};
-  }
+function json(res, status, body) {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(body));
 }
 
 export function defaultStatePath() {
-  return path.join(os.homedir(), ".openclaw", "state", "winch-plugin-dispatch.json");
+  return path.join(os.homedir(), ".openclaw", "state", "winch-dispatch.json");
 }
 
-// Thin transport around the router: reconnect forever, ignore malformed
-// frames, and let history replay through the same handler as live rows.
-export function startDispatchClient({ url = DEFAULT_WS_URL, router = null, wake = null, harness = null, executorId = randomUUID(), logger = null } = {}) {
-  let ws = null;
-  let stopped = false;
-  let retry = null;
-  let mode = "unknown";
-  const offers = new Map();
-  const started = new Set();
-  const startedOrder = [];
-
-  function rememberStart(id) {
-    started.add(id);
-    startedOrder.push(id);
-    if (startedOrder.length > 500) started.delete(startedOrder.shift());
-  }
-
-  function begin(frame) {
-    const id = frame?.admissionId;
-    if (!id || started.has(id)) return;
-    offers.delete(id);
-    if (typeof wake !== "function") {
-      logger?.warn?.(`winch: wake_granted ${id} but no wake callback is configured`);
-      return;
+export function loadExecutorState(statePath = defaultStatePath()) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (typeof parsed?.executorId === "string" && parsed.executorId.trim()
+      && typeof parsed?.bearer === "string" && parsed.bearer.trim()) {
+      return { executorId: parsed.executorId.trim(), bearer: parsed.bearer.trim() };
     }
-    rememberStart(id);
-    Promise.resolve(wake({
-      agent: frame.agent,
-      message: frame.itemId,
-      kind: frame.kind,
-      admissionId: id,
-    })).catch((e) => {
-      started.delete(id);
-      logger?.warn?.(`winch: wake failed for ${frame.itemId}: ${e?.message ?? e}`);
-    });
+  } catch {
+    // first boot
   }
+  const state = {
+    executorId: `openclaw-${crypto.randomUUID()}`,
+    bearer: crypto.randomBytes(32).toString("hex"),
+  };
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  return state;
+}
 
-  function send(obj) {
-    if (!ws || ws.readyState !== 1) return;
-    try { ws.send(JSON.stringify(obj)); } catch { /* reconnect owns it */ }
-  }
+function routeUrl(baseUrl) {
+  return `${String(baseUrl).replace(/\/+$/, "")}${ROUTE_PATH}`;
+}
 
-  function handle(frame) {
-    if (!frame || typeof frame !== "object") return;
-    switch (frame.type) {
-      case "welcome":
-        mode = frame.dispatchMode === "core" ? "core" : "plugin";
-        if (mode === "core") {
-          if (!harness) logger?.warn?.("winch: dispatch mode is core but no harness is configured; wake offers will be ignored");
-          else send({ type: "hello", executorId, harness });
-        } else if (!router) {
-          logger?.warn?.("winch: dispatch mode is plugin but no router is configured");
-        }
-        break;
-      case "event":
-        if (mode !== "core") router?.handle(frame);
-        break;
-      case "history":
-        if (mode !== "core" && Array.isArray(frame.events)) {
-          for (const ev of frame.events) router?.handle(ev);
-        }
-        break;
-      case "wake":
-        if (mode !== "core") break;
-        offers.set(frame.admissionId, frame);
-        send({ type: "wake_accept", admissionId: frame.admissionId, executorId });
-        break;
-      case "wake_granted":
-        if (mode === "core") begin(frame);
-        break;
-      case "wake_taken":
-        offers.delete(frame.admissionId);
-        break;
-      case "hello_rejected":
-        logger?.warn?.(`winch: executor rejected: ${frame.reason ?? "unknown"}`);
-        break;
-      default:
-        break;
-    }
-  }
-
-  const connect = () => {
-    if (stopped) return;
-    ws = new WebSocket(url);
-    ws.addEventListener("open", () => logger?.info?.(`winch: dispatch connected ${url}`));
-    ws.addEventListener("message", (m) => {
-      let frame;
-      try {
-        frame = JSON.parse(m.data);
-      } catch {
+export function registerReceiver({ api, bearer, wake, logger = console }) {
+  api.registerHttpRoute({
+    path: ROUTE_PATH,
+    auth: "plugin",
+    match: "exact",
+    handler: async (req, res) => {
+      if (req.method !== "POST") {
+        res.statusCode = 405;
+        res.setHeader("allow", "POST");
+        res.end(JSON.stringify({ error: "method not allowed" }));
         return;
       }
-      handle(frame);
+      const auth = req.headers?.authorization ?? "";
+      if (!auth.startsWith("Bearer ") || auth.slice(7) !== bearer) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      if (body?.type !== "wake" || !body.admissionId || !body.itemId || !body.agent) {
+        json(res, 400, { error: "wake payload requires admissionId, itemId, agent" });
+        return;
+      }
+      Promise.resolve(wake({
+        agent: body.agent,
+        message: body.itemId,
+        kind: body.kind,
+        admissionId: body.admissionId,
+      })).catch((err) => logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`));
+      json(res, 202, { ok: true, admissionId: body.admissionId });
+    },
+  });
+}
+
+export async function registerExecutor({ baseUrl, harness, executorId, url, bearer, timeoutMs = 5000 }) {
+  const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness, executorId, url, bearer }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`dispatch register ${res.status}`);
+  return res.json();
+}
+
+export async function recoverOnce({ baseUrl, harness, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
+  const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/recover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness, executorId }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`dispatch recover ${res.status}`);
+  const body = await res.json();
+  const now = Date.now();
+  for (const [key, at] of started) if (now - at > INFLIGHT_TTL_MS) started.delete(key);
+
+  for (const row of body?.resume ?? []) {
+    if (!row?.task?.id) continue;
+    const key = `resume:${row.task.id}:${row.attemptId ?? "none"}`;
+    if (started.has(key)) continue;
+    started.set(key, now);
+    Promise.resolve(wake({
+      agent: row.task.assignee_agent,
+      message: resumePrompt(row),
+      sessionKey: row.task.id,
+      kind: "resume",
+      attemptId: row.attemptId,
+    })).catch((err) => {
+      started.delete(key);
+      logger?.warn?.(`winch: resume ${row.task.id} failed: ${err?.message ?? err}`);
     });
-    ws.addEventListener("close", () => {
-      offers.clear();
-      if (stopped) return;
-      retry = setTimeout(connect, 2000);
+  }
+
+  for (const row of body?.start ?? []) {
+    if (!row?.admissionId || !row?.itemId) continue;
+    const key = `start:${row.admissionId}`;
+    if (started.has(key)) continue;
+    started.set(key, now);
+    Promise.resolve(wake({
+      agent: row.agent,
+      message: row.itemId,
+      kind: row.kind,
+      admissionId: row.admissionId,
+    })).catch((err) => {
+      started.delete(key);
+      logger?.warn?.(`winch: wake ${row.itemId} failed: ${err?.message ?? err}`);
     });
-    ws.addEventListener("error", () => {});
+  }
+  return body;
+}
+
+export function resumePrompt(row) {
+  const taskId = row?.task?.id ?? "(unknown)";
+  const attemptId = row?.attemptId ?? "(unknown)";
+  return `Resume ${taskId} attempt ${attemptId}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}" and attemptId "${attemptId}", heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
+}
+
+export function startDispatch({ api, cfg = {}, wake, logger = console }) {
+  if (cfg.dispatchEnabled === false) return null;
+  const harness = cfg.dispatchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
+  const baseUrl = cfg.dispatchUrl ?? process.env.WINCH_DISPATCH_URL ?? "http://127.0.0.1:38291";
+  const publicBaseUrl = cfg.dispatchPublicBaseUrl ?? process.env.WINCH_DISPATCH_PUBLIC_BASE_URL ?? "http://127.0.0.1:18789";
+  const statePath = cfg.dispatchStatePath ?? defaultStatePath();
+  const state = loadExecutorState(statePath);
+  const started = new Map();
+
+  registerReceiver({ api, bearer: state.bearer, wake, logger });
+
+  const run = async () => {
+    try {
+      await registerExecutor({
+        baseUrl,
+        harness,
+        executorId: state.executorId,
+        url: routeUrl(publicBaseUrl),
+        bearer: state.bearer,
+      });
+    } catch (err) {
+      logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
+    }
+    try {
+      await recoverOnce({ baseUrl, harness, executorId: state.executorId, wake, started, logger });
+    } catch (err) {
+      logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
+    }
   };
 
-  connect();
+  void run();
+  const intervalMs = Number(cfg.dispatchReconcileMs ?? 30000);
+  const timer = intervalMs > 0 ? setInterval(() => { void run(); }, intervalMs) : null;
+  timer?.unref?.();
+
   return {
     close() {
-      stopped = true;
-      if (retry) clearTimeout(retry);
-      try { ws?.close(); } catch {}
+      if (timer) clearInterval(timer);
     },
-    get mode() { return mode; },
-    get offers() { return offers.size; },
-    get executorId() { return executorId; },
+    get executorId() { return state.executorId; },
   };
 }

@@ -111,38 +111,9 @@ export function createAdmissionApi({ core }) {
     return rowById(id);
   }
 
-  function accept(id, { executorId, harness, at = now(), harnessMax = null }) {
-    const current = rowById(id);
-    if (current && current.status === "accepted" && current.executor_id === executorId) {
-      return { granted: true, row: current, duplicate: true };
-    }
-    // A broadcast row is not reserved against one harness until accept; refuse
-    // here rather than let the winner push its harness over its cap.
-    if (harnessMax && current?.harness === "*" && slotCount(harness) >= harnessMax) {
-      return { granted: false, row: current, reason: "harness_full" };
-    }
-    const r = db.prepare(`
-      UPDATE admission_queue
-         SET status='accepted',
-             harness=CASE WHEN harness='*' THEN ? ELSE harness END
-       WHERE id=? AND status='offered' AND ended_at IS NULL
-         AND (harness=? OR harness='*')
-    `).run(harness, id, harness);
-    if (r.changes > 0) {
-      const attempt = liveAttempt(id);
-      if (attempt) {
-        db.prepare(`
-          UPDATE admission_attempts SET executor_id=?, accepted_at=?
-           WHERE admission_id=? AND attempt_no=?
-        `).run(executorId, at, id, attempt.attempt_no);
-      }
-      return { granted: true, row: rowById(id) };
-    }
-    const row = rowById(id);
-    if (row && row.status === "accepted" && row.executor_id === executorId) {
-      return { granted: true, row, duplicate: true };
-    }
-    return { granted: false, row };
+  function fail(id, at = now()) {
+    endAttempts([id], at);
+    db.prepare("UPDATE admission_queue SET status='expired' WHERE id=? AND status='offered' AND ended_at IS NULL").run(id);
   }
 
   function activate(itemId, harness, at = now()) {
@@ -182,9 +153,9 @@ export function createAdmissionApi({ core }) {
     for (const row of rows) {
       db.prepare("UPDATE admission_attempts SET ended_at=? WHERE admission_id=? AND attempt_no=?")
         .run(at, row.id, row.attempt_no);
-      // Append and review wakes have no claim to confirm; once accepted they
+      // Append and review wakes have no claim to confirm; once offered, they
       // are one-shot, so TTL ends them instead of re-waking the planner.
-      if (row.status === "accepted" && (row.kind === "append" || row.kind === "review")) {
+      if ((row.status === "offered" || row.status === "accepted") && (row.kind === "append" || row.kind === "review")) {
         db.prepare("UPDATE admission_queue SET status='done', ended_at=? WHERE id=?").run(at, row.id);
         continue;
       }
@@ -206,19 +177,6 @@ export function createAdmissionApi({ core }) {
         db.prepare("UPDATE admission_queue SET status='queued' WHERE id=? AND status='expired'").run(row.id);
       }
     }
-  }
-
-  function requeueExecutor(executorId, at = now()) {
-    const ids = db.prepare(`
-      SELECT DISTINCT admission_id FROM admission_attempts
-       WHERE executor_id=? AND ended_at IS NULL
-    `).all(executorId).map((r) => r.admission_id);
-    if (!ids.length) return;
-    endAttempts(ids, at);
-    const marks = ids.map(() => "?").join(",");
-    db.prepare(`UPDATE admission_queue SET status='queued'
-                 WHERE id IN (${marks}) AND status IN ('offered','accepted') AND ended_at IS NULL`)
-      .run(...ids);
   }
 
   function resetOffers(at = now()) {
@@ -281,11 +239,10 @@ export function createAdmissionApi({ core }) {
     queued,
     offers,
     markOffered,
-    accept,
+    fail,
     activate,
     release,
     expire,
-    requeueExecutor,
     resetOffers,
     lastEventId,
     setParentCursor,

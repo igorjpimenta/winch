@@ -44,45 +44,55 @@ test("removed mcp command is unknown", () => {
   assert.match(r.stderr, /unknown command/);
 });
 
-test("webhook set/list/remove round-trips a target, secrets masked", async () => {
+test("dispatch list/remove round-trips an executor target, secrets masked", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
+  const { createStore } = await import("../../src/store/index.js");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
   const db = path.join(dir, "store.sqlite");
   try {
-    let r = runDb(db, "webhook", "set", "--harness", "openclaw", "--url", "http://gw/hook", "--bearer", "s3cret");
+    const store = createStore({ dbPath: db });
+    store.dispatch.upsert({ harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
+    store.close();
+
+    let r = runDb(db, "dispatch", "list");
     assert.equal(r.status, 0);
     assert.match(r.stdout, /openclaw/);
+    assert.match(r.stdout, /exec-1/);
     assert.doesNotMatch(r.stdout, /s3cret/);
-    r = runDb(db, "webhook", "list");
-    assert.equal(r.status, 0);
     const rows = JSON.parse(r.stdout);
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].url, "http://gw/hook");
-    r = runDb(db, "webhook", "remove", "--harness", "openclaw");
+    assert.equal(rows[0].url, "http://gw/wake");
+    assert.equal(rows[0].bearer, "<set>");
+
+    r = runDb(db, "dispatch", "remove", "--harness", "openclaw", "--executor", "exec-1");
     assert.equal(r.status, 0);
-    r = runDb(db, "webhook", "list");
+    r = runDb(db, "dispatch", "list");
     assert.deepEqual(JSON.parse(r.stdout), []);
-    r = runDb(db, "webhook", "remove", "--harness", "openclaw");
+    r = runDb(db, "dispatch", "remove", "--harness", "openclaw", "--executor", "exec-1");
     assert.equal(r.status, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("webhook set refuses bad urls, test fails fast with no target", async () => {
+test("dispatch remove requires both harness and executor", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
   const db = path.join(dir, "store.sqlite");
   try {
-    let r = runDb(db, "webhook", "set", "--harness", "oc", "--url", "ftp://x/y");
-    assert.equal(r.status, 1);
-    r = runDb(db, "webhook", "set", "--harness", "oc");
+    let r = runDb(db, "dispatch", "list");
+    assert.equal(r.status, 0);
+    assert.deepEqual(JSON.parse(r.stdout), []);
+    r = runDb(db, "dispatch", "remove", "--harness", "oc");
     assert.equal(r.status, 2);
-    r = runDb(db, "webhook", "test", "--harness", "nobody");
+    r = runDb(db, "dispatch", "remove", "--harness", "oc", "--executor", "missing");
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /no webhook target/);
+    assert.match(r.stderr, /no dispatch endpoint/);
+    r = runDb(db, "webhook", "list");
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /unknown command/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

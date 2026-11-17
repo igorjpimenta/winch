@@ -69,7 +69,7 @@ test("legacy data is copied into the recursive tree without losing ids or event 
   assert.equal(events[1].kind, "task.completed");
   assert.equal(events[1].actor, "builder");
 
-  assert.equal(store.webhook.get("openclaw").url, "http://127.0.0.1:9/hook");
+  assert.ok(!store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='harness_webhooks'").get());
   assert.ok(!store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='epics'").get());
   assert.equal(kindForEvent({ from_status: "in_progress", to_status: "blocked", kind: null, note: "blocked: need signoff" }), "task.blocked");
 });
