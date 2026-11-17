@@ -194,13 +194,7 @@ export const admissionQueue = sqliteTable("admission_queue", {
   agentId: text("agent_id").notNull(),
   status: text("status").notNull().default("queued"),
   eventId: integer("event_id"),
-  executorId: text("executor_id"),
-  offers: integer("offers").notNull().default(0),
-  backoffUntil: integer("backoff_until").notNull().default(0),
   createdAt: integer("created_at").notNull(),
-  offeredAt: integer("offered_at"),
-  acceptedAt: integer("accepted_at"),
-  admittedAt: integer("admitted_at"),
   endedAt: integer("ended_at"),
 }, (table) => [
   check("admission_kind", sql`${table.kind} IN (${inList(WAKE_KINDS)})`),
@@ -209,6 +203,19 @@ export const admissionQueue = sqliteTable("admission_queue", {
   index("idx_admission_harness").on(table.status, table.harness, table.createdAt),
   index("idx_admission_global").on(table.status, table.createdAt),
   index("idx_admission_item").on(table.itemId),
+]);
+
+export const admissionAttempts = sqliteTable("admission_attempts", {
+  admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no").notNull(),
+  executorId: text("executor_id"),
+  offeredAt: integer("offered_at").notNull(),
+  acceptedAt: integer("accepted_at"),
+  endedAt: integer("ended_at"),
+}, (table) => [
+  primaryKey({ columns: [table.admissionId, table.attemptNo] }),
+  uniqueIndex("uq_admission_attempt_live").on(table.admissionId).where(sql`${table.endedAt} IS NULL`),
+  index("idx_admission_attempts_executor").on(table.executorId, table.endedAt),
 ]);
 
 export const harnessWebhooks = sqliteTable("harness_webhooks", {

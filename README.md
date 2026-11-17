@@ -359,7 +359,8 @@ winch's, not the launching harness's.
 Schema lives in `src/schema.js` as Drizzle tables. The schema is one recursive
 `items` tree (`kind` = epic/story/task, `parent_id` for nesting), with
 `item_state`, `item_tags`, `item_edges`, `attempts`, `work_sessions`,
-`artifacts`, `item_events`, `admission_queue` and `harness_webhooks`. Item ids are opaque; `kind`
+`artifacts`, `item_events`, `admission_queue`, `admission_attempts` and
+`harness_webhooks`. Item ids are opaque; `kind`
 is the discriminator, never an id prefix. `npm run db:generate`
 turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending
 migrations on open, and `npm run db:migrate` does the same explicitly for a

@@ -1,9 +1,100 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e2d4acaa-ed59-4cc6-aca0-b0cea207e921",
+  "id": "9bcfc5fd-8305-4ca0-9981-dc175356a0e5",
   "prevId": "0f959c4b-afa8-4650-951f-8008bb0289a6",
   "tables": {
+    "admission_attempts": {
+      "name": "admission_attempts",
+      "columns": {
+        "admission_id": {
+          "name": "admission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executor_id": {
+          "name": "executor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "offered_at": {
+          "name": "offered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_admission_attempt_live": {
+          "name": "uq_admission_attempt_live",
+          "columns": [
+            "admission_id"
+          ],
+          "isUnique": true,
+          "where": "\"admission_attempts\".\"ended_at\" IS NULL"
+        },
+        "idx_admission_attempts_executor": {
+          "name": "idx_admission_attempts_executor",
+          "columns": [
+            "executor_id",
+            "ended_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "admission_attempts_admission_id_admission_queue_id_fk": {
+          "name": "admission_attempts_admission_id_admission_queue_id_fk",
+          "tableFrom": "admission_attempts",
+          "tableTo": "admission_queue",
+          "columnsFrom": [
+            "admission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "admission_attempts_admission_id_attempt_no_pk": {
+          "columns": [
+            "admission_id",
+            "attempt_no"
+          ],
+          "name": "admission_attempts_admission_id_attempt_no_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "admission_queue": {
       "name": "admission_queue",
       "columns": {
@@ -57,55 +148,11 @@
           "notNull": false,
           "autoincrement": false
         },
-        "executor_id": {
-          "name": "executor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "offers": {
-          "name": "offers",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "backoff_until": {
-          "name": "backoff_until",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "offered_at": {
-          "name": "offered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "admitted_at": {
-          "name": "admitted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "ended_at": {

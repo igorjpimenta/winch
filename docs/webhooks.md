@@ -5,13 +5,14 @@
 
 - The server routes `task.assigned`, `story.assigned`, `task.restored`,
   `task.appended` and `epic.completed` into `admission_queue`.
-- It offers a queued wake to each connected executor as a `wake` frame. The
+- Each delivery attempt is an `admission_attempts` row. The server offers the
+  queued wake to each connected executor as a `wake` frame. The
   first `wake_accept` wins and receives `wake_granted`; the rest receive
   `wake_taken`. The row becomes `active` when the item is claimed and closes
   when the item closes. Append and review wakes have no claim: acceptance is
   one-shot, and the offer TTL ends the row instead of retrying it.
-- A rejected connection, an expired offer, or an offer that was accepted but
-  never granted requeues with exponential backoff. The offer TTL, backoff,
+- A rejected connection, an expired offer, or an accepted wake that is never
+  claimed requeues with exponential backoff. The offer TTL, backoff,
   attempts, per-harness cap and global cap are in [Configuration](configuration.md).
 - Both adapters send `hello` with an executor id and harness. `dispatchHarness`
   selects the harness name; it must match the harness that claims the work.

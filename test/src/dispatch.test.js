@@ -112,14 +112,11 @@ test("an expired offer releases capacity and retries with backoff", () => {
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  store.db.prepare("UPDATE admission_queue SET offered_at=? WHERE id=?").run(Date.now() - 10_000, offer.id);
+  store.db.prepare("UPDATE admission_attempts SET offered_at=? WHERE admission_id=?").run(Date.now() - 10_000, offer.id);
   const retried = tick(store, { reachable: ["test"] });
   assert.equal(retried.length, 0, "backoff holds the row out of the next tick");
-  const backoff = store.admission.get(offer.id);
-  assert.equal(backoff.status, "expired");
-  assert.ok(backoff.backoff_until > Date.now());
-  store.db.prepare("UPDATE admission_queue SET backoff_until=0 WHERE id=?").run(offer.id);
-  const after = tick(store, { reachable: ["test"] });
+  assert.equal(store.admission.get(offer.id).status, "expired");
+  const after = tick(store, { at: Date.now() + 20, reachable: ["test"] });
   assert.equal(after.length, 1);
   assert.equal(after[0].status, "offered");
   assert.equal(after[0].offers, 2);
@@ -220,4 +217,19 @@ test("a review wake is one-shot: its TTL ends it instead of retrying", () => {
   tick(store, { at: Date.now() + 10_000, reachable: [] });
   assert.equal(store.admission.get(offer.id).status, "done");
   assert.equal(store.admission.globalSlotCount(), 0);
+});
+
+test("attempt state is normalized out of the admission queue", () => {
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const columns = store.db.prepare("PRAGMA table_info(admission_queue)").all().map((c) => c.name);
+  for (const gone of ["executor_id", "offers", "offered_at", "accepted_at", "backoff_until", "admitted_at"]) {
+    assert.ok(!columns.includes(gone), `${gone} is not a queue column`);
+  }
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM admission_attempts WHERE admission_id=?").get(offer.id).n, 1);
+  store.admission.accept(offer.id, { executorId: "A", harness: "test" });
+  const attempt = store.db.prepare("SELECT * FROM admission_attempts WHERE admission_id=? AND ended_at IS NULL").get(offer.id);
+  assert.equal(attempt.executor_id, "A");
+  assert.ok(attempt.accepted_at);
 });

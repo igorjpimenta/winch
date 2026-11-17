@@ -1,3 +1,4 @@
+PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `admission_queue` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -6,13 +7,7 @@ CREATE TABLE `admission_queue` (
 	`agent_id` text NOT NULL,
 	`status` text DEFAULT 'queued' NOT NULL,
 	`event_id` integer,
-	`executor_id` text,
-	`offers` integer DEFAULT 0 NOT NULL,
-	`backoff_until` integer DEFAULT 0 NOT NULL,
 	`created_at` integer NOT NULL,
-	`offered_at` integer,
-	`accepted_at` integer,
-	`admitted_at` integer,
 	`ended_at` integer,
 	FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "admission_kind" CHECK("admission_queue"."kind" IN ('task', 'story', 'append', 'review', 'unblocked')),
@@ -23,7 +18,19 @@ CREATE UNIQUE INDEX `uq_admission_live` ON `admission_queue` (`item_id`,`harness
 CREATE INDEX `idx_admission_harness` ON `admission_queue` (`status`,`harness`,`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_admission_global` ON `admission_queue` (`status`,`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_admission_item` ON `admission_queue` (`item_id`);--> statement-breakpoint
-PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `admission_attempts` (
+	`admission_id` text NOT NULL,
+	`attempt_no` integer NOT NULL,
+	`executor_id` text,
+	`offered_at` integer NOT NULL,
+	`accepted_at` integer,
+	`ended_at` integer,
+	PRIMARY KEY(`admission_id`, `attempt_no`),
+	FOREIGN KEY (`admission_id`) REFERENCES `admission_queue`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_admission_attempt_live` ON `admission_attempts` (`admission_id`) WHERE "admission_attempts"."ended_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `idx_admission_attempts_executor` ON `admission_attempts` (`executor_id`,`ended_at`);--> statement-breakpoint
 CREATE TABLE `__new_work_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`item_id` text NOT NULL,
