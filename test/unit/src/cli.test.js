@@ -219,17 +219,3 @@ test("webhook register uses WINCH_WEBHOOK_BEARER when --bearer is absent", async
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-test("webhook register uses WINCH_DISPATCH_BEARER when --bearer is absent", async () => {
-  const { mkdtempSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
-  const db = path.join(dir, "store.sqlite");
-  try {
-    const r = runDbWithEnv(db, { WINCH_DISPATCH_BEARER: "env-secret" }, "webhook", "register", "--harness", "myapp", "--id", "e-env", "--url", "http://127.0.0.1:9/wake");
-    assert.equal(r.status, 0);
-    assert.equal(JSON.parse(r.stdout).bearer, "<set>");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});

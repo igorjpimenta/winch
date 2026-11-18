@@ -148,9 +148,9 @@ export function resumePrompt(row) {
 export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, logger = console }) {
   if (cfg.dispatchEnabled === false) return null;
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
-  const bearer = process.env.WINCH_DISPATCH_BEARER;
+  const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
-    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_DISPATCH_BEARER; receiver disabled");
+    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
     return null;
   }
   const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;

@@ -38,7 +38,7 @@ carries no explicit extensions path; the browser-lease extension lives at
    Set `dispatchPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
    port isn't detectable, and `winchHarness` if the winch MCP entry uses a
    harness other than `openclaw`. Generate a bearer with
-   `winch webhook bearer`; set `WINCH_DISPATCH_BEARER` and a unique
+   `winch webhook bearer`; set `WINCH_WEBHOOK_BEARER` and a unique
    `WINCH_EXECUTOR_ID` in the gateway/plugin environment. The adapter fails
    closed if either is missing, then registers its wake route on boot.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
@@ -143,7 +143,7 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 
 The opencode companion ships its own dispatch receiver
 (`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, registers
-with `WINCH_EXECUTOR_ID` and `WINCH_DISPATCH_BEARER`, and calls
+with `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, and calls
 `POST /dispatch/recover` on startup and on its reconcile interval. Missing
 identity or bearer disables the receiver.
 
@@ -156,7 +156,7 @@ the guard; the core treats `202` as delivery, not acceptance.
 The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
 `winchExecutorId`, `dispatchReconcileMs`, and a port for the loopback listener.
 `dispatchUrl` and the state path are gone; use `WINCH_DISPATCH_URL` and
-`WINCH_DISPATCH_BEARER` instead. OpenCode V1 reads only the environment; V2
+`WINCH_WEBHOOK_BEARER` instead. OpenCode V1 reads only the environment; V2
 reads `ctx.options` first.
 
 ### Local (stdio) — the strong shape

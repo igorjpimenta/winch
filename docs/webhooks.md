@@ -25,9 +25,9 @@ independent endpoints for different purposes.
 `register` defaults to `--topic dispatch`. It derives a stable `manual-<hash>`
 id from the URL when `--id` is omitted. For the dispatch topic, the executor id
 defaults to the subscription id and `--harness` is required. If `--bearer` is
-omitted it uses `WINCH_WEBHOOK_BEARER`, then `WINCH_DISPATCH_BEARER`, then
-generates one and prints it once; later `list` output redacts it. The bearer is
-sent as `Authorization: Bearer …` on every delivery.
+omitted it uses `WINCH_WEBHOOK_BEARER`, then generates one and prints it once;
+later `list` output redacts it. The bearer is sent as
+`Authorization: Bearer …` on every delivery.
 
 `list` shows every topic unless `--topic` is given. `revoke` and `test` default
 to `dispatch`; `test` pings every subscription in the selected topic or id.
@@ -56,10 +56,10 @@ The adapter environment supplies the identity:
 |---|---|
 | `WINCH_HARNESS` | harness name; must match the MCP connection |
 | `WINCH_EXECUTOR_ID` | unique id for this executor; use a distinct value for every live connection |
-| `WINCH_DISPATCH_BEARER` | receiver token; generate with `winch webhook bearer` |
+| `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 
-Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_DISPATCH_BEARER` is
+Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
 missing. Plugin config can supply `winchHarness` and `winchExecutorId`; the
 environment is the fallback.
 

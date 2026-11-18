@@ -9,7 +9,7 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    executor bearer, and starts a one-shot session for the assigned agent. The
    agent's `backlog_claim` is the work guard, so duplicate delivery is safe.
 3. **Self-registration and recovery** — registers the wake URL with
-   `WINCH_EXECUTOR_ID` and `WINCH_DISPATCH_BEARER`, then reconciles assigned
+   `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, then reconciles assigned
    `in_progress` work through `POST /dispatch/recover`.
 
 ## Install
@@ -27,7 +27,7 @@ The plugin depends on `@igorjpimenta/winch`, so npm resolves and pins the
 server version alongside it.
 
 Set `dispatchPublicBaseUrl` if the gateway port isn't detectable. Generate the
-bearer with `winch webhook bearer`, then set `WINCH_DISPATCH_BEARER` and a unique
+bearer with `winch webhook bearer`, then set `WINCH_WEBHOOK_BEARER` and a unique
 `WINCH_EXECUTOR_ID` in the gateway/plugin environment. The receiver stays
 disarmed and logs a warning if either is missing.
 
@@ -54,7 +54,7 @@ Environment:
 | variable | meaning |
 |---|---|
 | `WINCH_EXECUTOR_ID` | unique executor id; required unless `winchExecutorId` is set |
-| `WINCH_DISPATCH_BEARER` | receiver token; generate with `winch webhook bearer` |
+| `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 | `WINCH_DISPATCH_PUBLIC_BASE_URL` | fallback for `dispatchPublicBaseUrl` |
 

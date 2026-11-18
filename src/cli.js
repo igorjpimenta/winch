@@ -315,7 +315,7 @@ export async function runCli(argv) {
           if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
             fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
           }
-          const envBearer = (process.env.WINCH_WEBHOOK_BEARER ?? process.env.WINCH_DISPATCH_BEARER ?? "").trim();
+          const envBearer = (process.env.WINCH_WEBHOOK_BEARER ?? "").trim();
           const generated = !values.bearer && !envBearer;
           const bearer = values.bearer || envBearer || crypto.randomBytes(32).toString("hex");
           const id = values.id ?? values.executor ?? manualExecutorId(values.url);

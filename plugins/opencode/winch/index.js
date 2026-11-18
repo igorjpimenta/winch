@@ -22,9 +22,9 @@ function opencodeWake({ agent, message }) {
 
 function start({ cfg = {}, harness, logger }) {
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
-  const bearer = process.env.WINCH_DISPATCH_BEARER;
+  const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
-    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_DISPATCH_BEARER; receiver disabled");
+    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
     return null;
   }
   const dispatch = startDispatch({
