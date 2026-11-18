@@ -33,6 +33,10 @@ export default definePluginEntry({
         type: "string",
         description: "Unique executor id for this connection. Default: WINCH_EXECUTOR_ID.",
       },
+      winchConsumerId: {
+        type: "string",
+        description: "Stable consumer id shared by this gateway's executors. Default: harness:hostname.",
+      },
       dispatchReconcileMs: {
         type: "integer",
         description: "Reconcile interval in milliseconds. Default: 30000.",

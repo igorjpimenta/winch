@@ -40,22 +40,22 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-export async function registerExecutor({ baseUrl, harness, executorId, url, bearer, timeoutMs = 5000 }) {
+export async function registerExecutor({ baseUrl, harness, consumerId, executorId, url, bearer, timeoutMs = 5000 }) {
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ harness, executorId, url, bearer }),
+    body: JSON.stringify({ harness, consumerId, executorId, url, bearer }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch register ${res.status}`);
   return res.json();
 }
 
-export async function recoverOnce({ baseUrl, harness, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
+export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/recover`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ harness, executorId }),
+    body: JSON.stringify({ harness, consumerId, executorId }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch recover ${res.status}`);
@@ -104,8 +104,9 @@ export function resumePrompt(row) {
   return `Resume ${taskId} attempt ${attemptId}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}" and attemptId "${attemptId}", heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
 }
 
-export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, executorId, bearer, wake, logger = console, host = "127.0.0.1", port = 0, reconcileMs = 30000 } = {}) {
+export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, consumerId = null, executorId, bearer, wake, logger = console, host = "127.0.0.1", port = 0, reconcileMs = 30000 } = {}) {
   if (!executorId || !bearer) throw new Error("dispatch needs an executor id and bearer");
+  const subscriptionId = consumerId || executorId;
   const started = new Map();
   let closed = false;
   let timer = null;
@@ -146,6 +147,7 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, executo
       await registerExecutor({
         baseUrl,
         harness,
+        consumerId: subscriptionId,
         executorId,
         url: `http://${host}:${listener.address().port}/wake`,
         bearer,
@@ -154,7 +156,7 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, executo
       logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
     }
     try {
-      await recoverOnce({ baseUrl, harness, executorId, wake, started, logger });
+      await recoverOnce({ baseUrl, harness, consumerId: subscriptionId, executorId, wake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }
@@ -169,13 +171,14 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, executo
         timer = setInterval(() => { void run(); }, Number(reconcileMs));
         timer.unref?.();
       }
-      resolve({ port: listener.address().port, executorId });
+      resolve({ port: listener.address().port, executorId, consumerId: subscriptionId });
     });
   });
 
   return {
     ready,
     get executorId() { return executorId; },
+    get consumerId() { return subscriptionId; },
     get port() { return listener?.address()?.port ?? null; },
     close() {
       closed = true;

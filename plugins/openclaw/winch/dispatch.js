@@ -81,22 +81,22 @@ export function registerReceiver({ api, bearer, wake, logger = console }) {
   });
 }
 
-export async function registerExecutor({ baseUrl, harness, executorId, url, bearer, timeoutMs = 5000 }) {
+export async function registerExecutor({ baseUrl, harness, consumerId, executorId, url, bearer, timeoutMs = 5000 }) {
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ harness, executorId, url, bearer }),
+    body: JSON.stringify({ harness, consumerId, executorId, url, bearer }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch register ${res.status}`);
   return res.json();
 }
 
-export async function recoverOnce({ baseUrl, harness, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
+export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/recover`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ harness, executorId }),
+    body: JSON.stringify({ harness, consumerId, executorId }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch recover ${res.status}`);
@@ -148,6 +148,7 @@ export function resumePrompt(row) {
 export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, logger = console }) {
   if (cfg.dispatchEnabled === false) return null;
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
+  const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
   const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
     logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
@@ -164,6 +165,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       await registerExecutor({
         baseUrl,
         harness,
+        consumerId,
         executorId,
         url: routeUrl(publicBaseUrl),
         bearer,
@@ -172,7 +174,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
     }
     try {
-      await recoverOnce({ baseUrl, harness, executorId, wake, started, logger });
+      await recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }
@@ -188,5 +190,6 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       if (timer) clearInterval(timer);
     },
     get executorId() { return executorId; },
+    get consumerId() { return consumerId; },
   };
 }

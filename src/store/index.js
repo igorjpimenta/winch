@@ -67,8 +67,8 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
 
-  const targetUrl = notifyUrl
-    ?? (cfg.dispatchNotifyUrl || `http://127.0.0.1:${cfg.dispatchPort}/dispatch/notify`);
+  const notifyBase = process.env.WINCH_DISPATCH_URL ?? `http://127.0.0.1:${cfg.dispatchPort}`;
+  const targetUrl = notifyUrl ?? `${notifyBase.replace(/\/+$/, "")}/dispatch/notify`;
   let notifyScheduled = false;
 
   function scheduleNotify() {

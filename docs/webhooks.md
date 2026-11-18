@@ -46,8 +46,8 @@ event stream is a separate process: `winch serve --ws`.
 
 A status transition writes its wake rows into `admission_queue` inside the same
 SQLite transaction as `item_state` and `item_events`. The writer then posts to
-`/dispatch/notify` (default `http://127.0.0.1:38293/dispatch/notify`, override
-with `WINCH_DISPATCH_NOTIFY_URL`) so the dispatcher drains immediately. The
+`/dispatch/notify` on the dispatch base URL (`WINCH_DISPATCH_URL`, default
+`http://127.0.0.1:38293`) so the dispatcher drains immediately. The
 notification is best-effort; the queue is durable. On startup the dispatcher
 replays `item_events` to repair queues written before this path existed, and
 `enqueue` deduplicates by event id. The interval pump remains only for offer
@@ -55,24 +55,30 @@ expiry, retry backoff and lost notifications.
 
 ## Dispatch registration
 
-Each adapter exposes a wake route and registers it on the `dispatch` topic with
-a stable executor id and bearer:
+Each adapter exposes one wake route for its consumer and registers it on the
+`dispatch` topic. The event's `kind` decides what the listener does; the
+executor is metadata, so a consumer never needs a second webhook:
 
     POST /dispatch/register
-    {"harness":"openclaw","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
+    {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
+
+`consumerId` is the webhook identity; `executorId` is the live connection.
+Re-registering a consumer replaces its URL. A legacy executor-keyed row for the
+same executor is removed on the first consumer registration.
 
 The adapter environment supplies the identity:
 
 | variable | meaning |
 |---|---|
 | `WINCH_HARNESS` | harness name; must match the MCP connection |
-| `WINCH_EXECUTOR_ID` | unique id for this executor; use a distinct value for every live connection |
+| `WINCH_CONSUMER_ID` | stable consumer id; default `harness:hostname` |
+| `WINCH_EXECUTOR_ID` | unique id for this live connection |
 | `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 
 Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
-missing. Plugin config can supply `winchHarness` and `winchExecutorId`; the
-environment is the fallback.
+missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
+`winchExecutorId`; the environment is the fallback.
 
 ## Dispatch routing
 

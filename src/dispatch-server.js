@@ -87,16 +87,22 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       try {
         const harness = typeof body.harness === "string" ? body.harness.trim() : "";
         const executorId = typeof body.executorId === "string" ? body.executorId.trim() : "";
-        if (!harness || !executorId) throw new Error("dispatch registration requires harness and executorId");
+        const consumerId = typeof body.consumerId === "string" ? body.consumerId.trim() : "";
+        if (!harness || (!consumerId && !executorId)) throw new Error("dispatch registration requires harness and consumerId or executorId");
+        const id = consumerId || executorId;
         const row = store.webhook.upsert({
           topic: "dispatch",
-          id: executorId,
+          id,
           harness,
-          executorId,
+          executorId: executorId || null,
           url: body.url,
           bearer: body.bearer,
           timeoutMs: body.timeoutMs ?? null,
         });
+        if (executorId && id !== executorId) {
+          const legacy = store.webhook.get({ topic: "dispatch", id: executorId });
+          if (legacy?.executorId === executorId) store.webhook.remove({ topic: "dispatch", id: executorId });
+        }
         json(res, 201, { ok: true, topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId });
         void pump();
       } catch (err) {

@@ -204,6 +204,31 @@ test("register and recover endpoints are available on the server", async () => {
   assert.ok(Array.isArray(body.start));
 });
 
+test("dispatch registration is one row per consumer, with executor metadata", async () => {
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const register = (body) => fetch(`${base}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  let res = await register({ harness: "test", executorId: "exec-legacy", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 1, "legacy executor registration exists");
+
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-legacy", url: "http://127.0.0.1:2/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-new", url: "http://127.0.0.1:3/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+
+  const rows = store.webhook.list({ topic: "dispatch" });
+  assert.equal(rows.length, 1, "one consumer owns one wake route");
+  assert.equal(rows[0].id, "test:host");
+  assert.equal(rows[0].executorId, "exec-new", "the latest executor is metadata, not identity");
+  assert.equal(rows[0].url, "http://127.0.0.1:3/wake");
+});
+
 test("a live assignment reaches the queue and the receiver without a restart", async () => {
   receiver = await wakeReceiver();
   srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });

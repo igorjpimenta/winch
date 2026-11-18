@@ -39,8 +39,9 @@ carries no explicit extensions path; the browser-lease extension lives at
    port isn't detectable, and `winchHarness` if the winch MCP entry uses a
    harness other than `openclaw`. Generate a bearer with
    `winch webhook bearer`; set `WINCH_WEBHOOK_BEARER` and a unique
-   `WINCH_EXECUTOR_ID` in the gateway/plugin environment. The adapter fails
-   closed if either is missing, then registers its wake route on boot.
+   `WINCH_EXECUTOR_ID` in the gateway/plugin environment; `WINCH_CONSUMER_ID`
+   defaults to `harness:hostname` and names the single wake route. The adapter
+   fails closed if the executor or bearer is missing, then registers on boot.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -143,9 +144,11 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 
 The opencode companion ships its own dispatch receiver
 (`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, registers
-with `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, and calls
-`POST /dispatch/recover` on startup and on its reconcile interval. Missing
-identity or bearer disables the receiver.
+with `WINCH_CONSUMER_ID` (default `harness:hostname`),
+`WINCH_EXECUTOR_ID`, and `WINCH_WEBHOOK_BEARER`, and calls
+`POST /dispatch/recover` on startup and on its reconcile interval. The wake
+payload's `kind` selects the listener action; one consumer owns one route.
+Missing identity or bearer disables the receiver.
 
 A wake carries the opaque item id; the plugin starts a claimable `opencode run`
 session. Resume wakes carry the task id and `attemptId`, so the prompt fences
@@ -154,7 +157,8 @@ the session with `backlog_update` and `backlog_done` and never re-claims an
 the guard; the core treats `202` as delivery, not acceptance.
 
 The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
-`winchExecutorId`, `dispatchReconcileMs`, and a port for the loopback listener.
+`winchConsumerId`, `winchExecutorId`, `dispatchReconcileMs`, and a port for the
+loopback listener.
 `dispatchUrl` and the state path are gone; use `WINCH_DISPATCH_URL` and
 `WINCH_WEBHOOK_BEARER` instead. OpenCode V1 reads only the environment; V2
 reads `ctx.options` first.

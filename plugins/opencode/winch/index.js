@@ -2,6 +2,7 @@ import { createWinchHooks } from "./hooks.js";
 import { stampWinchEvent } from "./identity.js";
 import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 
 function opencodeWake({ agent, message }) {
   return new Promise((resolve, reject) => {
@@ -22,6 +23,7 @@ function opencodeWake({ agent, message }) {
 
 function start({ cfg = {}, harness, logger }) {
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
+  const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
   const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
     logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
@@ -30,6 +32,7 @@ function start({ cfg = {}, harness, logger }) {
   const dispatch = startDispatch({
     baseUrl: process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
     harness,
+    consumerId,
     executorId,
     bearer,
     wake: opencodeWake,

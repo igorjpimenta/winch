@@ -23,6 +23,7 @@ test("listener registers with core and accepts a wake", async () => {
   const dispatch = startDispatch({
     baseUrl: `http://127.0.0.1:${core.address().port}`,
     harness: "opencode",
+    consumerId: "opencode:test-host",
     executorId: "e1",
     bearer: "secret",
     wake: (frame) => { calls.push(frame); },
@@ -37,6 +38,8 @@ test("listener registers with core and accepts a wake", async () => {
     }
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0].harness, "opencode");
+    assert.equal(registrations[0].consumerId, "opencode:test-host");
+    assert.equal(registrations[0].executorId, "e1");
     assert.match(registrations[0].url, /^http:\/\/127\.0\.0\.1:\d+\/wake$/);
     const ping = await fetch(registrations[0].url, {
       method: "POST",
