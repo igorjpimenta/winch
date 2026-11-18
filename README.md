@@ -73,8 +73,10 @@ them from the running server.
   harness) or streamable HTTP (one shared daemon). Identity is stamped at the
   transport edge.
 - The **Event stream** (`winch serve --ws`) is a read-only feed of backlog
-  events. Dispatch wakes leave over HTTP webhooks, coordinated through
-  `admission_queue` and accepted by the agent's MCP `backlog_claim`.
+  events; its frame protocol is in [WebSocket event
+  stream](docs/websocket.md). Dispatch wakes leave over HTTP webhooks,
+  coordinated through `admission_queue` and accepted by the agent's MCP
+  `backlog_claim`.
 - **Harness adapters** (`@igorjpimenta/winch-openclaw`, `@igorjpimenta/winch-opencode`)
   stamp identity, checkpoint on turn end (OpenClaw), receive dispatch webhooks
   on a plugin-local listener, and reconcile assigned `in_progress` work after a
@@ -267,8 +269,8 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | --- | --- |
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
 | Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
-| Dispatch routing, queue, recovery | [Dispatch and recovery](docs/dispatch.md) |
-| Executor webhook contract and CLI | [Dispatch webhooks](docs/webhooks.md) |
+| Dispatch routing, queue, recovery, webhook contract and CLI | [Dispatch webhooks](docs/webhooks.md) |
+| Event stream frame protocol and retention | [WebSocket event stream](docs/websocket.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
 
@@ -327,7 +329,9 @@ new row to all connected clients as JSON text frames:
   title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
   assignee},"actor":"...","note":"..."}` per insert, in id order.
 - Dispatch wakes are not frames on this stream. Executors register over HTTP
-  and receive wakes at their own endpoint. See [Dispatch and recovery](docs/dispatch.md) and [Dispatch webhooks](docs/webhooks.md).
+  and receive wakes at their own endpoint; see [Dispatch
+  webhooks](docs/webhooks.md) and [WebSocket event
+  stream](docs/websocket.md).
 
 Kinds on the wire come in three families - `task.*` for task lifecycle,
 `gate.*` for gate lifecycle, `release.*` for shipment - each declared by its

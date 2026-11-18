@@ -2,13 +2,33 @@
 
 Winch delivers dispatch wakes over HTTP. A receiver answers `202` (or any 2xx)
 to accept delivery; the agent's MCP `backlog_claim` remains the work guard, so
-duplicate wakes are safe. Routing, backoff and restart recovery live in
-[Dispatch and recovery](dispatch.md).
+duplicate wakes are safe.
+
+`winch serve --ws` starts both the HTTP dispatch endpoints and the read-only
+WebSocket feed. The flag name is historical: wakes leave over executor webhooks,
+not the socket. The event-stream contract is in [WebSocket event
+stream](websocket.md).
+
+## Routing
+
+The server routes `task.assigned`, `story.assigned`, `task.restored`,
+`task.appended` and `epic.completed` into `admission_queue`.
+
+- Each delivery attempt is an `admission_attempts` row. A queued wake is
+  POSTed to every registered endpoint for its harness. `202` means the
+  receiver accepted the request; it does **not** mean the work was claimed.
+  The agent's MCP `backlog_claim` is the work guard.
+- The row becomes `active` when the item is claimed and closes when the item
+  closes. Append and review wakes have no claim: one successful delivery is
+  one-shot, and the offer TTL ends the row instead of retrying it.
+- A failed delivery, an expired offer, or a wake that is never claimed
+  requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
+  cap and global cap are in [Configuration](configuration.md).
 
 ## Registration
 
-Each adapter receives wakes on `POST /wake` and registers its URL with a stable
-executor id and bearer:
+Each adapter exposes a wake route and registers its URL with a stable executor
+id and bearer:
 
     POST /dispatch/register
     {"harness":"openclaw","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
@@ -72,11 +92,36 @@ Both bundled receivers answer `200 {"ok":true,"test":true}`. A custom receiver
 may do the same, or return any 2xx. The command reports each endpoint's status
 and exits non-zero if any endpoint fails.
 
+## Restart recovery
+
+`POST /dispatch/recover` is the harness-owned reconciler:
+
+    POST /dispatch/recover
+    {"harness":"openclaw","executorId":"openclaw-1"}
+
+It returns:
+
+- `resume`: assigned `in_progress` work with `task`, `attemptId`,
+  `sessionId`, `sessionKey`, and `leaseExpiresAt`;
+- `start`: already-offered wakes plus queued wakes admitted into free slots;
+- `free`: remaining capacity after active and offered work.
+
+The harness resumes the same attempt, never re-claims an `in_progress` item.
+Its first action is `backlog_update` with the returned `attemptId`; a stale
+attempt gets `stale_claim`. Only an expired lease returns the item to `ready`,
+where normal wake and claim apply.
+
 ## Receiver requirements
 
 - Accept `POST` on a stable URL reachable from the winch server.
 - Require the executor bearer; reject a mismatched or missing one.
 - Return 2xx before starting long work, and deduplicate on `admissionId`.
 - Register on boot and re-register after an address change.
-- Call `POST /dispatch/recover` on boot; see
-  [Restart recovery](dispatch.md#restart-recovery).
+- Call `POST /dispatch/recover` on boot.
+
+## Delegation
+
+`backlog_delegate` can carry `childKey` and `visitSeq`. A retry of the same pair
+returns the existing child; a higher `visitSeq` starts a new round. The parent
+waits on all children, and the last child offered moves `current_child_key`.
+`backlog_append` wakes the epic creator, not the task assignee.
