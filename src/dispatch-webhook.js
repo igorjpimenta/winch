@@ -43,7 +43,7 @@ async function postWake(endpoint, payload, timeoutMs) {
 
 export async function deliverWake(store, row, { config = store.config, logger = null } = {}) {
   const harness = row.harness === "*" ? null : row.harness;
-  const endpoints = store.webhook.list({ harness });
+  const endpoints = store.webhook.list({ topic: "dispatch", harness });
   if (endpoints.length === 0) {
     store.admission.fail(row.id, Date.now());
     logger?.warn?.(`winch: no dispatch endpoint for ${row.harness}; requeueing ${row.id}`);
@@ -51,7 +51,7 @@ export async function deliverWake(store, row, { config = store.config, logger = 
   }
 
   const payload = wakePayload(row, { offerMs: config.dispatchOfferMs });
-  const fallbackTimeoutMs = config.dispatchWebhookTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const fallbackTimeoutMs = config.webhookTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const results = await Promise.all(endpoints.map((endpoint) => postWake(endpoint, payload, endpoint.timeoutMs ?? fallbackTimeoutMs)));
   const delivered = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);

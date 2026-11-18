@@ -54,11 +54,12 @@ const USAGE = `usage: winch <command>
   merge-detect [--dry-run]               apply merged/closed PR outcomes
   webhook serve [--port N] [--host H]     serve dispatch registration, recovery and the wake pump
   webhook bearer                           generate a dispatch bearer
-  webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
-                                           register or replace a webhook endpoint
-  webhook list [--harness H]              list webhook endpoints (bearer redacted)
-  webhook revoke --harness H --id E       remove a webhook endpoint
-  webhook test --harness H [--id E]       POST a ping to webhook endpoints`;
+  webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
+                                           register or replace a webhook subscription
+  webhook list [--topic T] [--harness H]  list webhook subscriptions (bearer redacted)
+  webhook revoke [--topic T] --id I       remove a webhook subscription
+  webhook test [--topic T] [--harness H] [--id I]
+                                           POST a ping to webhook subscriptions`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -251,6 +252,7 @@ export async function runCli(argv) {
           harness: { type: "string" },
           url: { type: "string" },
           bearer: { type: "string" },
+          topic: { type: "string" },
           id: { type: "string" },
           executor: { type: "string" },
           "timeout-ms": { type: "string" },
@@ -287,9 +289,14 @@ export async function runCli(argv) {
       const store = openStore(loadConfig(values));
       try {
         if (sub === "list") {
-          console.log(JSON.stringify(store.webhook.list({ harness: values.harness ?? null }).map((r) => ({
+          console.log(JSON.stringify(store.webhook.list({
+            topic: values.topic ?? null,
+            harness: values.harness ?? null,
+          }).map((r) => ({
+            topic: r.topic,
+            id: r.id,
             harness: r.harness,
-            id: r.executorId,
+            executorId: r.executorId,
             url: r.url,
             bearer: "<set>",
             timeoutMs: r.timeoutMs,
@@ -298,19 +305,35 @@ export async function runCli(argv) {
           return;
         }
         if (sub === "register") {
-          if (!values.harness || !values.url) fail("winch webhook register requires --harness H --url U");
+          if (!values.url) fail("winch webhook register requires --url U");
+          const topic = (values.topic ?? "dispatch").trim();
+          if (!topic) fail("winch webhook register requires a non-empty --topic");
+          if (topic === "dispatch" && !values.harness) {
+            fail("winch webhook register --topic dispatch requires --harness H");
+          }
           const timeoutMs = values["timeout-ms"] !== undefined ? Number(values["timeout-ms"]) : null;
           if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
             fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
           }
-          const envBearer = (process.env.WINCH_DISPATCH_BEARER ?? "").trim();
+          const envBearer = (process.env.WINCH_WEBHOOK_BEARER ?? process.env.WINCH_DISPATCH_BEARER ?? "").trim();
           const generated = !values.bearer && !envBearer;
           const bearer = values.bearer || envBearer || crypto.randomBytes(32).toString("hex");
-          const executorId = values.id ?? values.executor ?? manualExecutorId(values.url);
-          const row = store.webhook.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
+          const id = values.id ?? values.executor ?? manualExecutorId(values.url);
+          const executorId = values.executor ?? (topic === "dispatch" ? id : null);
+          const row = store.webhook.upsert({
+            topic,
+            id,
+            harness: values.harness ?? null,
+            executorId,
+            url: values.url,
+            bearer,
+            timeoutMs,
+          });
           console.log(JSON.stringify({
+            topic: row.topic,
+            id: row.id,
             harness: row.harness,
-            id: row.executorId,
+            executorId: row.executorId,
             url: row.url,
             bearer: generated ? bearer : "<set>",
             timeoutMs: row.timeoutMs,
@@ -319,31 +342,32 @@ export async function runCli(argv) {
           return;
         }
         if (sub === "revoke") {
+          const topic = (values.topic ?? "dispatch").trim();
           const id = values.id ?? values.executor;
-          if (!values.harness || !id) fail("winch webhook revoke requires --harness H --id E");
-          const removed = store.webhook.remove({ harness: values.harness, executorId: id });
-          if (!removed) fail(`no webhook endpoint for ${values.harness}/${id}`, 1);
-          console.log(JSON.stringify({ revoked: `${values.harness}/${id}` }));
+          if (!topic || !id) fail("winch webhook revoke requires --id E");
+          const removed = store.webhook.remove({ topic, id });
+          if (!removed) fail(`no webhook endpoint for ${topic}/${id}`, 1);
+          console.log(JSON.stringify({ revoked: `${topic}/${id}` }));
           return;
         }
-        if (!values.harness) fail("winch webhook test requires --harness H");
+        const topic = (values.topic ?? "dispatch").trim();
         const id = values.id ?? values.executor;
-        const rows = store.webhook.list({ harness: values.harness })
-          .filter((r) => !id || r.executorId === id);
-        if (!rows.length) fail(`no webhook endpoint for ${values.harness}${id ? `/${id}` : ""}`, 1);
+        const rows = store.webhook.list({ topic, harness: values.harness ?? null })
+          .filter((r) => !id || r.id === id);
+        if (!rows.length) fail(`no webhook endpoint for ${topic}${id ? `/${id}` : ""}`, 1);
         const results = await Promise.all(rows.map(async (row) => {
-          const timeoutMs = row.timeoutMs ?? store.config.dispatchWebhookTimeoutMs ?? 3000;
+          const timeoutMs = row.timeoutMs ?? store.config.webhookTimeoutMs ?? 3000;
           try {
             const res = await fetch(row.url, {
               method: "POST",
               headers: { "content-type": "application/json", authorization: `Bearer ${row.bearer}` },
-              body: JSON.stringify({ type: "ping", harness: row.harness, executorId: row.executorId, at: Date.now() }),
+              body: JSON.stringify({ type: "ping", topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, at: Date.now() }),
               signal: AbortSignal.timeout(timeoutMs),
             });
             const text = await res.text().catch(() => "");
-            return { harness: row.harness, id: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
+            return { topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
           } catch (err) {
-            return { harness: row.harness, id: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
+            return { topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
           }
         }));
         console.log(JSON.stringify(results, null, 2));

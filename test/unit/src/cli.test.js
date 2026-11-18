@@ -69,7 +69,7 @@ test("webhook list/revoke round-trips an endpoint, secrets masked", async () => 
   const db = path.join(dir, "store.sqlite");
   try {
     const store = createStore({ dbPath: db });
-    store.webhook.upsert({ harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
+    store.webhook.upsert({ topic: "dispatch", id: "exec-1", harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
     store.close();
 
     let r = runDb(db, "webhook", "list");
@@ -93,7 +93,7 @@ test("webhook list/revoke round-trips an endpoint, secrets masked", async () => 
   }
 });
 
-test("webhook revoke requires both harness and id", async () => {
+test("webhook revoke requires an id", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
@@ -141,6 +141,29 @@ test("webhook register creates a manual endpoint and generates a bearer", async 
   }
 });
 
+test("webhook register can create a non-dispatch subscription", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
+  const db = path.join(dir, "store.sqlite");
+  try {
+    let r = runDb(db, "webhook", "register", "--topic", "release", "--id", "r1", "--url", "http://127.0.0.1:9/release");
+    assert.equal(r.status, 0);
+    const created = JSON.parse(r.stdout);
+    assert.equal(created.topic, "release");
+    assert.equal(created.id, "r1");
+    assert.equal(created.harness, null);
+
+    r = runDb(db, "webhook", "list", "--topic", "release");
+    const rows = JSON.parse(r.stdout);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].topic, "release");
+    assert.equal(rows[0].id, "r1");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("webhook test pings each endpoint with its bearer", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
@@ -170,7 +193,7 @@ test("webhook test pings each endpoint with its bearer", async () => {
     assert.equal(rows[0].status, 200);
     assert.equal(seen.length, 1);
     assert.equal(seen[0].auth, "Bearer s3cret");
-    assert.deepEqual(seen[0].body, { type: "ping", harness: "myapp", executorId: "e1", at: seen[0].body.at });
+    assert.deepEqual(seen[0].body, { type: "ping", topic: "dispatch", id: "e1", harness: "myapp", executorId: "e1", at: seen[0].body.at });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     rmSync(dir, { recursive: true, force: true });
@@ -181,6 +204,20 @@ test("webhook bearer prints a token without touching the store", () => {
   const r = run("webhook", "bearer");
   assert.equal(r.status, 0);
   assert.match(r.stdout.trim(), /^[0-9a-f]{64}$/);
+});
+
+test("webhook register uses WINCH_WEBHOOK_BEARER when --bearer is absent", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
+  const db = path.join(dir, "store.sqlite");
+  try {
+    const r = runDbWithEnv(db, { WINCH_WEBHOOK_BEARER: "env-secret" }, "webhook", "register", "--harness", "myapp", "--id", "e-generic", "--url", "http://127.0.0.1:9/wake");
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(r.stdout).bearer, "<set>");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("webhook register uses WINCH_DISPATCH_BEARER when --bearer is absent", async () => {

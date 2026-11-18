@@ -69,7 +69,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
     try {
       const offered = dispatchTick(store, {
         at: Date.now(),
-        reachable: store.webhook.harnesses(),
+        reachable: store.webhook.harnesses({ topic: "dispatch" }),
         config: cfg,
       });
       for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
@@ -86,14 +86,19 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
+        const harness = typeof body.harness === "string" ? body.harness.trim() : "";
+        const executorId = typeof body.executorId === "string" ? body.executorId.trim() : "";
+        if (!harness || !executorId) throw new Error("dispatch registration requires harness and executorId");
         const row = store.webhook.upsert({
-          harness: body.harness,
-          executorId: body.executorId,
+          topic: "dispatch",
+          id: executorId,
+          harness,
+          executorId,
           url: body.url,
           bearer: body.bearer,
           timeoutMs: body.timeoutMs ?? null,
         });
-        json(res, 201, { ok: true, harness: row.harness, executorId: row.executorId });
+        json(res, 201, { ok: true, topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId });
         void pump();
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });

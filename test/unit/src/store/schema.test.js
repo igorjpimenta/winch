@@ -25,7 +25,7 @@ test("fresh store creates the schema and records the Drizzle migrations", (t) =>
   const store = createStore({ dbPath: tempDb(t) });
   t.after(() => store.close());
 
-  for (const name of ["items", "item_state", "item_tags", "item_edges", "attempts", "work_sessions", "artifacts", "item_events", "admission_queue", "admission_attempts", "dispatch_webhooks"]) {
+  for (const name of ["items", "item_state", "item_tags", "item_edges", "attempts", "work_sessions", "artifacts", "item_events", "admission_queue", "admission_attempts", "webhooks"]) {
     assert.ok(tables(store.db).includes(name), `${name} exists`);
   }
   for (const old of ["epics", "stories", "tasks", "events", "deps", "webhook_targets", "harness_webhooks", "session_budgets"]) {

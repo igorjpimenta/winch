@@ -218,9 +218,11 @@ export const admissionAttempts = sqliteTable("admission_attempts", {
   index("idx_admission_attempts_executor").on(table.executorId, table.endedAt),
 ]);
 
-export const dispatchWebhooks = sqliteTable("dispatch_webhooks", {
-  harness: text("harness").notNull(),
-  executorId: text("executor_id").notNull(),
+export const webhooks = sqliteTable("webhooks", {
+  topic: text("topic").notNull(),
+  id: text("id").notNull(),
+  harness: text("harness"),
+  executorId: text("executor_id"),
   url: text("url").notNull(),
   bearer: text("bearer").notNull(),
   timeoutMs: integer("timeout_ms"),
@@ -228,6 +230,6 @@ export const dispatchWebhooks = sqliteTable("dispatch_webhooks", {
   updatedAt: integer("updated_at").notNull(),
   lastSeenAt: integer("last_seen_at").notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.harness, table.executorId] }),
-  index("idx_dispatch_webhooks_harness").on(table.harness, table.lastSeenAt),
+  primaryKey({ columns: [table.topic, table.id] }),
+  index("idx_webhooks_topic_harness").on(table.topic, table.harness, table.lastSeenAt),
 ]);

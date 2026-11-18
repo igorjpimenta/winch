@@ -5,7 +5,7 @@ broadcasts new rows to every connected client as JSON text frames. The stream
 is read-only: clients observe, they do not claim or dispatch work.
 
 Dispatch runs in a separate process, `winch webhook serve`. Wakes are not frames
-on this socket; their contract is in [Dispatch webhooks](webhooks.md).
+on this socket; their contract is in [Webhooks](webhooks.md).
 
 ## Connection
 
@@ -84,7 +84,7 @@ ledger rather than relying on the socket.
 
 The WebSocket service polls for new rows on `WINCH_WS_INTERVAL_MS` and does
 nothing else. Queue delivery, registration, recovery and lease sweeping belong
-to `winch webhook serve`; see [Dispatch webhooks](webhooks.md).
+to `winch webhook serve`; see [Webhooks](webhooks.md).
 
 `winch watch` remains the one-shot tick for hosts that do not run the dispatch
 service. Claims still self-heal on the next tick when the database lives

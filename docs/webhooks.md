@@ -1,29 +1,36 @@
-# Dispatch webhooks
+# Webhooks
 
-Winch delivers dispatch wakes over HTTP. A receiver answers `202` (or any 2xx)
-to accept delivery; the agent's MCP `backlog_claim` remains the work guard, so
-duplicate wakes are safe.
+Winch stores webhook subscriptions by topic and stable id. Dispatch is the
+built-in topic: it delivers wake frames over HTTP, and a receiver answers `202`
+(or any 2xx) to accept delivery. The agent's MCP `backlog_claim` remains the
+work guard, so duplicate wakes are safe.
 
 `winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
 and the wake pump. It is separate from `winch serve --ws`, which serves only the
 read-only event stream; that contract is in [WebSocket event
 stream](websocket.md).
 
-## Routing
+## Subscriptions
 
-The server routes `task.assigned`, `story.assigned`, `task.restored`,
-`task.appended` and `epic.completed` into `admission_queue`.
+The core stores subscriptions in `webhooks`, keyed by `(topic, id)`.
+`harness` and `executor_id` are optional target metadata, so one id can carry
+independent endpoints for different purposes.
 
-- Each delivery attempt is an `admission_attempts` row. A queued wake is
-  POSTed to every registered endpoint for its harness. `202` means the
-  receiver accepted the request; it does **not** mean the work was claimed.
-  The agent's MCP `backlog_claim` is the work guard.
-- The row becomes `active` when the item is claimed and closes when the item
-  closes. Append and review wakes have no claim: one successful delivery is
-  one-shot, and the offer TTL ends the row instead of retrying it.
-- A failed delivery, an expired offer, or a wake that is never claimed
-  requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
-  cap and global cap are in [Configuration](configuration.md).
+    winch webhook bearer
+    winch webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
+    winch webhook list [--topic T] [--harness H]
+    winch webhook revoke [--topic T] --id I
+    winch webhook test [--topic T] [--harness H] [--id I]
+
+`register` defaults to `--topic dispatch`. It derives a stable `manual-<hash>`
+id from the URL when `--id` is omitted. For the dispatch topic, the executor id
+defaults to the subscription id and `--harness` is required. If `--bearer` is
+omitted it uses `WINCH_WEBHOOK_BEARER`, then `WINCH_DISPATCH_BEARER`, then
+generates one and prints it once; later `list` output redacts it. The bearer is
+sent as `Authorization: Bearer …` on every delivery.
+
+`list` shows every topic unless `--topic` is given. `revoke` and `test` default
+to `dispatch`; `test` pings every subscription in the selected topic or id.
 
 ## Serving
 
@@ -35,10 +42,10 @@ localhost-only unless `--host` says otherwise:
 It also sweeps expired leases on `WINCH_DISPATCH_SWEEP_MS`. The read-only
 event stream is a separate process: `winch serve --ws`.
 
-## Registration
+## Dispatch registration
 
-Each adapter exposes a wake route and registers its URL with a stable executor
-id and bearer:
+Each adapter exposes a wake route and registers it on the `dispatch` topic with
+a stable executor id and bearer:
 
     POST /dispatch/register
     {"harness":"openclaw","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
@@ -56,20 +63,21 @@ Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_DISPATCH_BEARER` is
 missing. Plugin config can supply `winchHarness` and `winchExecutorId`; the
 environment is the fallback.
 
-The core stores the target in `dispatch_webhooks`, keyed by
-`(harness, executor_id)`. Adapters register themselves; a manually managed
-endpoint can be registered or replaced from the CLI:
+## Dispatch routing
 
-    winch webhook bearer
-    winch webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
-    winch webhook list [--harness H]
-    winch webhook revoke --harness H --id E
-    winch webhook test --harness H [--id E]
+The server routes `task.assigned`, `story.assigned`, `task.restored`,
+`task.appended` and `epic.completed` into `admission_queue`.
 
-`register` derives a stable `manual-<hash>` id from the URL when `--id` is
-omitted. If `--bearer` is omitted it uses `WINCH_DISPATCH_BEARER`, then generates
-one and prints it once; later `list` output redacts it. The bearer is sent as
-`Authorization: Bearer …` on every wake.
+- Each delivery attempt is an `admission_attempts` row. A queued wake is
+  POSTed to every dispatch subscription for its harness. `202` means the
+  receiver accepted the request; it does **not** mean the work was claimed.
+  The agent's MCP `backlog_claim` is the work guard.
+- The row becomes `active` when the item is claimed and closes when the item
+  closes. Append and review wakes have no claim: one successful delivery is
+  one-shot, and the offer TTL ends the row instead of retrying it.
+- A failed delivery, an expired offer, or a wake that is never claimed
+  requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
+  cap and global cap are in [Configuration](configuration.md).
 
 ## Wake payload
 
@@ -94,13 +102,13 @@ backoff. The payload is a pointer, not a brief: the agent reads the record with
 
 ## Testing
 
-`winch webhook test --harness H [--id E]` sends:
+`winch webhook test --topic T [--harness H] [--id I]` sends:
 
-    {"type":"ping","harness":"H","executorId":"E","at":1730000000000}
+    {"type":"ping","topic":"T","id":"I","harness":"H","executorId":"E","at":1730000000000}
 
 Both bundled receivers answer `200 {"ok":true,"test":true}`. A custom receiver
-may do the same, or return any 2xx. The command reports each endpoint's status
-and exits non-zero if any endpoint fails.
+may do the same, or return any 2xx. The command reports each subscription's
+status and exits non-zero if any fails.
 
 ## Restart recovery
 

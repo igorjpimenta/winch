@@ -18,7 +18,7 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "winch-dispatch-"));
   store = createStore({
     dbPath: path.join(dir, "store.sqlite"),
-    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, dispatchWebhookTimeoutMs: 1000 },
+    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, webhookTimeoutMs: 1000 },
   });
 });
 afterEach(async () => {
@@ -146,7 +146,7 @@ test("an expired offer releases capacity and retries with backoff", () => {
 
 test("webhook delivery sends the admission id and bearer", async () => {
   receiver = await wakeReceiver();
-  store.webhook.upsert({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "exec-a", harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
