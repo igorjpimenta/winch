@@ -1,7 +1,6 @@
 // claim.js — claim one task by id, or the next ready task for this agent.
 import { readyTasks } from "../ready-queue.js";
 import { identitySessionKey } from "../identity.js";
-import { notifyClaim, claimPayload } from "../claim-webhook.js";
 import { ok, err, collectStoryArtifacts, renderReceiverPrompt } from "./shared.js";
 
 export function createClaimTools({ store, logger }) {
@@ -34,12 +33,6 @@ export function createClaimTools({ store, logger }) {
               artifacts,
               receiverPrompt: renderReceiverPrompt({ task: claimed, story: c.story, epic: c.epic, artifacts }),
             };
-            await notifyClaim(
-              cfg,
-              claimPayload({ task: claimed, story: c.story, epic: c.epic, artifacts, handoff, identity, sessionKey }),
-              logger,
-              store.webhook.get(identity.harness)
-            );
             return ok(
               JSON.stringify({
                 task: claimed,

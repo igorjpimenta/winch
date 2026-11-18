@@ -50,7 +50,17 @@ const SPEC = {
   mcpHttpPort:        { env: "WINCH_MCP_HTTP_PORT",       parse: parseInt, check: (v) => v >= 1 && v <= 65535 },
   wsHistoryLimit:     { env: "WINCH_WS_HISTORY_LIMIT",    parse: parseInt, check: (v) => v > 0 },
   wsIntervalMs:       { env: "WINCH_WS_INTERVAL_MS",      parse: parseInt, check: (v) => v > 0 },
+  dispatchPort:       { env: "WINCH_DISPATCH_PORT",       parse: parseInt, check: (v) => v >= 1 && v <= 65535 },
+  dispatchIntervalMs: { env: "WINCH_DISPATCH_INTERVAL_MS", parse: parseInt, check: (v) => v > 0 },
+  dispatchSweepMs:    { env: "WINCH_DISPATCH_SWEEP_MS",   parse: parseInt, check: (v) => v > 0 },
   maxActivePerAgent:  { env: "WINCH_MAX_ACTIVE_PER_AGENT", parse: parseInt, check: (v) => v > 0 },
+  dispatchHarnessMax: { env: "WINCH_DISPATCH_HARNESS_MAX", parse: parseInt, check: (v) => v > 0 },
+  dispatchGlobalMax:  { env: "WINCH_DISPATCH_GLOBAL_MAX",  parse: parseInt, check: (v) => v > 0 },
+  dispatchOfferMs:    { env: "WINCH_DISPATCH_OFFER_MS",    parse: parseInt, check: (v) => v > 0 },
+  dispatchOfferBackoffMs: { env: "WINCH_DISPATCH_OFFER_BACKOFF_MS", parse: parseInt, check: (v) => v > 0 },
+  dispatchOfferMaxBackoffMs: { env: "WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS", parse: parseInt, check: (v) => v > 0 },
+  dispatchOfferMaxAttempts: { env: "WINCH_DISPATCH_OFFER_MAX_ATTEMPTS", parse: parseInt, check: (v) => v > 0 },
+  webhookTimeoutMs:   { env: "WINCH_WEBHOOK_TIMEOUT_MS",   parse: parseInt, check: (v) => v > 0 },
   scanLimit:          { env: "WINCH_SCAN_LIMIT",          parse: parseInt, check: (v) => v > 0 },
   candidates:         { env: "WINCH_CANDIDATES",          parse: parseInt, check: (v) => v > 0 },
   blockedLimit:       { env: "WINCH_BLOCKED_LIMIT",       parse: parseInt, check: (v) => v > 0 },
@@ -60,30 +70,6 @@ const SPEC = {
   noteReasonLimit:    { env: "WINCH_NOTE_REASON_LIMIT",   parse: parseInt, check: (v) => v > 0 },
   noteArtifactLimit:  { env: "WINCH_NOTE_ARTIFACT_LIMIT", parse: parseInt, check: (v) => v > 0 },
   maxArtifacts:       { env: "WINCH_MAX_ARTIFACTS",       parse: parseInt, check: (v) => v > 0 },
-  claimWebhookUrl:     { env: "WINCH_CLAIM_WEBHOOK_URL",     parse: (raw) => String(raw ?? ""), check: () => true },
-  claimWebhookBearer:  { env: "WINCH_CLAIM_WEBHOOK_BEARER",  parse: (raw) => String(raw ?? ""), check: () => true },
-  claimWebhookTimeoutMs: { env: "WINCH_CLAIM_WEBHOOK_TIMEOUT_MS", parse: parseInt, check: (v) => v > 0 },
-  // Per-harness routing table: { <harness>: { url, bearer?, timeoutMs? } }.
-  // JSON in env (`WINCH_CLAIM_WEBHOOKS='{"openclaw":{"url":"…"}}'`), object
-  // in explicit config. A harness with no entry falls back to the single
-  // claimWebhookUrl/Bearer above; a harness with neither is not notified.
-  claimWebhooks: {
-    env: "WINCH_CLAIM_WEBHOOKS",
-    parse: (raw) => {
-      if (raw == null || raw === "") return {};
-      let obj;
-      try {
-        obj = typeof raw === "string" ? JSON.parse(raw) : raw;
-      } catch {
-        return null;
-      }
-      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
-      return obj;
-    },
-    check: (v) => Object.values(v).every(
-      (e) => e && typeof e === "object" && typeof e.url === "string" && e.url.trim() !== ""
-    ),
-  },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -94,7 +80,17 @@ export const CONFIG_DEFAULTS = {
   mcpHttpPort: 38292,
   wsHistoryLimit: 200,
   wsIntervalMs: 1000,
+  dispatchPort: 38293,
+  dispatchIntervalMs: 1000,
+  dispatchSweepMs: 30000,
   maxActivePerAgent: 2,
+  dispatchHarnessMax: 8,
+  dispatchGlobalMax: 16,
+  dispatchOfferMs: 120000,
+  dispatchOfferBackoffMs: 30000,
+  dispatchOfferMaxBackoffMs: 300000,
+  dispatchOfferMaxAttempts: 5,
+  webhookTimeoutMs: 3000,
   scanLimit: 50,
   candidates: 5,
   blockedLimit: 20,
@@ -104,10 +100,6 @@ export const CONFIG_DEFAULTS = {
   noteReasonLimit: 1000,
   noteArtifactLimit: 500,
   maxArtifacts: 50,
-  claimWebhookUrl: "",
-  claimWebhookBearer: "",
-  claimWebhookTimeoutMs: 3000,
-  claimWebhooks: {},
 };
 
 export const CONFIG_ENV = Object.fromEntries(

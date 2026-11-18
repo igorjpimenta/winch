@@ -1,7 +1,7 @@
 {
   "id": "winch",
   "name": "Winch",
-  "description": "Stamps _meta.winch onto tool calls, receives claim webhooks, and wakes agents from the winch event stream.",
+  "description": "Stamps _meta.winch onto tool calls, accepts HTTP wake webhooks, and reconciles assigned in-progress work.",
   "enabledByDefault": true,
   "activation": {
     "onStartup": true
@@ -10,45 +10,29 @@
     "type": "object",
     "additionalProperties": true,
     "properties": {
-      "webhookBearer": {
-        "type": "string",
-        "description": "Shared secret winch must send as Authorization: Bearer on POST /api/winch/claimed. Route stays disarmed (503) until set."
-      },
-      "webhookPublicBaseUrl": {
-        "type": "string",
-        "description": "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used by self-registration to build the route URL."
-      },
-      "webhookHarness": {
-        "type": "string",
-        "description": "Harness name registered in winch (must match WINCH_HARNESS). Default: openclaw."
-      },
-      "webhookAutoregister": {
-        "type": "boolean",
-        "description": "Register the route URL in winch on boot. Default true when webhookBearer is set."
-      },
-      "webhookWinchBin": {
-        "type": "string",
-        "description": "Winch binary for self-registration (default: WINCH_BIN env or `winch` on PATH)."
-      },
       "dispatchEnabled": {
         "type": "boolean",
-        "description": "Wake agents from winch events (assignments, appended work, epic reviews). Default true."
+        "description": "Accept wake webhooks and reconcile assigned in-progress work. Default true."
       },
-      "dispatchWsUrl": {
+      "dispatchPublicBaseUrl": {
         "type": "string",
-        "description": "Event stream to follow, e.g. ws://127.0.0.1:38291 (default: that)."
+        "description": "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used to register the wake route."
       },
-      "dispatchPlanner": {
-        "type": "string",
-        "description": "Fallback planner for rows without a recorded creator (default: atlas)."
-      },
-      "dispatchStatePath": {
-        "type": "string",
-        "description": "File remembering reviewed epics across restarts (default: ~/.openclaw/state/winch-plugin-dispatch.json)."
+      "dispatchReconcileMs": {
+        "type": "integer",
+        "description": "Reconcile interval in milliseconds. Default: 30000."
       },
       "dispatchOpenclawBin": {
         "type": "string",
         "description": "OpenClaw CLI entry used to start a wake session (default: the shim beside the gateway entry)."
+      },
+      "winchHarness": {
+        "type": "string",
+        "description": "Harness name for identity and dispatch (must match WINCH_HARNESS). Default: openclaw."
+      },
+      "winchExecutorId": {
+        "type": "string",
+        "description": "Unique executor id for this connection. Default: WINCH_EXECUTOR_ID."
       }
     }
   }

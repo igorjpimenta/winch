@@ -31,6 +31,9 @@ export function createItemApi({ core }) {
       if (status === "ready" && !assigned) throw new Error(`ready item requires an assignment: ${id}`);
       const executionKind = input.executionKind ?? "manual";
       if (!EXECUTION_KINDS.includes(executionKind)) throw new Error(`invalid execution_kind: ${executionKind}`);
+      const childKey = input.childKey == null || input.childKey === "" ? null : String(input.childKey);
+      const visitSeq = input.visitSeq == null ? 0 : Number(input.visitSeq);
+      if (!Number.isInteger(visitSeq) || visitSeq < 0) throw new Error(`invalid visit_seq: ${id}`);
       const parentId = kind === "epic" ? null : (input.parentId ?? null);
       if (kind !== "epic" && !parentId) throw new Error(`${kind} requires a parentId`);
       if (parentId) {
@@ -43,11 +46,11 @@ export function createItemApi({ core }) {
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(`
-          INSERT INTO items(id, kind, parent_id, title, description, acceptance,
+          INSERT INTO items(id, kind, parent_id, child_key, visit_seq, title, description, acceptance,
                             priority, size, owner_team, created_by, execution_kind, execution_args, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          id, kind, parentId, input.title,
+          id, kind, parentId, childKey, visitSeq, input.title,
           input.description ?? null, input.acceptance ?? null,
           input.priority ?? 50, input.size ?? null, input.ownerTeam ?? null,
           input.createdBy ?? null, executionKind, JSON.stringify(input.executionArgs ?? {}), t,
@@ -100,6 +103,12 @@ export function createItemApi({ core }) {
     },
 
     get(id, opts = {}) { return getRow(id, opts); },
+
+    byChild(parentId, childKey, visitSeq = 0) {
+      const row = db.prepare(`${ITEM_SELECT} WHERE i.parent_id=? AND i.child_key=? AND i.visit_seq=? AND s.deleted_at IS NULL`)
+        .get(parentId, childKey, visitSeq);
+      return row ? decorate(row) : null;
+    },
 
     list(opts = {}) { return listRows(opts); },
 

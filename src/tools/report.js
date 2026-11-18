@@ -12,8 +12,17 @@ export function createReportTools({ store, logger }) {
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress — claim it with backlog_claim first.`, "not_claimed", { taskId: task.id });
       if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
       try {
+        if (args?.attemptId && args?.heartbeat === false) {
+          const attempt = store.attempt.get(args.attemptId);
+          if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
+            return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
+          }
+        }
         const wantHeartbeat = args?.heartbeat !== false;
-        if (wantHeartbeat) store.task.heartbeat(task.id, agentId);
+        if (wantHeartbeat) {
+          const beat = store.task.heartbeat(task.id, agentId, args?.attemptId ?? null);
+          if (beat === null) return err(`${task.id} is not running attempt ${args?.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args?.attemptId ?? null });
+        }
         const noteParts = [];
         if (args?.progressSummary) noteParts.push(`progress: ${clampNote(args.progressSummary, cfg.noteProgressLimit)}`);
         if (args?.comment) noteParts.push(`comment: ${clampNote(args.comment, cfg.noteProgressLimit)}`);
@@ -42,6 +51,12 @@ export function createReportTools({ store, logger }) {
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
       if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
+      if (args?.attemptId) {
+        const attempt = store.attempt.get(args.attemptId);
+        if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
+          return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
+        }
+      }
       try {
         const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
@@ -89,6 +104,12 @@ export function createReportTools({ store, logger }) {
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
       if (task.assignee_agent && task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id });
       if (task.status !== "in_progress" && task.status !== "ready") return err(`${task.id} is ${task.status}; blocking applies to ready/in_progress only.`, "wrong_status", { taskId: task.id });
+      if (args?.attemptId) {
+        const attempt = store.attempt.get(args.attemptId);
+        if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
+          return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
+        }
+      }
       try {
         const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;

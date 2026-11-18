@@ -31,8 +31,9 @@ import { createClaimMethods } from "./claims.js";
 import { createGateMethods } from "./gates.js";
 import { createSweepMethods } from "./sweep.js";
 import { createDepApi } from "./deps.js";
-import { createWebhookApi } from "./webhooks.js";
+import { createWebhookApi } from "./webhook.js";
 import { createEventApi } from "./events.js";
+import { createAdmissionApi } from "./admission.js";
 
 export { MAX_ATTEMPTS };
 export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };
@@ -62,6 +63,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
   apis.dep = createDepApi({ core });
   apis.webhook = createWebhookApi({ core });
   apis.event = createEventApi({ core });
+  apis.admission = createAdmissionApi({ core });
 
   return {
     db,
@@ -83,6 +85,7 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     },
     artifact: apis.artifact,
     event: apis.event,
+    admission: apis.admission,
     epic: apis.epic,
     story: apis.story,
     task: apis.task,

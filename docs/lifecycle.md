@@ -28,11 +28,13 @@ flowchart LR
 A lease expiry keeps the assignee so a dispatcher can re-wake the same worker;
 only the status returns to `ready`.
 
-Delegation keeps the accountable on the parent: a child task carries the
-worker, the parent depends on it and waits in `blocked`, and the watcher
-returns the parent to `ready` for the accountable when every child is
-terminal. `backlog_block` with `blockedBy` enters the same wait; a plain block
-requires `backlog_resume`.
+Delegation keeps the accountable on the parent: each child carries the
+worker, the parent depends on every child and waits in `blocked`, and the
+watcher returns the parent to `ready` for the accountable when every child is
+terminal. A dependency-blocked parent accepts another child, so a fan-out can
+be built in parallel. `childKey` + `visitSeq` make a retry idempotent and let
+a later round reuse the lane. `backlog_block` with `blockedBy` enters the same
+wait; a plain block requires `backlog_resume`.
 
 ```mermaid
 flowchart LR

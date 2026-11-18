@@ -5,12 +5,12 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
 1. **Identity** — `before_tool_call` stamps `_meta.winch {harness, agent, session}`
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
    meta cannot impersonate an agent.
-2. **Claim receiver** — serves `POST /api/winch/claimed`; verifies the bearer,
-   then opens a fresh one-shot session (`winch-claim-<TASK-ID>`) carrying the
-   receiver prompt. Falls back to the claiming session, then to the heartbeat
-   queue (no-Cron path).
-3. **Self-registration** — on boot, registers its own route in winch
-   (`winch webhook set` + `test`) so the operator has nothing to wire by hand.
+2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
+   executor bearer, and starts a one-shot session for the assigned agent. The
+   agent's `backlog_claim` is the work guard, so duplicate delivery is safe.
+3. **Self-registration and recovery** — registers the wake URL with
+   `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, then reconciles assigned
+   `in_progress` work through `POST /dispatch/recover`.
 
 ## Install
 
@@ -24,13 +24,12 @@ binds). The `--accept-capabilities` flag is required: the plugin registers
 an HTTP route and a service.
 
 The plugin depends on `@igorjpimenta/winch`, so npm resolves and pins the
-server version alongside it. Self-registration invokes the same `winch` the
-harness MCP entry spawns (`webhookWinchBin` → `WINCH_BIN` → `PATH`), so both
-always operate on one store.
+server version alongside it.
 
-Then set the shared secret in the plugin config (`webhookBearer`), and
-`webhookPublicBaseUrl` if the gateway port isn't detectable. The route stays
-disarmed (503) until `webhookBearer` is set.
+Set `dispatchPublicBaseUrl` if the gateway port isn't detectable. Generate the
+bearer with `winch webhook bearer`, then set `WINCH_WEBHOOK_BEARER` and a unique
+`WINCH_EXECUTOR_ID` in the gateway/plugin environment. The receiver stays
+disarmed and logs a warning if either is missing.
 
 ## Releases
 
@@ -43,10 +42,20 @@ its `@igorjpimenta/winch` dependency floor together.
 
 | key | default | meaning |
 |---|---|---|
-| `webhookBearer` | — | secret winch sends; must match `WINCH_CLAIM_WEBHOOK_BEARER` |
-| `webhookPublicBaseUrl` | `http://127.0.0.1:<gateway.port>` | address winch can reach |
-| `webhookHarness` | `openclaw` | harness name registered in winch (must match `WINCH_HARNESS`) |
-| `webhookAutoregister` | `true` | self-register the route on boot |
-| `webhookWinchBin` | `WINCH_BIN` or `winch` | binary used for self-registration |
+| `dispatchEnabled` | `true` | receive wakes and reconcile assigned `in_progress` work |
+| `dispatchPublicBaseUrl` | `http://127.0.0.1:<gateway.port>` | gateway address winch can reach |
+| `winchHarness` | `WINCH_HARNESS` or `openclaw` | harness name for identity and dispatch |
+| `winchExecutorId` | `WINCH_EXECUTOR_ID` | unique executor id for this connection |
+| `dispatchReconcileMs` | `30000` | recovery interval |
+| `dispatchOpenclawBin` | shim beside the gateway entry | CLI used to start a wake session |
+
+Environment:
+
+| variable | meaning |
+|---|---|
+| `WINCH_EXECUTOR_ID` | unique executor id; required unless `winchExecutorId` is set |
+| `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
+| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
+| `WINCH_DISPATCH_PUBLIC_BASE_URL` | fallback for `dispatchPublicBaseUrl` |
 
 Requires OpenClaw ≥ 2026.5.18 (declared as `openclaw.install.minHostVersion`).

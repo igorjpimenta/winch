@@ -29,7 +29,10 @@ export function createClaimMethods({ core, apis }) {
              AND assignee_agent=? AND assignee_harness=?
         `).run(h, agentId, t, id, agentId, h);
         if (r.changes === 0) { db.exec("ROLLBACK"); return null; }
-        const sess = ensureSession({ harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim" });
+        const parentSessionId = row.state_json?.fanout?.parentSessionId ?? null;
+        const sess = ensureSession({
+          harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim", parentSessionId,
+        });
         const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds });
         const eventId = appendEvent({
           itemId: id, attemptId: attempt.id, sessionId: sess.id,
@@ -83,8 +86,18 @@ export function createClaimMethods({ core, apis }) {
       return apis.task.get(id);
     },
 
-    heartbeat(id, agentId) {
+    heartbeat(id, agentId, attemptId = null) {
       const t = now();
+      if (attemptId) {
+        const exact = db.prepare(`
+          UPDATE attempts SET heartbeat_at=?
+           WHERE id=? AND item_id=? AND ended_at IS NULL
+             AND session_id IN (SELECT id FROM work_sessions WHERE agent_id=?)
+        `).run(t, attemptId, id, agentId);
+        if (exact.changes === 0) return null;
+        db.prepare("UPDATE item_state SET updated_at=? WHERE item_id=?").run(t, id);
+        return apis.task.get(id);
+      }
       let r = db.prepare(`
         UPDATE attempts SET heartbeat_at=?
          WHERE item_id=? AND ended_at IS NULL

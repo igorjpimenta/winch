@@ -27,7 +27,9 @@ export const ALL_STATUSES = ITEM_STATUSES;
 export const EXECUTION_KINDS = ["pipeclaw", "subagent", "cli", "gate", "manual"];
 export const ITEM_KINDS = ["epic", "story", "task"];
 export const ATTEMPT_STATUSES = ["claimed", "running", "gated", "done", "failed", "released", "cancelled"];
-export const SESSION_KINDS = ["claim", "review", "system"];
+export const SESSION_KINDS = ["claim", "review", "system", "fanout"];
+export const WAKE_KINDS = ["task", "story", "append", "review", "unblocked"];
+export const ADMISSION_STATUSES = ["queued", "offered", "accepted", "active", "done", "cancelled", "expired"];
 export const EDGE_KINDS = ["depends_on"];
 
 const inList = (values) => sql.raw(values.map((v) => `'${v}'`).join(", "));
@@ -36,6 +38,8 @@ export const items = sqliteTable("items", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),
   parentId: text("parent_id").references(() => items.id, { onDelete: "cascade" }),
+  childKey: text("child_key"),
+  visitSeq: integer("visit_seq").notNull().default(0),
   title: text("title").notNull(),
   description: text("description"),
   acceptance: text("acceptance"),
@@ -51,6 +55,7 @@ export const items = sqliteTable("items", {
   check("items_kind", sql`${table.kind} IN (${inList(ITEM_KINDS)})`),
   check("items_execution_kind", sql`${table.executionKind} IN (${inList(EXECUTION_KINDS)})`),
   check("items_root", sql`(${table.kind} = 'epic' AND ${table.parentId} IS NULL) OR (${table.kind} <> 'epic' AND ${table.parentId} IS NOT NULL)`),
+  uniqueIndex("uq_items_child").on(table.parentId, table.childKey, table.visitSeq).where(sql`${table.childKey} IS NOT NULL`),
   index("idx_items_parent").on(table.parentId),
   index("idx_items_kind_created").on(table.kind, table.createdAt),
 ]);
@@ -61,6 +66,7 @@ export const itemState = sqliteTable("item_state", {
   status: text("status").notNull(),
   stateJson: text("state_json").notNull().default("{}"),
   waitKind: text("wait_kind").generatedAlwaysAs(sql`json_extract(${sql.identifier("state_json")}, '$.wait.kind')`, { mode: "virtual" }),
+  currentChildKey: text("current_child_key").generatedAlwaysAs(sql`json_extract(${sql.identifier("state_json")}, '$.currentChildKey')`, { mode: "virtual" }),
   assigneeHarness: text("assignee_harness"),
   assigneeAgent: text("assignee_agent"),
   updatedAt: integer("updated_at").notNull(),
@@ -97,6 +103,7 @@ export const workSessions = sqliteTable("work_sessions", {
     { mode: "virtual" },
   ),
   kind: text("kind").notNull().default("claim"),
+  parentSessionId: text("parent_session_id").references(() => workSessions.id, { onDelete: "set null" }),
   createdAt: integer("created_at").notNull(),
   endedAt: integer("ended_at"),
   deletedAt: integer("deleted_at"),
@@ -104,6 +111,7 @@ export const workSessions = sqliteTable("work_sessions", {
   check("work_sessions_kind", sql`${table.kind} IN (${inList(SESSION_KINDS)})`),
   uniqueIndex("uq_sessions_identity").on(table.harness, table.agentId, table.externalSessionId),
   index("idx_sessions_item").on(table.itemId),
+  index("idx_sessions_parent").on(table.parentSessionId),
 ]);
 
 export const attempts = sqliteTable("attempts", {
@@ -178,11 +186,50 @@ export const itemEdges = sqliteTable("item_edges", {
   index("idx_edges_to").on(table.toItemId),
 ]);
 
-export const harnessWebhooks = sqliteTable("harness_webhooks", {
-  harness: text("harness").primaryKey(),
+export const admissionQueue = sqliteTable("admission_queue", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  harness: text("harness").notNull(),
+  agentId: text("agent_id").notNull(),
+  status: text("status").notNull().default("queued"),
+  eventId: integer("event_id"),
+  createdAt: integer("created_at").notNull(),
+  endedAt: integer("ended_at"),
+}, (table) => [
+  check("admission_kind", sql`${table.kind} IN (${inList(WAKE_KINDS)})`),
+  check("admission_status", sql`${table.status} IN (${inList(ADMISSION_STATUSES)})`),
+  uniqueIndex("uq_admission_live").on(table.itemId, table.harness).where(sql`${table.endedAt} IS NULL`),
+  index("idx_admission_harness").on(table.status, table.harness, table.createdAt),
+  index("idx_admission_global").on(table.status, table.createdAt),
+  index("idx_admission_item").on(table.itemId),
+]);
+
+export const admissionAttempts = sqliteTable("admission_attempts", {
+  admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no").notNull(),
+  executorId: text("executor_id"),
+  offeredAt: integer("offered_at").notNull(),
+  acceptedAt: integer("accepted_at"),
+  endedAt: integer("ended_at"),
+}, (table) => [
+  primaryKey({ columns: [table.admissionId, table.attemptNo] }),
+  uniqueIndex("uq_admission_attempt_live").on(table.admissionId).where(sql`${table.endedAt} IS NULL`),
+  index("idx_admission_attempts_executor").on(table.executorId, table.endedAt),
+]);
+
+export const webhooks = sqliteTable("webhooks", {
+  topic: text("topic").notNull(),
+  id: text("id").notNull(),
+  harness: text("harness"),
+  executorId: text("executor_id"),
   url: text("url").notNull(),
-  bearer: text("bearer"),
+  bearer: text("bearer").notNull(),
   timeoutMs: integer("timeout_ms"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
-});
+  lastSeenAt: integer("last_seen_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.topic, table.id] }),
+  index("idx_webhooks_topic_harness").on(table.topic, table.harness, table.lastSeenAt),
+]);

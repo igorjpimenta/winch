@@ -1,16 +1,17 @@
-// events-ws.js — dumb event pipe over WebSocket. Tails the item_events ledger and
-// broadcasts every new row to all connected clients, verbatim. No
-// interpretation, no filtering, no notify logic: a gate opening is just
-// another row, and what it means — ping, dashboard card, digest line — is the
-// subscriber's decision.
+// events-ws.js — the read-only event pipe.
+// Tails the item_events ledger and broadcasts every new row; dispatch wakes
+// leave over executor webhooks served by dispatch-server.js, not this socket.
 //
-// Wire protocol (JSON text frames, server → client only):
-//   {"type":"welcome","lastEventId":N}    on connect (current max row id)
-//   {"type":"history","events":[...]}     backlog of envelopes, oldest-first
-//   {"type":"event","event":{...}}        one envelope per new row, in id order
+// Wire protocol (JSON text frames):
+//   server → client:
+//     {"type":"welcome","payload":"v3","lastEventId":N}
+//     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
+//     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
+//
 // Clients track their own seen state: reconnecting replays history, so a
-// missed frame costs a re-read, never a lost event. No auth in-process —
-// bind localhost, or put a bearer-checked reverse proxy in front.
+// missed frame costs a re-read, never a lost event. The admission queue owns
+// wake delivery and retry; MCP claim remains the work-level guard. No auth
+// in-process — bind localhost, or put a bearer-checked reverse proxy in front.
 
 import http from "node:http";
 import crypto from "node:crypto";
@@ -93,11 +94,14 @@ export function toEventMessage(store, row) {
   const task = itemKind === "task" ? item : null;
   const story = itemKind === "story" ? item : task?.story_id ? store.story.get(task.story_id) : null;
   const epic = itemKind === "epic" ? item : story?.epic_id ? store.epic.get(story.epic_id) : item?.epic_id ? store.epic.get(item.epic_id) : null;
+  const actorSession = row.session_id ? store.session.get(row.session_id) : null;
   return {
     type: "event",
     kind: kindForEvent(row),
     id: row.id,
     at: row.created_at,
+    fromStatus: row.from_status ?? null,
+    toStatus: row.to_status,
     // Normalised item: a dispatcher routes assignment and review wakes without
     // knowing which level the row is about.
     item: item
@@ -107,13 +111,16 @@ export function toEventMessage(store, row) {
           title: item.title,
           status: item.status,
           assigned: item.assignee_agent ?? null,
+          assigneeHarness: item.assignee_harness ?? null,
           createdBy: item.created_by ?? null,
         }
       : null,
     epicId: epic?.id ?? null,
     epicCreatedBy: epic?.created_by ?? null,
+    epicAssigneeHarness: epic?.assignee_harness ?? null,
     storyId: story?.id ?? null,
     storyAssigned: story?.assignee_agent ?? null,
+    storyAssigneeHarness: story?.assignee_harness ?? null,
     // Work that a close just made claimable: a dispatcher wakes these without
     // recomputing the dependency graph. Structural readiness only: capability
     // tags are the claimant's business, so a tagged task must still appear.
@@ -134,6 +141,7 @@ export function toEventMessage(store, row) {
         }
       : null,
     actor: row.actor,
+    actorHarness: actorSession?.harness ?? null,
     note: row.note,
   };
 }
@@ -143,20 +151,24 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   const listenPort = port ?? cfg.wsPort ?? DEFAULT_WS_PORT;
   const pollMs = intervalMs ?? cfg.wsIntervalMs ?? 1000;
   const histLimit = historyLimit ?? cfg.wsHistoryLimit ?? HISTORY_LIMIT;
-  const clients = new Set();
+  const clients = new Map();
+  let closing = false;
   let cursor = lastEventId(store);
-  // The ws service is the only long-lived process winch guarantees, so it also
-  // sweeps expired leases; without this a crashed worker holds its task until
-  // a human runs the CLI.
-  const sweepMs = cfg.wsSweepMs ?? 30000;
-  const sweeper = sweepMs > 0
-    ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
-    : null;
-  sweeper?.unref?.();
+
+  function send(socket, obj) {
+    if (socket.destroyed || !socket.writable) return false;
+    try {
+      socket.write(encodeFrame(JSON.stringify(obj)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function broadcast(obj) {
     const frame = encodeFrame(JSON.stringify(obj));
-    for (const sock of [...clients]) {
+    for (const client of [...clients.values()]) {
+      const sock = client.socket;
       if (sock.destroyed || !sock.writable) {
         clients.delete(sock);
         continue;
@@ -166,8 +178,8 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   }
 
   const server = http.createServer((req, res) => {
-    res.writeHead(404, { "content-type": "text/plain" });
-    res.end("winch events: websocket only — connect with an Upgrade request\n");
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
   });
 
   server.on("upgrade", (req, socket) => {
@@ -182,49 +194,20 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         "Connection: Upgrade\r\n" +
         `Sec-WebSocket-Accept: ${acceptKey(key)}\r\n\r\n`
     );
-    clients.add(socket);
+    const client = { socket, connectedAt: Date.now() };
+    clients.set(socket, client);
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
-      socket.write(encodeFrame(JSON.stringify({ type: "welcome", payload: "v2", lastEventId: cursor })));
-      socket.write(encodeFrame(JSON.stringify({ type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) })));
+      send(socket, { type: "welcome", payload: "v3", lastEventId: cursor });
+      send(socket, { type: "history", events: eventsLatest(store, histLimit).map((row) => toEventMessage(store, row)) });
     } catch {
       clients.delete(socket);
     }
 
-    // Client frames are only ever interesting as close/ping; everything else
-    // is consumed and ignored. Mask bit respected when skipping payloads.
-    let buf = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buf = Buffer.concat([buf, chunk]);
-      for (;;) {
-        if (buf.length < 2) return;
-        const opcode = buf[0] & 0x0f;
-        let len = buf[1] & 0x7f;
-        let off = 2;
-        if (len === 126) {
-          if (buf.length < 4) return;
-          len = buf.readUInt16BE(2);
-          off = 4;
-        } else if (len === 127) {
-          if (buf.length < 10) return;
-          if (buf.readUInt32BE(2) !== 0) {
-            socket.destroy();
-            return;
-          }
-          len = buf.readUInt32BE(6);
-          off = 10;
-        }
-        if (buf[1] & 0x80) off += 4;
-        if (buf.length < off + len) return;
-        buf = buf.slice(off + len);
-        if (opcode === 0x8) {
-          socket.destroy();
-          return;
-        }
-        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
-      }
-    });
-    const drop = () => clients.delete(socket);
+    const drop = () => {
+      clients.delete(socket);
+      if (closing) return;
+    };
     socket.on("close", drop);
     socket.on("error", drop);
   });
@@ -232,9 +215,12 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   const timer = setInterval(() => {
     try {
       const rows = eventsSince(store, cursor, histLimit);
-      if (!rows.length) return;
-      cursor = rows[rows.length - 1].id;
-      for (const row of rows) broadcast(toEventMessage(store, row));
+      if (rows.length) {
+        cursor = rows[rows.length - 1].id;
+        for (const row of rows) {
+          broadcast(toEventMessage(store, row));
+        }
+      }
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }
@@ -250,9 +236,9 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
         clients: () => clients.size,
         close: () =>
           new Promise((res) => {
+            closing = true;
             clearInterval(timer);
-            if (sweeper) clearInterval(sweeper);
-            for (const s of clients) s.destroy();
+            for (const client of clients.values()) client.socket.destroy();
             server.close(() => res());
           }),
       });

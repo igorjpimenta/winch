@@ -1,11 +1,145 @@
-# Webhooks and wake bridge
+# Webhooks
 
-Claim webhooks notify harnesses when work is claimed. Register via:
+Winch stores webhook subscriptions by topic and stable id. Dispatch is the
+built-in topic: it delivers wake frames over HTTP, and a receiver answers `202`
+(or any 2xx) to accept delivery. The agent's MCP `backlog_claim` remains the
+work guard, so duplicate wakes are safe.
 
-    winch webhook set --harness H --url U [--bearer B]
-    winch webhook list
-    winch webhook remove --harness H
-    winch webhook test --harness H
+`winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
+and the wake pump. It is separate from `winch serve --ws`, which serves only the
+read-only event stream; that contract is in [WebSocket event
+stream](websocket.md).
 
-The wake bridge receives the claim webhook and prompts the claiming session
-through the OpenCode SDK. OpenClaw receives webhooks at POST /api/winch/claimed.
+## Subscriptions
+
+The core stores subscriptions in `webhooks`, keyed by `(topic, id)`.
+`harness` and `executor_id` are optional target metadata, so one id can carry
+independent endpoints for different purposes.
+
+    winch webhook bearer
+    winch webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
+    winch webhook list [--topic T] [--harness H]
+    winch webhook revoke [--topic T] --id I
+    winch webhook test [--topic T] [--harness H] [--id I]
+
+`register` defaults to `--topic dispatch`. It derives a stable `manual-<hash>`
+id from the URL when `--id` is omitted. For the dispatch topic, the executor id
+defaults to the subscription id and `--harness` is required. If `--bearer` is
+omitted it uses `WINCH_WEBHOOK_BEARER`, then generates one and prints it once;
+later `list` output redacts it. The bearer is sent as
+`Authorization: Bearer …` on every delivery.
+
+`list` shows every topic unless `--topic` is given. `revoke` and `test` default
+to `dispatch`; `test` pings every subscription in the selected topic or id.
+
+## Serving
+
+The dispatch server listens on `WINCH_DISPATCH_PORT` (default `38293`) and
+localhost-only unless `--host` says otherwise:
+
+    winch webhook serve [--port N] [--host H]
+
+It also sweeps expired leases on `WINCH_DISPATCH_SWEEP_MS`. The read-only
+event stream is a separate process: `winch serve --ws`.
+
+## Dispatch registration
+
+Each adapter exposes a wake route and registers it on the `dispatch` topic with
+a stable executor id and bearer:
+
+    POST /dispatch/register
+    {"harness":"openclaw","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
+
+The adapter environment supplies the identity:
+
+| variable | meaning |
+|---|---|
+| `WINCH_HARNESS` | harness name; must match the MCP connection |
+| `WINCH_EXECUTOR_ID` | unique id for this executor; use a distinct value for every live connection |
+| `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
+| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
+
+Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
+missing. Plugin config can supply `winchHarness` and `winchExecutorId`; the
+environment is the fallback.
+
+## Dispatch routing
+
+The server routes `task.assigned`, `story.assigned`, `task.restored`,
+`task.appended` and `epic.completed` into `admission_queue`.
+
+- Each delivery attempt is an `admission_attempts` row. A queued wake is
+  POSTed to every dispatch subscription for its harness. `202` means the
+  receiver accepted the request; it does **not** mean the work was claimed.
+  The agent's MCP `backlog_claim` is the work guard.
+- The row becomes `active` when the item is claimed and closes when the item
+  closes. Append and review wakes have no claim: one successful delivery is
+  one-shot, and the offer TTL ends the row instead of retrying it.
+- A failed delivery, an expired offer, or a wake that is never claimed
+  requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
+  cap and global cap are in [Configuration](configuration.md).
+
+## Wake payload
+
+Winch POSTs this JSON body:
+
+    {
+      "type": "wake",
+      "admissionId": "ADM-…",
+      "itemId": "TASK-…",
+      "kind": "task",
+      "harness": "openclaw",
+      "agent": "worker",
+      "eventId": 42,
+      "offerExpiresAt": 1730000000000,
+      "at": 1729999880000
+    }
+
+The receiver should verify the bearer, keep the request bounded, and return 2xx
+once the wake is queued locally. A non-2xx response requeues delivery with
+backoff. The payload is a pointer, not a brief: the agent reads the record with
+`backlog_get` and wins the work with `backlog_claim`.
+
+## Testing
+
+`winch webhook test --topic T [--harness H] [--id I]` sends:
+
+    {"type":"ping","topic":"T","id":"I","harness":"H","executorId":"E","at":1730000000000}
+
+Both bundled receivers answer `200 {"ok":true,"test":true}`. A custom receiver
+may do the same, or return any 2xx. The command reports each subscription's
+status and exits non-zero if any fails.
+
+## Restart recovery
+
+`POST /dispatch/recover` is the harness-owned reconciler:
+
+    POST /dispatch/recover
+    {"harness":"openclaw","executorId":"openclaw-1"}
+
+It returns:
+
+- `resume`: assigned `in_progress` work with `task`, `attemptId`,
+  `sessionId`, `sessionKey`, and `leaseExpiresAt`;
+- `start`: already-offered wakes plus queued wakes admitted into free slots;
+- `free`: remaining capacity after active and offered work.
+
+The harness resumes the same attempt, never re-claims an `in_progress` item.
+Its first action is `backlog_update` with the returned `attemptId`; a stale
+attempt gets `stale_claim`. Only an expired lease returns the item to `ready`,
+where normal wake and claim apply.
+
+## Receiver requirements
+
+- Accept `POST` on a stable URL reachable from the winch server.
+- Require the executor bearer; reject a mismatched or missing one.
+- Return 2xx before starting long work, and deduplicate on `admissionId`.
+- Register on boot and re-register after an address change.
+- Call `POST /dispatch/recover` on boot.
+
+## Delegation
+
+`backlog_delegate` can carry `childKey` and `visitSeq`. A retry of the same pair
+returns the existing child; a higher `visitSeq` starts a new round. The parent
+waits on all children, and the last child offered moves `current_child_key`.
+`backlog_append` wakes the epic creator, not the task assignee.

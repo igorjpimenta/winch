@@ -11,14 +11,14 @@ export function createTaskApi({ core, apis }) {
   } = core;
 
   const taskApi = {
-    create({ storyId, title, description, status, executionKind, executionArgs, capabilities, assigned, assigneeHarness, id }) {
+    create({ storyId, title, description, status, executionKind, executionArgs, capabilities, assigned, assigneeHarness, id, childKey, visitSeq, state }) {
       const parent = apis.item.get(storyId, { includeDeleted: true });
       if (!parent) throw new Error(`story not found: ${storyId}`);
       if (parent.kind !== "story" && parent.kind !== "task") throw new Error(`task parent must be a story or task: ${storyId}`);
       return apis.item.create({
-        id, kind: "task", parentId: storyId, title, description,
+        id, kind: "task", parentId: storyId, childKey, visitSeq, title, description,
         status, executionKind: executionKind ?? "manual",
-        executionArgs, capabilities,
+        executionArgs, capabilities, state,
         assigneeAgent: assigned ?? null,
         assigneeHarness: assigned ? assigneeHarness : null,
         emit: true, note: "task created",

@@ -3,6 +3,7 @@
 // ~/.winch/store.sqlite.
 
 import { readFileSync } from "node:fs";
+import crypto from "node:crypto";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { createStore } from "./store/index.js";
@@ -12,6 +13,7 @@ import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer } from "./events-ws.js";
+import { startDispatchServer } from "./dispatch-server.js";
 import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 
@@ -50,15 +52,22 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  webhook set --harness H --url U [--bearer B] [--timeout-ms N]
-                                           register a harness callback URL (checked first at claim)
-  webhook list                             list registered callback URLs
-  webhook remove --harness H              drop a registered callback URL
-  webhook test --harness H                POST a test ping to the harness target`;
+  webhook serve [--port N] [--host H]     serve dispatch registration, recovery and the wake pump
+  webhook bearer                           generate a dispatch bearer
+  webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
+                                           register or replace a webhook subscription
+  webhook list [--topic T] [--harness H]  list webhook subscriptions (bearer redacted)
+  webhook revoke [--topic T] --id I       remove a webhook subscription
+  webhook test [--topic T] [--harness H] [--id I]
+                                           POST a ping to webhook subscriptions`;
 
 function fail(msg, code = 2) {
   console.error(msg);
   process.exit(code);
+}
+
+function manualExecutorId(url) {
+  return `manual-${crypto.createHash("sha256").update(String(url)).digest("hex").slice(0, 12)}`;
 }
 
 export async function runCli(argv) {
@@ -234,17 +243,8 @@ export async function runCli(argv) {
 
     case "webhook": {
       const [sub, ...subRest] = rest;
-      if (!["set", "list", "remove", "test"].includes(sub)) {
-        fail("usage: winch webhook (set|list|remove|test) …");
-      }
-      if (sub === "list") {
-        const store = openStore();
-        try {
-          console.log(JSON.stringify(store.webhook.list(), null, 2));
-        } finally {
-          store.close();
-        }
-        return;
+      if (!["serve", "bearer", "register", "list", "revoke", "test"].includes(sub)) {
+        fail("usage: winch webhook (serve|bearer|register|list|revoke|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
@@ -252,57 +252,130 @@ export async function runCli(argv) {
           harness: { type: "string" },
           url: { type: "string" },
           bearer: { type: "string" },
+          topic: { type: "string" },
+          id: { type: "string" },
+          executor: { type: "string" },
           "timeout-ms": { type: "string" },
+          port: { type: "string" },
+          host: { type: "string" },
+          config: { type: "string" },
         },
       });
-      const harness = values.harness;
-      if (!harness || !harness.trim()) fail(`winch webhook ${sub} requires --harness <name>`);
-      const store = openStore();
+      if (sub === "bearer") {
+        console.log(crypto.randomBytes(32).toString("hex"));
+        return;
+      }
+      if (sub === "serve") {
+        const port = values.port ? Number(values.port) : undefined;
+        if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
+          fail(`winch: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
+        }
+        const store = openStore(loadConfig(values));
+        const logger = {
+          info: (...a) => console.error(...a),
+          warn: (...a) => console.error(...a),
+          error: (...a) => console.error(...a),
+        };
+        const host = values.host ?? "127.0.0.1";
+        try {
+          const srv = await startDispatchServer({ store, port, host, logger });
+          logger.info(`winch: dispatch on http://${host}:${srv.port} (webhooks; queue pump; lease sweep)`);
+        } catch (err) {
+          store.close();
+          fail(String(err?.message ?? err));
+        }
+        return;
+      }
+      const store = openStore(loadConfig(values));
       try {
-        if (sub === "remove") {
-          const removed = store.webhook.remove({ harness });
-          if (!removed) fail(`no webhook registered for harness: ${harness}`, 1);
-          console.log(JSON.stringify({ removed: harness }));
+        if (sub === "list") {
+          console.log(JSON.stringify(store.webhook.list({
+            topic: values.topic ?? null,
+            harness: values.harness ?? null,
+          }).map((r) => ({
+            topic: r.topic,
+            id: r.id,
+            harness: r.harness,
+            executorId: r.executorId,
+            url: r.url,
+            bearer: "<set>",
+            timeoutMs: r.timeoutMs,
+            lastSeenAt: r.lastSeenAt,
+          })), null, 2));
           return;
         }
-        if (sub === "set") {
-          if (!values.url) fail("winch webhook set requires --url <http(s)://…>");
+        if (sub === "register") {
+          if (!values.url) fail("winch webhook register requires --url U");
+          const topic = (values.topic ?? "dispatch").trim();
+          if (!topic) fail("winch webhook register requires a non-empty --topic");
+          if (topic === "dispatch" && !values.harness) {
+            fail("winch webhook register --topic dispatch requires --harness H");
+          }
           const timeoutMs = values["timeout-ms"] !== undefined ? Number(values["timeout-ms"]) : null;
           if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
             fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
           }
-          try {
-            const row = store.webhook.upsert({ harness, url: values.url, bearer: values.bearer ?? null, timeoutMs });
-            console.log(JSON.stringify({ ...row, bearer: row.bearer ? "<set>" : null }, null, 2));
-          } catch (err) {
-            fail(String(err?.message ?? err), 1);
-          }
+          const envBearer = (process.env.WINCH_WEBHOOK_BEARER ?? "").trim();
+          const generated = !values.bearer && !envBearer;
+          const bearer = values.bearer || envBearer || crypto.randomBytes(32).toString("hex");
+          const id = values.id ?? values.executor ?? manualExecutorId(values.url);
+          const executorId = values.executor ?? (topic === "dispatch" ? id : null);
+          const row = store.webhook.upsert({
+            topic,
+            id,
+            harness: values.harness ?? null,
+            executorId,
+            url: values.url,
+            bearer,
+            timeoutMs,
+          });
+          console.log(JSON.stringify({
+            topic: row.topic,
+            id: row.id,
+            harness: row.harness,
+            executorId: row.executorId,
+            url: row.url,
+            bearer: generated ? bearer : "<set>",
+            timeoutMs: row.timeoutMs,
+            lastSeenAt: row.lastSeenAt,
+          }, null, 2));
           return;
         }
-        // test: resolve exactly like a claim would (registry → env map → single)
-        // and POST a test ping. The plugin answers {ok:true,test:true}.
-        const { webhookConfig } = await import("./claim-webhook.js");
-        const hook = webhookConfig(store.config, harness, store.webhook.get(harness));
-        if (!hook) fail(`no webhook target for harness: ${harness} (register one or set WINCH_CLAIM_WEBHOOK_URL)`, 1);
-        const headers = { "content-type": "application/json" };
-        if (hook.bearer) headers.authorization = `Bearer ${hook.bearer}`;
-        try {
-          const res = await fetch(hook.url, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ event: "webhook.test", at: Date.now(), harness }),
-            signal: AbortSignal.timeout(hook.timeoutMs),
-          });
-          const text = await res.text();
-          console.log(JSON.stringify({ ok: res.ok, status: res.status, body: text.slice(0, 500) }, null, 2));
-          if (!res.ok) process.exitCode = 1;
-        } catch (err) {
-          fail(`webhook test failed: ${err?.message ?? err}`, 1);
+        if (sub === "revoke") {
+          const topic = (values.topic ?? "dispatch").trim();
+          const id = values.id ?? values.executor;
+          if (!topic || !id) fail("winch webhook revoke requires --id E");
+          const removed = store.webhook.remove({ topic, id });
+          if (!removed) fail(`no webhook endpoint for ${topic}/${id}`, 1);
+          console.log(JSON.stringify({ revoked: `${topic}/${id}` }));
+          return;
         }
-        return;
+        const topic = (values.topic ?? "dispatch").trim();
+        const id = values.id ?? values.executor;
+        const rows = store.webhook.list({ topic, harness: values.harness ?? null })
+          .filter((r) => !id || r.id === id);
+        if (!rows.length) fail(`no webhook endpoint for ${topic}${id ? `/${id}` : ""}`, 1);
+        const results = await Promise.all(rows.map(async (row) => {
+          const timeoutMs = row.timeoutMs ?? store.config.webhookTimeoutMs ?? 3000;
+          try {
+            const res = await fetch(row.url, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${row.bearer}` },
+              body: JSON.stringify({ type: "ping", topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, at: Date.now() }),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            const text = await res.text().catch(() => "");
+            return { topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
+          } catch (err) {
+            return { topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
+          }
+        }));
+        console.log(JSON.stringify(results, null, 2));
+        if (results.some((r) => !r.ok)) process.exitCode = 1;
       } finally {
         store.close();
       }
+      return;
     }
 
     default:
