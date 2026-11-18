@@ -295,7 +295,7 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
     logger?.info?.(`winch: ws subscriber connected (${clients.size} total)`);
     try {
       send(socket, { type: "welcome", payload: "v3", lastEventId: cursor });
-      send(socket, { type: "history", events: eventsSince(store, 0, histLimit).map((row) => toEventMessage(store, row)) });
+      send(socket, { type: "history", events: eventsLatest(store, histLimit).map((row) => toEventMessage(store, row)) });
     } catch {
       clients.delete(socket);
     }

@@ -97,6 +97,17 @@ test("subscriber gets welcome + history, then live rows", async () => {
   assert.ok(birth.id > last.id);
 });
 
+test("history is the most recent window, oldest-first", async () => {
+  seedEvent();
+  seedEvent();
+  seedEvent();
+  const last = store.event.lastEventId();
+  srv = await startEventServer({ store, port: 0, intervalMs: 50, historyLimit: 2 });
+  const ws = await connect(srv.port);
+  const [, history] = await collect(ws, 2);
+  assert.deepEqual(history.events.map((e) => e.id), [last - 1, last]);
+});
+
 test("every connected client receives the same broadcast", async () => {
   seedEvent();
   srv = await startEventServer({ store, port: 0, intervalMs: 50 });
