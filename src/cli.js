@@ -287,7 +287,7 @@ export async function runCli(argv) {
       const store = openStore(loadConfig(values));
       try {
         if (sub === "list") {
-          console.log(JSON.stringify(store.dispatch.list({ harness: values.harness ?? null }).map((r) => ({
+          console.log(JSON.stringify(store.webhook.list({ harness: values.harness ?? null }).map((r) => ({
             harness: r.harness,
             id: r.executorId,
             url: r.url,
@@ -307,7 +307,7 @@ export async function runCli(argv) {
           const generated = !values.bearer && !envBearer;
           const bearer = values.bearer || envBearer || crypto.randomBytes(32).toString("hex");
           const executorId = values.id ?? values.executor ?? manualExecutorId(values.url);
-          const row = store.dispatch.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
+          const row = store.webhook.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
           console.log(JSON.stringify({
             harness: row.harness,
             id: row.executorId,
@@ -321,14 +321,14 @@ export async function runCli(argv) {
         if (sub === "revoke") {
           const id = values.id ?? values.executor;
           if (!values.harness || !id) fail("winch webhook revoke requires --harness H --id E");
-          const removed = store.dispatch.remove({ harness: values.harness, executorId: id });
+          const removed = store.webhook.remove({ harness: values.harness, executorId: id });
           if (!removed) fail(`no webhook endpoint for ${values.harness}/${id}`, 1);
           console.log(JSON.stringify({ revoked: `${values.harness}/${id}` }));
           return;
         }
         if (!values.harness) fail("winch webhook test requires --harness H");
         const id = values.id ?? values.executor;
-        const rows = store.dispatch.list({ harness: values.harness })
+        const rows = store.webhook.list({ harness: values.harness })
           .filter((r) => !id || r.executorId === id);
         if (!rows.length) fail(`no webhook endpoint for ${values.harness}${id ? `/${id}` : ""}`, 1);
         const results = await Promise.all(rows.map(async (row) => {

@@ -69,7 +69,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
     try {
       const offered = dispatchTick(store, {
         at: Date.now(),
-        reachable: store.dispatch.harnesses(),
+        reachable: store.webhook.harnesses(),
         config: cfg,
       });
       for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
@@ -86,7 +86,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
-        const row = store.dispatch.upsert({
+        const row = store.webhook.upsert({
           harness: body.harness,
           executorId: body.executorId,
           url: body.url,

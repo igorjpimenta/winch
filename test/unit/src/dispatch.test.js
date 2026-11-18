@@ -146,7 +146,7 @@ test("an expired offer releases capacity and retries with backoff", () => {
 
 test("webhook delivery sends the admission id and bearer", async () => {
   receiver = await wakeReceiver();
-  store.dispatch.upsert({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
+  store.webhook.upsert({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });

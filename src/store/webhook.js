@@ -1,26 +1,26 @@
-// Executor-scoped dispatch endpoints. A harness registers one row per stable
-// executor id; winch POSTs wake frames to that URL until the row is replaced
-// or removed.
+// Webhook endpoints. A harness registers one row per stable executor id; the
+// dispatch server POSTs wake frames to that URL until the row is replaced or
+// removed.
 
-export function createDispatchWebhookApi({ core }) {
+export function createWebhookApi({ core }) {
   const { db, now } = core;
 
   const api = {
     upsert({ harness, executorId, url, bearer, timeoutMs = null, at = now() }) {
       const h = typeof harness === "string" ? harness.trim() : "";
       const e = typeof executorId === "string" ? executorId.trim() : "";
-      if (!h) throw new Error("dispatch target requires a harness");
-      if (!e) throw new Error("dispatch target requires an executorId");
+      if (!h) throw new Error("webhook requires a harness");
+      if (!e) throw new Error("webhook requires an executorId");
       let u;
-      try { u = new URL(url); } catch { throw new Error(`invalid dispatch url: ${JSON.stringify(url)}`); }
+      try { u = new URL(url); } catch { throw new Error(`invalid webhook url: ${JSON.stringify(url)}`); }
       if (u.protocol !== "http:" && u.protocol !== "https:") {
-        throw new Error(`dispatch url must be http(s): ${JSON.stringify(url)}`);
+        throw new Error(`webhook url must be http(s): ${JSON.stringify(url)}`);
       }
       if (typeof bearer !== "string" || bearer === "") {
-        throw new Error("dispatch target requires a bearer");
+        throw new Error("webhook requires a bearer");
       }
       if (timeoutMs != null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
-        throw new Error(`dispatch timeoutMs must be a positive integer, got ${JSON.stringify(timeoutMs)}`);
+        throw new Error(`webhook timeoutMs must be a positive integer, got ${JSON.stringify(timeoutMs)}`);
       }
       db.prepare(`
         INSERT INTO dispatch_webhooks(harness, executor_id, url, bearer, timeout_ms, created_at, updated_at, last_seen_at)

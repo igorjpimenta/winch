@@ -69,7 +69,7 @@ test("webhook list/revoke round-trips an endpoint, secrets masked", async () => 
   const db = path.join(dir, "store.sqlite");
   try {
     const store = createStore({ dbPath: db });
-    store.dispatch.upsert({ harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
+    store.webhook.upsert({ harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
     store.close();
 
     let r = runDb(db, "webhook", "list");
