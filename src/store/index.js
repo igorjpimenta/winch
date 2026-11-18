@@ -34,11 +34,13 @@ import { createDepApi } from "./deps.js";
 import { createWebhookApi } from "./webhook.js";
 import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
+import { observe } from "../dispatch.js";
+import { toEventMessage } from "../events-ws.js";
 
 export { MAX_ATTEMPTS };
 export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };
 
-export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
+export function createStore({ dbPath, logger, config: explicitConfig, notifyDispatch = false, notifyUrl = null } = {}) {
   const finalPath = dbPath || resolveDbPath();
   const { sqlite: db, orm } = openDatabase({ dbPath: finalPath, logger });
   const cfg = resolveConfig({ explicit: explicitConfig ?? {} });
@@ -65,7 +67,25 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
 
-  return {
+  const targetUrl = notifyUrl
+    ?? (cfg.dispatchNotifyUrl || `http://127.0.0.1:${cfg.dispatchPort}/dispatch/notify`);
+  let notifyScheduled = false;
+
+  function scheduleNotify() {
+    if (!notifyDispatch || notifyScheduled) return;
+    notifyScheduled = true;
+    queueMicrotask(() => {
+      notifyScheduled = false;
+      fetch(targetUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "notify" }),
+        signal: AbortSignal.timeout(500),
+      }).catch(() => {});
+    });
+  }
+
+  const store = {
     db,
     orm,
     path: finalPath,
@@ -94,4 +114,13 @@ export function createStore({ dbPath, logger, config: explicitConfig } = {}) {
     itemKindOf(id) { return apis.item.kindOf(id); },
     close() { db.close(); },
   };
+
+  core.setEventHook((eventId) => {
+    const row = core.eventById(eventId);
+    if (!row) return;
+    observe(store, toEventMessage(store, row), row.created_at ?? Date.now());
+    scheduleNotify();
+  });
+
+  return store;
 }

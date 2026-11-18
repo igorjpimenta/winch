@@ -37,6 +37,8 @@ export function splitSessionKey(key) {
 }
 
 export function createCore({ db, cfg }) {
+  let eventHook = null;
+
   function ancestors(id) {
     const rows = db.prepare(`
       WITH RECURSIVE up(id, kind, parent_id, depth) AS (
@@ -116,7 +118,11 @@ export function createCore({ db, cfg }) {
       INSERT INTO item_events(item_id, attempt_id, session_id, from_status, to_status, kind, actor, note, payload_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(itemId, attemptId, sessionId, fromStatus, toStatus, kind, actor, note, jsonOut(payload), at ?? now());
-    return Number(r.lastInsertRowid);
+    const id = Number(r.lastInsertRowid);
+    // Runs inside the caller's transaction, so a status write and its wake
+    // admission commit or roll back together.
+    if (eventHook) eventHook(id);
+    return id;
   }
 
   function eventById(id) {
@@ -203,6 +209,7 @@ export function createCore({ db, cfg }) {
     getRow,
     listRows,
     appendEvent,
+    setEventHook(fn) { eventHook = fn; },
     eventById,
     eventsFor,
     kindForTransition,

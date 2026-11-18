@@ -24,12 +24,11 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   sweeper?.unref?.();
 
   store.admission.resetOffers();
-  // The queue survives a restart; events written while the server was down do
-  // not. Replay from the last admitted event, bounded on a fresh store so an
-  // old ledger cannot replay everything.
-  let since = store.admission.lastEventId();
+  // Repair a queue written before write-time routing existed. `enqueue` is
+  // idempotent per event, so replaying tells the same story without minting a
+  // second wake for rows the write hook already admitted.
+  let since = 0;
   const cursor = lastEventId(store);
-  if (!since) since = Math.max(0, cursor - histLimit);
   for (;;) {
     const rows = eventsSince(store, since, histLimit);
     if (!rows.length) break;
@@ -103,6 +102,12 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });
       }
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/dispatch/notify") {
+      req.resume();
+      json(res, 202, { ok: true });
+      void pump();
       return;
     }
     if (req.method === "POST" && url.pathname === "/dispatch/recover") {

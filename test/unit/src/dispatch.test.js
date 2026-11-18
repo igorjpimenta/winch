@@ -204,6 +204,55 @@ test("register and recover endpoints are available on the server", async () => {
   assert.ok(Array.isArray(body.start));
 });
 
+test("a live assignment reaches the queue and the receiver without a restart", async () => {
+  receiver = await wakeReceiver();
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const reg = await fetch(`${base}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" }),
+  });
+  assert.equal(reg.status, 201);
+
+  const { row } = seedAssigned();
+  assert.equal(store.admission.queued("test").length, 1, "the write hook admitted the wake");
+
+  const notify = await fetch(`${base}/dispatch/notify`, { method: "POST" });
+  assert.equal(notify.status, 202);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(receiver.rows.length >= 1, "notify drained the queue without waiting for the poll");
+  assert.equal(receiver.rows[0].body.itemId, row.item_id);
+});
+
+test("the store rings the dispatcher after a committed write", async () => {
+  let hits = 0;
+  const doorbell = http.createServer((req, res) => {
+    req.resume();
+    hits++;
+    res.statusCode = 202;
+    res.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((resolve) => doorbell.listen(0, "127.0.0.1", resolve));
+  const notifyUrl = `http://127.0.0.1:${doorbell.address().port}/dispatch/notify`;
+  const notifying = createStore({
+    dbPath: path.join(dir, "notify.sqlite"),
+    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, webhookTimeoutMs: 1000 },
+    notifyDispatch: true,
+    notifyUrl,
+  });
+  try {
+    const epic = notifying.epic.create({ title: "notify" });
+    const story = notifying.story.create({ epicId: epic.id, title: "notify" });
+    notifying.task.create({ storyId: story.id, title: "notify" });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(hits >= 1, "the post-commit notification reached the dispatcher");
+  } finally {
+    notifying.close();
+    await new Promise((resolve) => doorbell.close(resolve));
+  }
+});
+
 test("a review wake is one-shot after a successful delivery", () => {
   const epic = store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
   observe(store, {
