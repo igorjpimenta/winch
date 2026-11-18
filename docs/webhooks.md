@@ -93,10 +93,11 @@ The server routes `task.assigned`, `story.assigned`, `task.restored`,
   POSTed to every dispatch subscription for its harness. `202` means the
   receiver accepted the request; it does **not** mean the work was claimed.
 - Before spawning a session, the receiver calls `POST /dispatch/accept` with
-  `{admissionId, attemptNo, consumerId, executorId}`. The first consumer wins
-  `offered -> accepted`; the same consumer retry is idempotent, other consumers
-  get `409`. Only the winner starts a session. The agent's MCP
-  `backlog_claim` remains the final work guard.
+  `{admissionId, attemptNo, consumerId, executorId}`. It always answers `200`
+  for a valid request: `{accepted: true}` for the winner, `{accepted: false}`
+  for a loser or stale attempt. The first consumer wins `offered -> accepted`;
+  the same consumer retry is idempotent. Only the winner starts a session. The
+  agent's MCP `backlog_claim` remains the final work guard.
 - The row becomes `active` when the item is claimed and closes when the item
   closes. Append and review wakes have no claim: one successful delivery is
   one-shot, and the offer TTL ends the row instead of retrying it.

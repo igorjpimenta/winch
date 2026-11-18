@@ -84,7 +84,7 @@ export function registerReceiver({ api, bearer, wake, accept, started, logger = 
         json(res, 503, { error: `dispatch accept failed: ${err?.message ?? err}` });
         return;
       }
-      if (accepted?.ok) {
+      if (accepted?.accepted) {
         started?.set(key, now);
         Promise.resolve(wake({
           agent: body.agent,
@@ -97,7 +97,7 @@ export function registerReceiver({ api, bearer, wake, accept, started, logger = 
           logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`);
         });
       }
-      json(res, 202, { ok: true, admissionId: body.admissionId, accepted: Boolean(accepted?.ok) });
+      json(res, 202, { ok: true, admissionId: body.admissionId, accepted: Boolean(accepted?.accepted) });
     },
   });
 }
@@ -120,7 +120,6 @@ export async function acceptOffer({ baseUrl, admissionId, attemptNo, consumerId,
     body: JSON.stringify({ admissionId, attemptNo, consumerId, executorId }),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (res.status === 409) return { ok: false };
   if (!res.ok) throw new Error(`dispatch accept ${res.status}`);
   return res.json();
 }
@@ -165,7 +164,7 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
       logger?.warn?.(`winch: accept ${row.itemId} failed: ${err?.message ?? err}`);
       continue;
     }
-    if (!accepted?.ok) continue;
+    if (!accepted?.accepted) continue;
     started.set(key, now);
     Promise.resolve(wake({
       agent: row.agent,

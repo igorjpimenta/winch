@@ -44,7 +44,7 @@ test("receiver rejects a bad bearer and accepts a wake", async () => {
     api,
     bearer: "secret",
     wake: (frame) => { calls.push(frame); },
-    accept: async () => ({ ok: true }),
+    accept: async () => ({ accepted: true }),
     started: new Map(),
     logger: null,
   });

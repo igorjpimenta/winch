@@ -151,7 +151,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           executorId,
           at,
         });
-        json(res, result.ok ? 200 : 409, result);
+        json(res, 200, { ...result, accepted: result.ok });
       } catch (err) {
         json(res, 400, { ok: false, error: String(err?.message ?? err) });
       }

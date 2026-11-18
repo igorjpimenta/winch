@@ -306,8 +306,10 @@ test("dispatch accept endpoint elects one consumer", async () => {
   assert.equal((await res.json()).ok, true);
 
   res = await accept("consumer-b", "exec-b");
-  assert.equal(res.status, 409);
-  assert.equal((await res.json()).reason, "taken");
+  assert.equal(res.status, 200);
+  const lost = await res.json();
+  assert.equal(lost.accepted, false);
+  assert.equal(lost.reason, "taken");
 
   res = await accept("consumer-a", "exec-a");
   assert.equal(res.status, 200);
