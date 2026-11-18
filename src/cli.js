@@ -51,13 +51,11 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  dispatch set --harness H --url U [--bearer B] [--executor E] [--timeout-ms N]
-                                           register or replace an executor endpoint
-  dispatch list [--harness H]             list registered executor endpoints
-  dispatch remove --harness H --executor E
-                                           drop an executor endpoint
-  dispatch test --harness H [--executor E]
-                                           POST a ping to registered executor endpoints`;
+  webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
+                                           register or replace a webhook endpoint
+  webhook list [--harness H]              list webhook endpoints (bearer redacted)
+  webhook revoke --harness H --id E       remove a webhook endpoint
+  webhook test --harness H [--id E]       POST a ping to webhook endpoints`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -239,10 +237,10 @@ export async function runCli(argv) {
       return;
     }
 
-    case "dispatch": {
+    case "webhook": {
       const [sub, ...subRest] = rest;
-      if (!["set", "list", "remove", "test"].includes(sub)) {
-        fail("usage: winch dispatch (set|list|remove|test) …");
+      if (!["register", "list", "revoke", "test"].includes(sub)) {
+        fail("usage: winch webhook (register|list|revoke|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
@@ -250,6 +248,7 @@ export async function runCli(argv) {
           harness: { type: "string" },
           url: { type: "string" },
           bearer: { type: "string" },
+          id: { type: "string" },
           executor: { type: "string" },
           "timeout-ms": { type: "string" },
           config: { type: "string" },
@@ -258,33 +257,49 @@ export async function runCli(argv) {
       const store = openStore(loadConfig(values));
       try {
         if (sub === "list") {
-          console.log(JSON.stringify(store.dispatch.list({ harness: values.harness ?? null }).map((r) => ({ ...r, bearer: "<set>" })), null, 2));
+          console.log(JSON.stringify(store.dispatch.list({ harness: values.harness ?? null }).map((r) => ({
+            harness: r.harness,
+            id: r.executorId,
+            url: r.url,
+            bearer: "<set>",
+            timeoutMs: r.timeoutMs,
+            lastSeenAt: r.lastSeenAt,
+          })), null, 2));
           return;
         }
-        if (sub === "set") {
-          if (!values.harness || !values.url) fail("winch dispatch set requires --harness H --url U");
+        if (sub === "register") {
+          if (!values.harness || !values.url) fail("winch webhook register requires --harness H --url U");
           const timeoutMs = values["timeout-ms"] !== undefined ? Number(values["timeout-ms"]) : null;
           if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
             fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
           }
           const generated = !values.bearer;
           const bearer = values.bearer ?? crypto.randomBytes(32).toString("hex");
-          const executorId = values.executor ?? manualExecutorId(values.url);
+          const executorId = values.id ?? values.executor ?? manualExecutorId(values.url);
           const row = store.dispatch.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
-          console.log(JSON.stringify({ ...row, bearer: generated ? bearer : "<set>" }, null, 2));
+          console.log(JSON.stringify({
+            harness: row.harness,
+            id: row.executorId,
+            url: row.url,
+            bearer: generated ? bearer : "<set>",
+            timeoutMs: row.timeoutMs,
+            lastSeenAt: row.lastSeenAt,
+          }, null, 2));
           return;
         }
-        if (sub === "remove") {
-          if (!values.harness || !values.executor) fail("winch dispatch remove requires --harness H --executor E");
-          const removed = store.dispatch.remove({ harness: values.harness, executorId: values.executor });
-          if (!removed) fail(`no dispatch endpoint for ${values.harness}/${values.executor}`, 1);
-          console.log(JSON.stringify({ removed: `${values.harness}/${values.executor}` }));
+        if (sub === "revoke") {
+          const id = values.id ?? values.executor;
+          if (!values.harness || !id) fail("winch webhook revoke requires --harness H --id E");
+          const removed = store.dispatch.remove({ harness: values.harness, executorId: id });
+          if (!removed) fail(`no webhook endpoint for ${values.harness}/${id}`, 1);
+          console.log(JSON.stringify({ revoked: `${values.harness}/${id}` }));
           return;
         }
-        if (!values.harness) fail("winch dispatch test requires --harness H");
+        if (!values.harness) fail("winch webhook test requires --harness H");
+        const id = values.id ?? values.executor;
         const rows = store.dispatch.list({ harness: values.harness })
-          .filter((r) => !values.executor || r.executorId === values.executor);
-        if (!rows.length) fail(`no dispatch endpoint for ${values.harness}${values.executor ? `/${values.executor}` : ""}`, 1);
+          .filter((r) => !id || r.executorId === id);
+        if (!rows.length) fail(`no webhook endpoint for ${values.harness}${id ? `/${id}` : ""}`, 1);
         const results = await Promise.all(rows.map(async (row) => {
           const timeoutMs = row.timeoutMs ?? store.config.dispatchWebhookTimeoutMs ?? 3000;
           try {
@@ -295,9 +310,9 @@ export async function runCli(argv) {
               signal: AbortSignal.timeout(timeoutMs),
             });
             const text = await res.text().catch(() => "");
-            return { harness: row.harness, executorId: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
+            return { harness: row.harness, id: row.executorId, url: row.url, ok: res.ok, status: res.status, body: text.slice(0, 500) };
           } catch (err) {
-            return { harness: row.harness, executorId: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
+            return { harness: row.harness, id: row.executorId, url: row.url, ok: false, status: 0, error: String(err?.message ?? err) };
           }
         }));
         console.log(JSON.stringify(results, null, 2));

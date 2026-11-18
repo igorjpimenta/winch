@@ -17,15 +17,15 @@ The core stores the target in `dispatch_webhooks`, keyed by
 `(harness, executor_id)`. Adapters register themselves; a manually managed
 endpoint can be registered or replaced from the CLI:
 
-    winch dispatch set --harness H --url U [--bearer B] [--executor E] [--timeout-ms N]
-    winch dispatch list [--harness H]
-    winch dispatch remove --harness H --executor E
-    winch dispatch test --harness H [--executor E]
+    winch webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
+    winch webhook list [--harness H]
+    winch webhook revoke --harness H --id E
+    winch webhook test --harness H [--id E]
 
-`dispatch set` derives a stable `manual-<hash>` executor id from the URL when
-`--executor` is omitted. If `--bearer` is omitted it generates one and prints it
-once; later `list` output masks it. The bearer is sent as
-`Authorization: Bearer …` on every wake.
+`register` derives a stable `manual-<hash>` id from the URL when `--id` is
+omitted. If `--bearer` is omitted it generates one and prints it once; later
+`list` output redacts it. The bearer is sent as `Authorization: Bearer …` on
+every wake.
 
 ## Wake payload
 
@@ -50,7 +50,7 @@ backoff. The payload is a pointer, not a brief: the agent reads the record with
 
 ## Testing
 
-`winch dispatch test --harness H [--executor E]` sends:
+`winch webhook test --harness H [--id E]` sends:
 
     {"type":"ping","harness":"H","executorId":"E","at":1730000000000}
 

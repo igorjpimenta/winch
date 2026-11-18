@@ -54,7 +54,7 @@ test("removed mcp command is unknown", () => {
   assert.match(r.stderr, /unknown command/);
 });
 
-test("dispatch list/remove round-trips an executor target, secrets masked", async () => {
+test("webhook list/revoke round-trips an endpoint, secrets masked", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { createStore } = await import("../../src/store/index.js");
@@ -65,7 +65,7 @@ test("dispatch list/remove round-trips an executor target, secrets masked", asyn
     store.dispatch.upsert({ harness: "openclaw", executorId: "exec-1", url: "http://gw/wake", bearer: "s3cret" });
     store.close();
 
-    let r = runDb(db, "dispatch", "list");
+    let r = runDb(db, "webhook", "list");
     assert.equal(r.status, 0);
     assert.match(r.stdout, /openclaw/);
     assert.match(r.stdout, /exec-1/);
@@ -75,32 +75,32 @@ test("dispatch list/remove round-trips an executor target, secrets masked", asyn
     assert.equal(rows[0].url, "http://gw/wake");
     assert.equal(rows[0].bearer, "<set>");
 
-    r = runDb(db, "dispatch", "remove", "--harness", "openclaw", "--executor", "exec-1");
+    r = runDb(db, "webhook", "revoke", "--harness", "openclaw", "--id", "exec-1");
     assert.equal(r.status, 0);
-    r = runDb(db, "dispatch", "list");
+    r = runDb(db, "webhook", "list");
     assert.deepEqual(JSON.parse(r.stdout), []);
-    r = runDb(db, "dispatch", "remove", "--harness", "openclaw", "--executor", "exec-1");
+    r = runDb(db, "webhook", "revoke", "--harness", "openclaw", "--id", "exec-1");
     assert.equal(r.status, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("dispatch remove requires both harness and executor", async () => {
+test("webhook revoke requires both harness and id", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
   const db = path.join(dir, "store.sqlite");
   try {
-    let r = runDb(db, "dispatch", "list");
+    let r = runDb(db, "webhook", "list");
     assert.equal(r.status, 0);
     assert.deepEqual(JSON.parse(r.stdout), []);
-    r = runDb(db, "dispatch", "remove", "--harness", "oc");
+    r = runDb(db, "webhook", "revoke", "--harness", "oc");
     assert.equal(r.status, 2);
-    r = runDb(db, "dispatch", "remove", "--harness", "oc", "--executor", "missing");
+    r = runDb(db, "webhook", "revoke", "--harness", "oc", "--id", "missing");
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /no dispatch endpoint/);
-    r = runDb(db, "webhook", "list");
+    assert.match(r.stderr, /no webhook endpoint/);
+    r = runDb(db, "dispatch", "list");
     assert.equal(r.status, 2);
     assert.match(r.stderr, /unknown command/);
   } finally {
@@ -108,33 +108,33 @@ test("dispatch remove requires both harness and executor", async () => {
   }
 });
 
-test("dispatch set registers a manual endpoint and generates a bearer", async () => {
+test("webhook register creates a manual endpoint and generates a bearer", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
   const db = path.join(dir, "store.sqlite");
   try {
-    let r = runDb(db, "dispatch", "set", "--harness", "myapp", "--url", "http://127.0.0.1:9/wake");
+    let r = runDb(db, "webhook", "register", "--harness", "myapp", "--url", "http://127.0.0.1:9/wake");
     assert.equal(r.status, 0);
     const created = JSON.parse(r.stdout);
     assert.equal(created.harness, "myapp");
-    assert.match(created.executorId, /^manual-[0-9a-f]{12}$/);
+    assert.match(created.id, /^manual-[0-9a-f]{12}$/);
     assert.match(created.bearer, /^[0-9a-f]{64}$/);
 
-    r = runDb(db, "dispatch", "set", "--harness", "myapp", "--executor", "e1", "--url", "http://127.0.0.1:9/wake", "--bearer", "s3cret");
+    r = runDb(db, "webhook", "register", "--harness", "myapp", "--id", "e1", "--url", "http://127.0.0.1:9/wake", "--bearer", "s3cret");
     assert.equal(r.status, 0);
     assert.equal(JSON.parse(r.stdout).bearer, "<set>");
 
-    r = runDb(db, "dispatch", "list", "--harness", "myapp");
+    r = runDb(db, "webhook", "list", "--harness", "myapp");
     const rows = JSON.parse(r.stdout);
     assert.equal(rows.length, 2);
-    assert.equal(rows.find((row) => row.executorId === "e1").bearer, "<set>");
+    assert.equal(rows.find((row) => row.id === "e1").bearer, "<set>");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("dispatch test pings each executor with its bearer", async () => {
+test("webhook test pings each endpoint with its bearer", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
@@ -153,10 +153,10 @@ test("dispatch test pings each executor with its bearer", async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const url = `http://127.0.0.1:${server.address().port}/wake`;
-    let r = runDb(db, "dispatch", "set", "--harness", "myapp", "--executor", "e1", "--url", url, "--bearer", "s3cret");
+    let r = runDb(db, "webhook", "register", "--harness", "myapp", "--id", "e1", "--url", url, "--bearer", "s3cret");
     assert.equal(r.status, 0);
 
-    const result = await runDbAsync(db, "dispatch", "test", "--harness", "myapp");
+    const result = await runDbAsync(db, "webhook", "test", "--harness", "myapp");
     const rows = JSON.parse(result.stdout);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].ok, true);
