@@ -35,6 +35,7 @@ test("resolveConfig with nothing declared returns the documented defaults", () =
   ]);
   assert.equal(cfg.wsPort, 38291);
   assert.equal(cfg.dispatchPort, 38293);
+  assert.equal(cfg.dispatchNotifyUrl, "");
   assert.equal(cfg.webhookTimeoutMs, 3000);
   assert.equal(cfg.wsHistoryLimit, 200);
   assert.equal(cfg.maxActivePerAgent, 2);

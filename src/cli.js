@@ -21,7 +21,7 @@ export { resolveDbPath };
 
 // stdout is the data channel for every subcommand; diagnostics go to stderr.
 function openStore(explicitConfig) {
-  return createStore({ dbPath: resolveDbPath(), config: explicitConfig });
+  return createStore({ dbPath: resolveDbPath(), config: explicitConfig, notifyDispatch: true });
 }
 
 // --config takes a JSON object or a path to a JSON file, the way --harness

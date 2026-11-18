@@ -42,6 +42,17 @@ localhost-only unless `--host` says otherwise:
 It also sweeps expired leases on `WINCH_DISPATCH_SWEEP_MS`. The read-only
 event stream is a separate process: `winch serve --ws`.
 
+## Live enqueue
+
+A status transition writes its wake rows into `admission_queue` inside the same
+SQLite transaction as `item_state` and `item_events`. The writer then posts to
+`/dispatch/notify` (default `http://127.0.0.1:38293/dispatch/notify`, override
+with `WINCH_DISPATCH_NOTIFY_URL`) so the dispatcher drains immediately. The
+notification is best-effort; the queue is durable. On startup the dispatcher
+replays `item_events` to repair queues written before this path existed, and
+`enqueue` deduplicates by event id. The interval pump remains only for offer
+expiry, retry backoff and lost notifications.
+
 ## Dispatch registration
 
 Each adapter exposes a wake route and registers it on the `dispatch` topic with
