@@ -10,6 +10,7 @@ export function wakePayload(row, { at = Date.now(), offerMs = 120000 } = {}) {
     type: "wake",
     admissionId: row.id,
     itemId: row.item_id,
+    attemptNo: row.attempt_no ?? null,
     kind: row.kind,
     harness: row.harness,
     agent: row.agent_id,
@@ -31,13 +32,14 @@ async function postWake(endpoint, payload, timeoutMs) {
     });
     const text = await res.text().catch(() => "");
     return {
+      id: endpoint.id,
       executorId: endpoint.executorId,
       ok: res.status >= 200 && res.status < 300,
       status: res.status,
       body: text.slice(0, MAX_BODY_CHARS),
     };
   } catch (err) {
-    return { executorId: endpoint.executorId, ok: false, status: 0, error: String(err?.message ?? err) };
+    return { id: endpoint.id, executorId: endpoint.executorId, ok: false, status: 0, error: String(err?.message ?? err) };
   }
 }
 
@@ -57,6 +59,7 @@ export async function deliverWake(store, row, { config = store.config, logger = 
   const failed = results.filter((r) => !r.ok);
   for (const r of failed) {
     logger?.warn?.(`winch: dispatch wake ${row.id} -> ${r.executorId} failed (${r.status || r.error})`);
+    if (r.status === 404 || r.status === 410) store.webhook.remove({ topic: "dispatch", id: r.id });
   }
   if (delivered.length === 0) store.admission.fail(row.id, Date.now());
   return { ok: delivered.length > 0, delivered, failed };

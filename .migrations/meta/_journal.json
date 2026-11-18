@@ -71,6 +71,13 @@
       "when": 1794936798231,
       "tag": "0009_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795035490048,
+      "tag": "0010_quiet_carlie_cooper",
+      "breakpoints": true
     }
   ]
 }

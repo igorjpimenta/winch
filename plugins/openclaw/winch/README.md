@@ -6,8 +6,9 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
    meta cannot impersonate an agent.
 2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
-   executor bearer, and starts a one-shot session for the assigned agent. The
-   agent's `backlog_claim` is the work guard, so duplicate delivery is safe.
+   executor bearer, calls `POST /dispatch/accept`, and starts a one-shot
+   session only when it wins the offer. The agent's `backlog_claim` is the
+   final work guard.
 3. **Self-registration and recovery** — registers one wake URL per
    `WINCH_CONSUMER_ID` with `WINCH_WEBHOOK_BEARER`, then reconciles assigned
    `in_progress` work through `POST /dispatch/recover`. `WINCH_EXECUTOR_ID`

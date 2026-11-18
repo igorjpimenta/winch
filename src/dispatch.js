@@ -95,7 +95,7 @@ export function observe(store, ev, at = Date.now()) {
   return routes;
 }
 
-export function recover(store, { harness, at = Date.now(), config = store.config } = {}) {
+export function recover(store, { harness, consumerId = null, at = Date.now(), config = store.config } = {}) {
   store.admission.expire({
     at,
     offerMs: config.dispatchOfferMs,
@@ -104,41 +104,69 @@ export function recover(store, { harness, at = Date.now(), config = store.config
     maxAttempts: config.dispatchOfferMaxAttempts,
   });
 
+  const ownerForItem = `(
+    SELECT aa.consumer_id
+      FROM admission_queue q
+      JOIN admission_attempts aa ON aa.admission_id=q.id
+     WHERE q.item_id=s.item_id AND q.status='active' AND q.ended_at IS NULL
+     ORDER BY aa.attempt_no DESC LIMIT 1
+  )`;
   const resume = store.db.prepare(`
     SELECT s.item_id, s.assignee_agent, s.assignee_harness,
            a.id AS attempt_id, a.attempt_no, a.claimed_at, a.heartbeat_at, a.expires_at,
-           ws.id AS session_id, ws.external_session_id, ws.session_key
+           ws.id AS session_id, ws.external_session_id, ws.session_key,
+           ${ownerForItem} AS consumer_id
       FROM item_state s
       LEFT JOIN attempts a ON a.item_id=s.item_id AND a.ended_at IS NULL
       LEFT JOIN work_sessions ws ON ws.id=a.session_id
      WHERE s.status='in_progress' AND s.deleted_at IS NULL AND s.assignee_harness=?
+       AND (? IS NULL OR COALESCE(${ownerForItem}, ?) = ?)
      ORDER BY a.claimed_at ASC, s.updated_at ASC
-  `).all(harness).map((r) => ({
+  `).all(harness, consumerId, consumerId, consumerId).map((r) => ({
     task: store.task.get(r.item_id),
     attemptId: r.attempt_id ?? null,
     attemptNo: r.attempt_no ?? null,
     sessionId: r.session_id ?? null,
     sessionKey: r.session_key ?? null,
     leaseExpiresAt: r.expires_at ?? null,
+    consumerId: r.consumer_id ?? null,
     needsRepair: r.attempt_id == null,
   }));
 
-  const start = store.admission.offers(harness).map((row) => {
-    const live = store.admission.get(row.id);
-    return {
-      admissionId: live.id,
-      itemId: live.item_id,
-      kind: live.kind,
-      agent: live.agent_id,
-      harness: live.harness,
-      eventId: live.event_id ?? null,
-      offerExpiresAt: (live.offered_at ?? at) + config.dispatchOfferMs,
-      status: "offered",
-    };
-  });
+  const offered = store.admission.offers(harness)
+    .map((row) => store.admission.get(row.id))
+    .filter(Boolean)
+    .sort((a, b) => (a.offered_at ?? 0) - (b.offered_at ?? 0)
+      || (a.attempt_no ?? 0) - (b.attempt_no ?? 0)
+      || String(a.id).localeCompare(String(b.id)));
 
-  const usedHarness = store.admission.slotCount(harness);
-  const usedGlobal = store.admission.globalSlotCount();
+  const { active, reserved } = store.admission.slots();
+  const activeHarness = active.get(harness) ?? 0;
+  const activeGlobal = [...active.values()].reduce((n, v) => n + v, 0);
+  const reservedGlobal = [...reserved.values()].reduce((n, v) => n + v, 0);
+  const otherReserved = Math.max(0, reservedGlobal - offered.length);
+  const keep = Math.max(0, Math.min(
+    config.dispatchHarnessMax - activeHarness,
+    config.dispatchGlobalMax - activeGlobal - otherReserved,
+    offered.length,
+  ));
+  const keptOffers = offered.slice(0, keep);
+  for (const row of offered.slice(keep)) store.admission.requeue(row.id, at);
+
+  const start = keptOffers.map((live) => ({
+    admissionId: live.id,
+    itemId: live.item_id,
+    attemptNo: live.attempt_no ?? null,
+    kind: live.kind,
+    agent: live.agent_id,
+    harness: live.harness,
+    eventId: live.event_id ?? null,
+    offerExpiresAt: (live.offered_at ?? at) + config.dispatchOfferMs,
+    status: live.status,
+  }));
+
+  const usedHarness = activeHarness + keptOffers.length;
+  const usedGlobal = activeGlobal + otherReserved + keptOffers.length;
   let free = Math.max(0, Math.min(
     config.dispatchHarnessMax - usedHarness,
     config.dispatchGlobalMax - usedGlobal,
@@ -150,6 +178,7 @@ export function recover(store, { harness, at = Date.now(), config = store.config
     start.push({
       admissionId: next.id,
       itemId: next.item_id,
+      attemptNo: next.attempt_no ?? null,
       kind: next.kind,
       agent: next.agent_id,
       harness: next.harness,

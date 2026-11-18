@@ -209,6 +209,7 @@ export const admissionAttempts = sqliteTable("admission_attempts", {
   admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
   attemptNo: integer("attempt_no").notNull(),
   executorId: text("executor_id"),
+  consumerId: text("consumer_id"),
   offeredAt: integer("offered_at").notNull(),
   acceptedAt: integer("accepted_at"),
   endedAt: integer("ended_at"),

@@ -76,6 +76,11 @@ export function createWebhookApi({ core }) {
         .all(...params).map(toWebhook);
     },
 
+    prune({ topic, before = now() } = {}) {
+      return db.prepare("DELETE FROM webhooks WHERE topic=? AND last_seen_at < ?")
+        .run(required(topic, "a topic"), Number(before)).changes;
+    },
+
     get({ topic, id }) {
       const row = db.prepare("SELECT * FROM webhooks WHERE topic=? AND id=?")
         .get(required(topic, "a topic"), required(id, "an id"));

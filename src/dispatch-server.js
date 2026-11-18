@@ -14,16 +14,24 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const listenPort = port ?? cfg.dispatchPort ?? DEFAULT_DISPATCH_PORT;
   const pollMs = intervalMs ?? cfg.dispatchIntervalMs ?? 1000;
   const sweepMs = cfg.dispatchSweepMs ?? 30000;
+  const consumerTtlMs = cfg.dispatchConsumerTtlMs ?? 90000;
   const histLimit = cfg.wsHistoryLimit ?? HISTORY_LIMIT;
   let closing = false;
   let pumping = false;
 
+  const pruneConsumers = () => {
+    try { store.webhook.prune({ topic: "dispatch", before: Date.now() - consumerTtlMs }); } catch {}
+  };
   const sweeper = sweepMs > 0
-    ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
+    ? setInterval(() => {
+        try { store.task.sweepExpired({}); } catch {}
+        pruneConsumers();
+      }, sweepMs)
     : null;
   sweeper?.unref?.();
 
   store.admission.resetOffers();
+  pruneConsumers();
   // Repair a queue written before write-time routing existed. `enqueue` is
   // idempotent per event, so replaying tells the same story without minting a
   // second wake for rows the write hook already admitted.
@@ -66,6 +74,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
     if (pumping) return;
     pumping = true;
     try {
+      pruneConsumers();
       const offered = dispatchTick(store, {
         at: Date.now(),
         reachable: store.webhook.harnesses({ topic: "dispatch" }),
@@ -116,11 +125,48 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       void pump();
       return;
     }
+    if (req.method === "POST" && url.pathname === "/dispatch/accept") {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      try {
+        const admissionId = String(body.admissionId ?? "").trim();
+        const consumerId = String(body.consumerId ?? "").trim();
+        const executorId = String(body.executorId ?? "").trim();
+        if (!admissionId || (!consumerId && !executorId)) {
+          json(res, 400, { ok: false, error: "accept requires admissionId and consumerId or executorId" });
+          return;
+        }
+        const at = Date.now();
+        store.admission.expire({
+          at,
+          offerMs: cfg.dispatchOfferMs,
+          baseBackoffMs: cfg.dispatchOfferBackoffMs,
+          maxBackoffMs: cfg.dispatchOfferMaxBackoffMs,
+          maxAttempts: cfg.dispatchOfferMaxAttempts,
+        });
+        const result = store.admission.accept({
+          id: admissionId,
+          attemptNo: body.attemptNo,
+          consumerId,
+          executorId,
+          at,
+        });
+        json(res, result.ok ? 200 : 409, result);
+      } catch (err) {
+        json(res, 400, { ok: false, error: String(err?.message ?? err) });
+      }
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/dispatch/recover") {
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
-        const result = recover(store, { harness: String(body.harness ?? "").trim(), at: Date.now(), config: cfg });
+        const result = recover(store, {
+          harness: String(body.harness ?? "").trim(),
+          consumerId: String(body.consumerId ?? "").trim() || null,
+          at: Date.now(),
+          config: cfg,
+        });
         json(res, 200, result);
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });

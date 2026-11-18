@@ -63,8 +63,12 @@ executor is metadata, so a consumer never needs a second webhook:
     {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
 
 `consumerId` is the webhook identity; `executorId` is the live connection.
-Re-registering a consumer replaces its URL. A legacy executor-keyed row for the
-same executor is removed on the first consumer registration.
+Re-registering a consumer replaces its URL and refreshes `lastSeenAt`. Adapters
+re-register on every reconcile; the server drops a dispatch webhook whose
+`lastSeenAt` is older than `WINCH_DISPATCH_CONSUMER_TTL_MS` (default 90s). A
+`404` or `410` from a wake URL drops that row immediately. A legacy
+executor-keyed row for the same executor is removed on the first consumer
+registration. Multiple consumers may share a harness; each gets the wake.
 
 The adapter environment supplies the identity:
 
@@ -88,7 +92,11 @@ The server routes `task.assigned`, `story.assigned`, `task.restored`,
 - Each delivery attempt is an `admission_attempts` row. A queued wake is
   POSTed to every dispatch subscription for its harness. `202` means the
   receiver accepted the request; it does **not** mean the work was claimed.
-  The agent's MCP `backlog_claim` is the work guard.
+- Before spawning a session, the receiver calls `POST /dispatch/accept` with
+  `{admissionId, attemptNo, consumerId, executorId}`. The first consumer wins
+  `offered -> accepted`; the same consumer retry is idempotent, other consumers
+  get `409`. Only the winner starts a session. The agent's MCP
+  `backlog_claim` remains the final work guard.
 - The row becomes `active` when the item is claimed and closes when the item
   closes. Append and review wakes have no claim: one successful delivery is
   one-shot, and the offer TTL ends the row instead of retrying it.
@@ -104,6 +112,7 @@ Winch POSTs this JSON body:
       "type": "wake",
       "admissionId": "ADM-…",
       "itemId": "TASK-…",
+      "attemptNo": 1,
       "kind": "task",
       "harness": "openclaw",
       "agent": "worker",
@@ -129,16 +138,22 @@ status and exits non-zero if any fails.
 
 ## Restart recovery
 
-`POST /dispatch/recover` is the harness-owned reconciler:
+`POST /dispatch/recover` is the consumer-owned reconciler:
 
     POST /dispatch/recover
-    {"harness":"openclaw","executorId":"openclaw-1"}
+    {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1"}
 
 It returns:
 
 - `resume`: assigned `in_progress` work with `task`, `attemptId`,
-  `sessionId`, `sessionKey`, and `leaseExpiresAt`;
-- `start`: already-offered wakes plus queued wakes admitted into free slots;
+  `sessionId`, `sessionKey`, and `leaseExpiresAt`. An accepted wake records
+  the winning consumer; only that consumer gets its resume. Legacy active rows
+  with no recorded consumer are returned to the requester;
+- `start`: already-offered or accepted wakes plus queued wakes admitted into
+  free slots; a wake accepted by this consumer is returned so a restart can
+  retry it idempotently. If
+  existing offers exceed a cap (for example after a cap is lowered), the oldest
+  offers are kept and the newest return to `queued` before the free-slot fill;
 - `free`: remaining capacity after active and offered work.
 
 The harness resumes the same attempt, never re-claims an `in_progress` item.
@@ -150,9 +165,11 @@ where normal wake and claim apply.
 
 - Accept `POST` on a stable URL reachable from the winch server.
 - Require the executor bearer; reject a mismatched or missing one.
-- Return 2xx before starting long work, and deduplicate on `admissionId`.
-- Register on boot and re-register after an address change.
-- Call `POST /dispatch/recover` on boot.
+- Call `POST /dispatch/accept` before starting long work. Deduplicate on
+  `admissionId` + `attemptNo`; a duplicate or losing accept must not start a
+  session.
+- Register on boot and re-register on every reconcile so the heartbeat stays
+  fresh. Call `POST /dispatch/recover` after registering.
 
 ## Delegation
 

@@ -50,15 +50,15 @@ function observeEvent(row) {
   return msg;
 }
 
-async function wakeReceiver({ bearer = "tok" } = {}) {
+async function wakeReceiver({ bearer = "tok", status = 202 } = {}) {
   const rows = [];
   const server = http.createServer((req, res) => {
     let raw = "";
     req.on("data", (d) => { raw += d; });
     req.on("end", () => {
       rows.push({ auth: req.headers.authorization, body: JSON.parse(raw) });
-      res.statusCode = 202;
-      res.end(JSON.stringify({ ok: true }));
+      res.statusCode = status;
+      res.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -157,7 +157,62 @@ test("webhook delivery sends the admission id and bearer", async () => {
   assert.equal(receiver.rows[0].body.type, "wake");
   assert.equal(receiver.rows[0].body.admissionId, offer.id);
   assert.equal(receiver.rows[0].body.itemId, row.item_id);
+  assert.equal(receiver.rows[0].body.attemptNo, offer.attempt_no);
   assert.equal(store.admission.get(offer.id).status, "offered");
+});
+
+test("delivery drops a webhook that answers 410", async () => {
+  receiver = await wakeReceiver({ status: 410 });
+  store.webhook.upsert({ topic: "dispatch", id: "exec-dead", harness: "test", executorId: "exec-dead", url: receiver.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, false);
+  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 0);
+});
+
+test("stale dispatch registrations are pruned by last-seen", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "c-old", harness: "test", url: "http://127.0.0.1:1/wake", bearer: "tok", at: 1000 });
+  store.webhook.upsert({ topic: "dispatch", id: "c-new", harness: "test", url: "http://127.0.0.1:2/wake", bearer: "tok", at: 5000 });
+  assert.equal(store.webhook.prune({ topic: "dispatch", before: 3000 }), 1);
+  assert.deepEqual(store.webhook.list({ topic: "dispatch" }).map((w) => w.id), ["c-new"]);
+});
+
+test("accept elects one consumer and is idempotent for that consumer", () => {
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const accepted = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.idempotent, false);
+
+  const again = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
+  assert.equal(again.ok, true);
+  assert.equal(again.idempotent, true);
+
+  const other = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-b", executorId: "exec-b" });
+  assert.equal(other.ok, false);
+  assert.equal(other.reason, "taken");
+  assert.equal(store.admission.get(offer.id).status, "accepted");
+  const recovered = recover(store, { harness: "test", consumerId: "consumer-a" });
+  assert.ok(recovered.start.some((r) => r.admissionId === offer.id && r.status === "accepted"));
+});
+
+test("resume is scoped to the consumer that accepted the offer", () => {
+  const { task, row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s" });
+  const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  observeEvent(claimRow);
+
+  const mine = recover(store, { harness: "test", consumerId: "consumer-a" });
+  assert.deepEqual(mine.resume.map((r) => r.task.id), [task.id]);
+  const other = recover(store, { harness: "test", consumerId: "consumer-b" });
+  assert.deepEqual(other.resume, []);
+  assert.equal(mine.resume[0].consumerId, "consumer-a");
 });
 
 test("recover returns in-progress resume work and fills free slots", () => {
@@ -175,6 +230,36 @@ test("recover returns in-progress resume work and fills free slots", () => {
   assert.equal(result.resume[0].task.id, first.task.id);
   assert.ok(result.resume[0].attemptId);
   assert.ok(result.start.some((r) => r.admissionId === offer.id || r.itemId === second.task.id));
+});
+
+test("recover requeues offers beyond the cap, keeping the oldest", () => {
+  for (let i = 0; i < 4; i++) {
+    const { row } = seedAssigned({ agent: `worker-${i}` });
+    observeEvent(row);
+  }
+  const offers = tick(store, {
+    reachable: ["test"],
+    at: 1000,
+    config: { ...store.config, dispatchHarnessMax: 4, dispatchGlobalMax: 4 },
+  });
+  assert.equal(offers.length, 4);
+  for (let i = 0; i < offers.length; i++) {
+    store.db.prepare("UPDATE admission_attempts SET offered_at=? WHERE admission_id=? AND ended_at IS NULL")
+      .run(1000 + i, offers[i].id);
+  }
+
+  const result = recover(store, {
+    harness: "test",
+    at: 1010,
+    config: { ...store.config, dispatchHarnessMax: 2, dispatchGlobalMax: 2 },
+  });
+  assert.equal(result.start.length, 2);
+  assert.deepEqual(result.start.map((r) => r.admissionId), offers.slice(0, 2).map((r) => r.id));
+  assert.equal(result.free, 0);
+  assert.equal(store.admission.get(offers[0].id).status, "offered");
+  assert.equal(store.admission.get(offers[1].id).status, "offered");
+  assert.equal(store.admission.get(offers[2].id).status, "queued");
+  assert.equal(store.admission.get(offers[3].id).status, "queued");
 });
 
 test("register and recover endpoints are available on the server", async () => {
@@ -202,6 +287,31 @@ test("register and recover endpoints are available on the server", async () => {
   assert.equal(rec.status, 200);
   const body = await rec.json();
   assert.ok(Array.isArray(body.start));
+});
+
+test("dispatch accept endpoint elects one consumer", async () => {
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const accept = (consumerId, executorId) => fetch(`${base}/dispatch/accept`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ admissionId: offer.id, attemptNo: offer.attempt_no, consumerId, executorId }),
+  });
+
+  let res = await accept("consumer-a", "exec-a");
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+
+  res = await accept("consumer-b", "exec-b");
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).reason, "taken");
+
+  res = await accept("consumer-a", "exec-a");
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).idempotent, true);
 });
 
 test("dispatch registration is one row per consumer, with executor metadata", async () => {

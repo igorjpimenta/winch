@@ -77,7 +77,7 @@ them from the running server.
   stream](docs/websocket.md).
 - The **Dispatch server** (`winch webhook serve`) accepts executor
   registration and recovery, pumps `admission_queue`, and POSTs wakes to
-  executor webhooks. The agent's MCP `backlog_claim` accepts the work.
+  consumer webhooks. The agent's MCP `backlog_claim` accepts the work.
 - **Harness adapters** (`@igorjpimenta/winch-openclaw`, `@igorjpimenta/winch-opencode`)
   stamp identity, checkpoint on turn end (OpenClaw), receive dispatch webhooks
   on a plugin-local listener, and reconcile assigned `in_progress` work after a
@@ -114,8 +114,9 @@ is the single scheduler:
 - It routes `task.assigned`, `story.assigned`, `task.restored`, `task.appended`
   (to the epic creator) and `epic.completed` (to the epic creator).
 - It writes each wake to `admission_queue`, then POSTs it to every registered
-  executor for that harness. `202` means the receiver accepted the request;
-  the agent's `backlog_claim` is the work guard, so duplicate wakes are safe.
+  consumer for that harness. Before starting a session the receiver calls
+  `POST /dispatch/accept`; the first consumer wins, so duplicate wakes do not
+  start duplicate sessions. The agent's `backlog_claim` is the final guard.
 - An offer reserves capacity until it is claimed, closes, or expires. Failed
   deliveries and expired offers requeue with backoff; append/review wakes are
   one-shot and end on their TTL.
@@ -133,7 +134,8 @@ or bearer disables the receiver; see [Webhooks](docs/webhooks.md).
 
 `POST /dispatch/recover` returns assigned `in_progress` work with its
 `attemptId`, so a restarted harness resumes that attempt instead of
-re-claiming it. Its first call is `backlog_update` with the returned
+re-claiming it. An accepted offer records the winning consumer, so only that
+consumer gets the resume; multiple consumers still share the harness. Its first call is `backlog_update` with the returned
 `attemptId`; a stale attempt gets `stale_claim`. Expired leases return work to
 `ready` through the normal sweep.
 
@@ -420,6 +422,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
 | Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
+| Dispatch consumer heartbeat TTL | `WINCH_DISPATCH_CONSUMER_TTL_MS` | 90000 ms |
 | Offer TTL / backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
 | Webhook delivery timeout | `WINCH_WEBHOOK_TIMEOUT_MS` | 3000 ms |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |

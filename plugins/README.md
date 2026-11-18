@@ -111,16 +111,18 @@ Two more rows matter to the dispatcher:
   not on every replay.
 
 Dispatch is delivered by HTTP, not polled. `202` means the receiver accepted
-the request; the agent's `backlog_claim` is the one-winner guard, so duplicate
-wakes are safe. The admission queue holds an offer until it is claimed, closes,
-or expires; failed deliveries and expired offers requeue with backoff.
-Append/review wakes are one-shot. Claim leases remain the work-level guard.
+the request. Before spawning, the receiver calls `POST /dispatch/accept`; the
+first consumer wins and the same consumer may retry idempotently. The admission
+queue holds an offer until it is claimed, closes, or expires; failed deliveries
+and expired offers requeue with backoff. Append/review wakes are one-shot.
+Claim leases remain the work-level guard.
 
 ## Restart recovery
 
 The core query is `POST /dispatch/recover`; it returns assigned `in_progress`
-work with `attemptId`, `sessionId`, `sessionKey` and lease expiry. The plugin
-dedupes by task id and resumes the same attempt. Its first action is
+work with `attemptId`, `sessionId`, `sessionKey` and lease expiry. An accepted
+offer records the winning consumer, so only that consumer gets the resume; the
+plugin dedupes by task id and resumes the same attempt. Its first action is
 `backlog_update` with the returned `attemptId`; a stale attempt gets
 `stale_claim`, and only an expired lease returns the item to `ready` for a
 normal wake and claim.
@@ -147,14 +149,15 @@ The opencode companion ships its own dispatch receiver
 with `WINCH_CONSUMER_ID` (default `harness:hostname`),
 `WINCH_EXECUTOR_ID`, and `WINCH_WEBHOOK_BEARER`, and calls
 `POST /dispatch/recover` on startup and on its reconcile interval. The wake
-payload's `kind` selects the listener action; one consumer owns one route.
-Missing identity or bearer disables the receiver.
+payload's `kind` selects the listener action; many consumers may share one
+harness, each with its own route. Missing identity or bearer disables the
+receiver.
 
-A wake carries the opaque item id; the plugin starts a claimable `opencode run`
-session. Resume wakes carry the task id and `attemptId`, so the prompt fences
-the session with `backlog_update` and `backlog_done` and never re-claims an
-`in_progress` item. Duplicate wakes are harmless because `backlog_claim` is
-the guard; the core treats `202` as delivery, not acceptance.
+A wake carries the opaque item id; the plugin calls `POST /dispatch/accept`
+before starting a claimable `opencode run` session. Resume wakes carry the task
+id and `attemptId`, so the prompt fences the session with `backlog_update` and
+`backlog_done` and never re-claims an `in_progress` item. `202` is delivery,
+not acceptance; only the accept winner starts a session.
 
 The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
 `winchConsumerId`, `winchExecutorId`, `dispatchReconcileMs`, and a port for the

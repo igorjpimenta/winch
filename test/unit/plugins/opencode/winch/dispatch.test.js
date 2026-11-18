@@ -14,6 +14,10 @@ test("listener registers with core and accepts a wake", async () => {
     req.on("end", () => {
       if (req.url === "/dispatch/register") registrations.push(JSON.parse(raw));
       res.setHeader("content-type", "application/json");
+      if (req.url === "/dispatch/accept") {
+        res.end(JSON.stringify({ ok: true, accepted: true, attemptNo: 1 }));
+        return;
+      }
       res.end(JSON.stringify({ resume: [], start: [] }));
     });
   });

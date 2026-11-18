@@ -11,9 +11,13 @@ test("recoverOnce wakes resume and start rows once", async () => {
   const calls = [];
   const server = http.createServer((req, res) => {
     res.setHeader("content-type", "application/json");
+    if (req.url === "/dispatch/accept") {
+      res.end(JSON.stringify({ ok: true, accepted: true, attemptNo: 1 }));
+      return;
+    }
     res.end(JSON.stringify({
       resume: [{ task: { id: "TASK-1", assignee_agent: "worker" }, attemptId: "a1" }],
-      start: [{ admissionId: "ADM-1", itemId: "TASK-2", agent: "worker", kind: "task" }],
+      start: [{ admissionId: "ADM-1", itemId: "TASK-2", agent: "worker", kind: "task", attemptNo: 1 }],
     }));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -36,7 +40,14 @@ test("receiver rejects a bad bearer and accepts a wake", async () => {
   let handler;
   const api = { registerHttpRoute: (route) => { handler = route.handler; } };
   const calls = [];
-  registerReceiver({ api, bearer: "secret", wake: (frame) => { calls.push(frame); }, logger: null });
+  registerReceiver({
+    api,
+    bearer: "secret",
+    wake: (frame) => { calls.push(frame); },
+    accept: async () => ({ ok: true }),
+    started: new Map(),
+    logger: null,
+  });
 
   const bad = { method: "POST", headers: { authorization: "Bearer nope" } };
   const badRes = { statusCode: 0, setHeader() {}, end() { this.done = true; } };
