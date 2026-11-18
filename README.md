@@ -379,7 +379,7 @@ append a new one instead of editing it.
 
 Concurrency note: concurrent access to the sqlite file - server, watcher and
 CLI processes at once - is safe under WAL mode, and
-[test/src/store/race.test.js](test/src/store/race.test.js)
+[test/unit/src/store/race.test.js](test/unit/src/store/race.test.js)
 races 4 real OS processes with independent handles through one claim to prove
 the CAS transaction boundary under WAL contention.
 
