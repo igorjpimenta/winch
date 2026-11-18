@@ -15,13 +15,13 @@ test("matches winch tools only", () => {
 test("stamps the session and the known agent", () => {
   const output = { args: { taskId: "TASK-1" } };
   assert.equal(stampWinchIdentity({ tool: "winch__backlog_claim", sessionID: "ses_1" }, output, { agent: "builder" }), true);
-  assert.deepEqual(output.args, { taskId: "TASK-1", winch_agent: "builder", winch_session: "ses_1" });
+  assert.deepEqual(output.args, { taskId: "TASK-1", winch_agent: "builder", winch_session: "ses_1", winch_consumer: "" });
 });
 
 test("overwrites a model-supplied identity pair", () => {
   const output = { args: { winch_agent: "forged", winch_session: "forged" } };
   stampWinchIdentity({ tool: "winch__backlog_claim", sessionID: "ses_2" }, output, { agent: "builder" });
-  assert.deepEqual(output.args, { winch_agent: "builder", winch_session: "ses_2" });
+  assert.deepEqual(output.args, { winch_agent: "builder", winch_session: "ses_2", winch_consumer: "" });
 });
 
 test("leaves non-winch calls untouched", () => {
@@ -35,7 +35,7 @@ test("hooks learn the agent from chat events and stamp the tool call", async () 
   await hooks["chat.message"]({ sessionID: "ses_9", agent: "docs" });
   const output = { args: {} };
   await hooks["tool.execute.before"]({ tool: "winch__backlog_get", sessionID: "ses_9" }, output);
-  assert.deepEqual(output.args, { winch_agent: "docs", winch_session: "ses_9" });
+  assert.deepEqual(output.args, { winch_agent: "docs", winch_session: "ses_9", winch_consumer: "" });
 });
 
 test("chat.params also teaches the agent", async () => {
@@ -49,7 +49,7 @@ test("chat.params also teaches the agent", async () => {
 test("v2 event stamping writes the same unconditional pair", async () => {
   const event = { tool: "winch_backlog_claim", sessionID: "ses_v2", input: { taskId: "TASK-1" } };
   assert.equal(stampWinchEvent(event, "build"), true);
-  assert.deepEqual(event.input, { taskId: "TASK-1", winch_agent: "build", winch_session: "ses_v2" });
+  assert.deepEqual(event.input, { taskId: "TASK-1", winch_agent: "build", winch_session: "ses_v2", winch_consumer: "" });
   const forged = { tool: "winch_backlog_claim", sessionID: "ses_v2", input: { winch_agent: "forged" } };
   stampWinchEvent(forged, "build");
   assert.equal(forged.input.winch_agent, "build");
@@ -69,9 +69,10 @@ test("the package exposes both host entrypoints", async () => {
 test("an unknown agent blanks a model-supplied pair instead of trusting it", () => {
   const output = { args: { winch_agent: "forged", winch_session: "forged" } };
   stampWinchIdentity({ tool: "winch__backlog_claim", sessionID: "ses_1" }, output, { agent: null });
-  assert.deepEqual(output.args, { winch_agent: "", winch_session: "ses_1" });
+  assert.deepEqual(output.args, { winch_agent: "", winch_session: "ses_1", winch_consumer: "" });
   const event = { tool: "winch_backlog_claim", sessionID: "ses_2", input: { winch_agent: "forged" } };
   stampWinchEvent(event, null);
   assert.equal(event.input.winch_agent, "");
   assert.equal(event.input.winch_session, "ses_2");
+  assert.equal(event.input.winch_consumer, "");
 });

@@ -92,12 +92,10 @@ The server routes `task.assigned`, `story.assigned`, `task.restored`,
 - Each delivery attempt is an `admission_attempts` row. A queued wake is
   POSTed to every dispatch subscription for its harness. `202` means the
   receiver accepted the request; it does **not** mean the work was claimed.
-- Before spawning a session, the receiver calls `POST /dispatch/accept` with
-  `{admissionId, attemptNo, consumerId, executorId}`. It always answers `200`
-  for a valid request: `{accepted: true}` for the winner, `{accepted: false}`
-  for a loser or stale attempt. The first consumer wins `offered -> accepted`;
-  the same consumer retry is idempotent. Only the winner starts a session. The
-  agent's MCP `backlog_claim` remains the final work guard.
+- Every consumer receives the wake. Each receiver deduplicates on
+  `admissionId + attemptNo`, then starts its session; the agent's MCP
+  `backlog_claim` is the one-winner guard, so losers stop without handling the
+  item. The winning claim records `consumerId` on the admission attempt.
 - The row becomes `active` when the item is claimed and closes when the item
   closes. Append and review wakes have no claim: one successful delivery is
   one-shot, and the offer TTL ends the row instead of retrying it.
@@ -147,12 +145,11 @@ status and exits non-zero if any fails.
 It returns:
 
 - `resume`: assigned `in_progress` work with `task`, `attemptId`,
-  `sessionId`, `sessionKey`, and `leaseExpiresAt`. An accepted wake records
-  the winning consumer; only that consumer gets its resume. Legacy active rows
-  with no recorded consumer are returned to the requester;
-- `start`: already-offered or accepted wakes plus queued wakes admitted into
-  free slots; a wake accepted by this consumer is returned so a restart can
-  retry it idempotently. If
+  `sessionId`, `sessionKey`, and `leaseExpiresAt`. The winning claim records
+  the consumer; only that consumer gets its resume. Legacy active rows with no
+  recorded consumer are returned to the requester;
+- `start`: already-offered wakes plus queued wakes admitted into free slots; a
+  consumer deduplicates them by `admissionId + attemptNo`. If
   existing offers exceed a cap (for example after a cap is lowered), the oldest
   offers are kept and the newest return to `queued` before the free-slot fill;
 - `free`: remaining capacity after active and offered work.
@@ -166,9 +163,8 @@ where normal wake and claim apply.
 
 - Accept `POST` on a stable URL reachable from the winch server.
 - Require the executor bearer; reject a mismatched or missing one.
-- Call `POST /dispatch/accept` before starting long work. Deduplicate on
-  `admissionId` + `attemptNo`; a duplicate or losing accept must not start a
-  session.
+- Deduplicate on `admissionId` + `attemptNo`; a duplicate wake must not start
+  a second local session.
 - Register on boot and re-register on every reconcile so the heartbeat stays
   fresh. Call `POST /dispatch/recover` after registering.
 

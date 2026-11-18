@@ -125,38 +125,6 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       void pump();
       return;
     }
-    if (req.method === "POST" && url.pathname === "/dispatch/accept") {
-      const body = await readJson(req, res);
-      if (body === undefined) return;
-      try {
-        const admissionId = String(body.admissionId ?? "").trim();
-        const consumerId = String(body.consumerId ?? "").trim();
-        const executorId = String(body.executorId ?? "").trim();
-        if (!admissionId || (!consumerId && !executorId)) {
-          json(res, 400, { ok: false, error: "accept requires admissionId and consumerId or executorId" });
-          return;
-        }
-        const at = Date.now();
-        store.admission.expire({
-          at,
-          offerMs: cfg.dispatchOfferMs,
-          baseBackoffMs: cfg.dispatchOfferBackoffMs,
-          maxBackoffMs: cfg.dispatchOfferMaxBackoffMs,
-          maxAttempts: cfg.dispatchOfferMaxAttempts,
-        });
-        const result = store.admission.accept({
-          id: admissionId,
-          attemptNo: body.attemptNo,
-          consumerId,
-          executorId,
-          at,
-        });
-        json(res, 200, { ...result, accepted: result.ok });
-      } catch (err) {
-        json(res, 400, { ok: false, error: String(err?.message ?? err) });
-      }
-      return;
-    }
     if (req.method === "POST" && url.pathname === "/dispatch/recover") {
       const body = await readJson(req, res);
       if (body === undefined) return;

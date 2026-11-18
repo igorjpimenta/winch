@@ -114,9 +114,9 @@ is the single scheduler:
 - It routes `task.assigned`, `story.assigned`, `task.restored`, `task.appended`
   (to the epic creator) and `epic.completed` (to the epic creator).
 - It writes each wake to `admission_queue`, then POSTs it to every registered
-  consumer for that harness. Before starting a session the receiver calls
-  `POST /dispatch/accept`; the first consumer wins, so duplicate wakes do not
-  start duplicate sessions. The agent's `backlog_claim` is the final guard.
+  consumer for that harness. Receivers deduplicate on `admissionId +
+  attemptNo`; the agent's `backlog_claim` picks the single winner, so duplicate
+  wakes never produce two handlers for one item.
 - An offer reserves capacity until it is claimed, closes, or expires. Failed
   deliveries and expired offers requeue with backoff; append/review wakes are
   one-shot and end on their TTL.
@@ -134,8 +134,8 @@ or bearer disables the receiver; see [Webhooks](docs/webhooks.md).
 
 `POST /dispatch/recover` returns assigned `in_progress` work with its
 `attemptId`, so a restarted harness resumes that attempt instead of
-re-claiming it. An accepted offer records the winning consumer, so only that
-consumer gets the resume; multiple consumers still share the harness. Its first call is `backlog_update` with the returned
+re-claiming it. The winning claim records its consumer, so only that consumer
+gets the resume; multiple consumers still share the harness. Its first call is `backlog_update` with the returned
 `attemptId`; a stale attempt gets `stale_claim`. Expired leases return work to
 `ready` through the normal sweep.
 

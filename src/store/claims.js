@@ -11,7 +11,7 @@ export function createClaimMethods({ core, apis }) {
   } = core;
 
   return {
-    claim({ id, agentId, harness = null, session = null, sessionKey = null, watchdogMs = null }) {
+    claim({ id, agentId, harness = null, session = null, sessionKey = null, watchdogMs = null, consumerId = null }) {
       const row = apis.item.get(id);
       if (!row || row.kind !== "task") return null;
       const parsed = splitSessionKey(sessionKey);
@@ -34,6 +34,16 @@ export function createClaimMethods({ core, apis }) {
           harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim", parentSessionId,
         });
         const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds });
+        if (consumerId) {
+          db.prepare(`
+            UPDATE admission_attempts SET consumer_id=?
+             WHERE ended_at IS NULL
+               AND admission_id IN (
+                 SELECT id FROM admission_queue
+                  WHERE item_id=? AND status IN ('offered','accepted') AND ended_at IS NULL
+               )
+          `).run(consumerId, id);
+        }
         const eventId = appendEvent({
           itemId: id, attemptId: attempt.id, sessionId: sess.id,
           fromStatus: "ready", toStatus: "in_progress", kind: "task.claimed",

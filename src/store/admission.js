@@ -89,7 +89,7 @@ export function createAdmissionApi({ core }) {
 
   function offers(harness) {
     return db.prepare(`SELECT * FROM admission_queue
-                        WHERE status IN ('offered','accepted') AND ended_at IS NULL
+                        WHERE status='offered' AND ended_at IS NULL
                           AND (harness=? OR harness='*')
                         ORDER BY created_at ASC, id ASC`).all(harness);
   }
@@ -114,44 +114,6 @@ export function createAdmissionApi({ core }) {
   function fail(id, at = now()) {
     endAttempts([id], at);
     db.prepare("UPDATE admission_queue SET status='expired' WHERE id=? AND status='offered' AND ended_at IS NULL").run(id);
-  }
-
-  function accept({ id, attemptNo = null, executorId = null, consumerId = null, at = now() }) {
-    const owner = consumerId || executorId || null;
-    if (!owner) return { ok: false, reason: "owner_required" };
-    const row = db.prepare("SELECT * FROM admission_queue WHERE id=? AND ended_at IS NULL").get(id);
-    if (!row) return { ok: false, reason: "not_found" };
-    const attempt = liveAttempt(id);
-    if (!attempt) return { ok: false, reason: "not_offered" };
-    if (attemptNo != null && Number(attemptNo) !== attempt.attempt_no) {
-      return { ok: false, reason: "stale_attempt", attemptNo: attempt.attempt_no };
-    }
-    if (row.status === "accepted") {
-      return attempt.consumer_id === owner
-        ? { ok: true, idempotent: true, attemptNo: attempt.attempt_no, consumerId: attempt.consumer_id }
-        : { ok: false, reason: "taken", attemptNo: attempt.attempt_no, consumerId: attempt.consumer_id };
-    }
-    if (row.status !== "offered") return { ok: false, reason: "not_offered" };
-
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const r = db.prepare(`
-        UPDATE admission_queue SET status='accepted'
-         WHERE id=? AND status='offered' AND ended_at IS NULL
-      `).run(id);
-      if (r.changes === 0) { db.exec("ROLLBACK"); return { ok: false, reason: "taken" }; }
-      const u = db.prepare(`
-        UPDATE admission_attempts
-           SET accepted_at=?, executor_id=COALESCE(?, executor_id), consumer_id=COALESCE(?, consumer_id)
-         WHERE admission_id=? AND attempt_no=? AND ended_at IS NULL
-      `).run(at, executorId, owner, id, attempt.attempt_no);
-      if (u.changes === 0) { db.exec("ROLLBACK"); return { ok: false, reason: "not_offered" }; }
-      db.exec("COMMIT");
-      return { ok: true, idempotent: false, attemptNo: attempt.attempt_no, consumerId: owner };
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
   }
 
   function requeue(id, at = now()) {
@@ -286,7 +248,6 @@ export function createAdmissionApi({ core }) {
     offers,
     markOffered,
     fail,
-    accept,
     requeue,
     activate,
     release,

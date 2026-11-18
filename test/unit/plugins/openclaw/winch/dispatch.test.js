@@ -11,10 +11,6 @@ test("recoverOnce wakes resume and start rows once", async () => {
   const calls = [];
   const server = http.createServer((req, res) => {
     res.setHeader("content-type", "application/json");
-    if (req.url === "/dispatch/accept") {
-      res.end(JSON.stringify({ ok: true, accepted: true, attemptNo: 1 }));
-      return;
-    }
     res.end(JSON.stringify({
       resume: [{ task: { id: "TASK-1", assignee_agent: "worker" }, attemptId: "a1" }],
       start: [{ admissionId: "ADM-1", itemId: "TASK-2", agent: "worker", kind: "task", attemptNo: 1 }],
@@ -44,7 +40,6 @@ test("receiver rejects a bad bearer and accepts a wake", async () => {
     api,
     bearer: "secret",
     wake: (frame) => { calls.push(frame); },
-    accept: async () => ({ accepted: true }),
     started: new Map(),
     logger: null,
   });

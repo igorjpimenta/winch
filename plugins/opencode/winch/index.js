@@ -21,9 +21,13 @@ function opencodeWake({ agent, message }) {
   });
 }
 
+function consumerIdFor(harness, cfg = {}) {
+  return cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
+}
+
 function start({ cfg = {}, harness, logger }) {
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
-  const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
+  const consumerId = consumerIdFor(harness, cfg);
   const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
     logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
@@ -52,13 +56,14 @@ export default {
     // SessionContext (the "context" hook event) carries both sessionID and
     // the session's agent; session.get() in this beta returns a projection
     // without agent, so the request hook is the reliable source.
+    const cfg = ctx.options ?? {};
+    const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
+    const consumerId = consumerIdFor(harness, cfg);
     const agents = new Map();
     let dispatch = null;
     const ensureDispatch = () => {
       if (dispatch) return;
-      const cfg = ctx.options ?? {};
       if (cfg.dispatchEnabled === false || process.env.WINCH_DISPATCH_ENABLED === "0") return;
-      const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
       dispatch = start({ cfg, harness, logger: console });
     };
     await ctx.session.hook("context", (event) => {
@@ -69,16 +74,17 @@ export default {
       const agent = agents.get(event.sessionID) ?? process.env.WINCH_AGENT ?? null;
       // Unconditional: unknown agent blanks the slot, the server refuses
       // rather than trusting whatever the model wrote there.
-      stampWinchEvent(event, agent);
+      stampWinchEvent(event, agent, consumerId);
     });
   },
   async server() {
-    const hooks = createWinchHooks();
+    const harness = process.env.WINCH_HARNESS ?? "opencode";
+    const consumerId = consumerIdFor(harness);
+    const hooks = createWinchHooks({ consumerId });
     let dispatch = null;
     const ensureDispatch = () => {
       if (dispatch) return;
       if (process.env.WINCH_DISPATCH_ENABLED === "0") return;
-      const harness = process.env.WINCH_HARNESS ?? "opencode";
       dispatch = start({ cfg: {}, harness, logger: console });
     };
     const origMessage = hooks["chat.message"];

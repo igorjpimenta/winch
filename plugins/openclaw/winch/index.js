@@ -3,6 +3,7 @@ import { buildWinchMeta } from "./meta.js";
 import { startDispatch } from "./dispatch.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
@@ -50,8 +51,9 @@ export default definePluginEntry({
   register: (api) => {
     const cfg = api.pluginConfig ?? {};
     const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
+    const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
     if (typeof api.on === "function") {
-      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness));
+      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness, consumerId));
     } else {
       api.logger.warn("winch: api.on unavailable; identity hook not registered");
     }

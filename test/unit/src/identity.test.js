@@ -87,6 +87,20 @@ test("resolveIdentity: incomplete base throws even with full meta", () => {
   );
 });
 
+test("resolveIdentity carries the optional consumer from the same channel", () => {
+  const meta = resolveIdentity({
+    base: BASE,
+    meta: { winch: { agent: "atlas", session: "ses_42", consumer: "langgraph:host" } },
+  });
+  assert.equal(meta.consumer, "langgraph:host");
+  const args = resolveIdentity({
+    base: BASE,
+    args: { winch_agent: "opencode", winch_session: "ses-9", winch_consumer: "opencode:host" },
+  });
+  assert.equal(args.consumer, "opencode:host");
+  assert.equal(resolveIdentity({ base: BASE, args: { winch_agent: "a", winch_session: "s" } }).consumer, null);
+});
+
 test("sessionKey format: harness:agent:session", () => {
   assert.equal(
     identitySessionKey({ harness: "test-harness", agent: "main", session: "s1" }),

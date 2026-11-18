@@ -179,40 +179,21 @@ test("stale dispatch registrations are pruned by last-seen", () => {
   assert.deepEqual(store.webhook.list({ topic: "dispatch" }).map((w) => w.id), ["c-new"]);
 });
 
-test("accept elects one consumer and is idempotent for that consumer", () => {
-  const { row } = seedAssigned();
-  observeEvent(row);
-  const [offer] = tick(store, { reachable: ["test"] });
-  const accepted = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
-  assert.equal(accepted.ok, true);
-  assert.equal(accepted.idempotent, false);
-
-  const again = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
-  assert.equal(again.ok, true);
-  assert.equal(again.idempotent, true);
-
-  const other = store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-b", executorId: "exec-b" });
-  assert.equal(other.ok, false);
-  assert.equal(other.reason, "taken");
-  assert.equal(store.admission.get(offer.id).status, "accepted");
-  const recovered = recover(store, { harness: "test", consumerId: "consumer-a" });
-  assert.ok(recovered.start.some((r) => r.admissionId === offer.id && r.status === "accepted"));
-});
-
-test("resume is scoped to the consumer that accepted the offer", () => {
+test("claim records the winning consumer for resume", () => {
   const { task, row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  store.admission.accept({ id: offer.id, attemptNo: offer.attempt_no, consumerId: "consumer-a", executorId: "exec-a" });
-  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s" });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s", consumerId: "consumer-a" });
   const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
   observeEvent(claimRow);
 
+  const attempt = store.db.prepare("SELECT consumer_id FROM admission_attempts WHERE admission_id=? ORDER BY attempt_no DESC LIMIT 1").get(offer.id);
+  assert.equal(attempt.consumer_id, "consumer-a");
   const mine = recover(store, { harness: "test", consumerId: "consumer-a" });
   assert.deepEqual(mine.resume.map((r) => r.task.id), [task.id]);
+  assert.equal(mine.resume[0].consumerId, "consumer-a");
   const other = recover(store, { harness: "test", consumerId: "consumer-b" });
   assert.deepEqual(other.resume, []);
-  assert.equal(mine.resume[0].consumerId, "consumer-a");
 });
 
 test("recover returns in-progress resume work and fills free slots", () => {
@@ -287,33 +268,6 @@ test("register and recover endpoints are available on the server", async () => {
   assert.equal(rec.status, 200);
   const body = await rec.json();
   assert.ok(Array.isArray(body.start));
-});
-
-test("dispatch accept endpoint elects one consumer", async () => {
-  srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
-  const base = `http://127.0.0.1:${srv.port}`;
-  const { row } = seedAssigned();
-  observeEvent(row);
-  const [offer] = tick(store, { reachable: ["test"] });
-  const accept = (consumerId, executorId) => fetch(`${base}/dispatch/accept`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ admissionId: offer.id, attemptNo: offer.attempt_no, consumerId, executorId }),
-  });
-
-  let res = await accept("consumer-a", "exec-a");
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).ok, true);
-
-  res = await accept("consumer-b", "exec-b");
-  assert.equal(res.status, 200);
-  const lost = await res.json();
-  assert.equal(lost.accepted, false);
-  assert.equal(lost.reason, "taken");
-
-  res = await accept("consumer-a", "exec-a");
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).idempotent, true);
 });
 
 test("dispatch registration is one row per consumer, with executor metadata", async () => {

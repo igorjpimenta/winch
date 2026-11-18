@@ -51,17 +51,6 @@ export async function registerExecutor({ baseUrl, harness, consumerId, executorI
   return res.json();
 }
 
-export async function acceptOffer({ baseUrl, admissionId, attemptNo, consumerId, executorId, timeoutMs = 5000 }) {
-  const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/accept`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ admissionId, attemptNo, consumerId, executorId }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`dispatch accept ${res.status}`);
-  return res.json();
-}
-
 export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger = console, timeoutMs = 5000 }) {
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/recover`, {
     method: "POST",
@@ -95,14 +84,6 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
     if (!row?.admissionId || !row?.itemId) continue;
     const key = `start:${row.admissionId}:${row.attemptNo ?? "none"}`;
     if (started.has(key)) continue;
-    let accepted;
-    try {
-      accepted = await acceptOffer({ baseUrl, admissionId: row.admissionId, attemptNo: row.attemptNo, consumerId, executorId, timeoutMs });
-    } catch (err) {
-      logger?.warn?.(`winch: accept ${row.itemId} failed: ${err?.message ?? err}`);
-      continue;
-    }
-    if (!accepted?.accepted) continue;
     started.set(key, now);
     Promise.resolve(wake({
       agent: row.agent,
@@ -157,23 +138,6 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, consume
       json(res, 202, { ok: true, admissionId: body.admissionId, duplicate: true });
       return;
     }
-    let accepted;
-    try {
-      accepted = await acceptOffer({
-        baseUrl,
-        admissionId: body.admissionId,
-        attemptNo: body.attemptNo,
-        consumerId: subscriptionId,
-        executorId,
-      });
-    } catch (err) {
-      json(res, 503, { error: `dispatch accept failed: ${err?.message ?? err}` });
-      return;
-    }
-    if (!accepted?.accepted) {
-      json(res, 202, { ok: true, admissionId: body.admissionId, accepted: false });
-      return;
-    }
     started.set(key, Date.now());
     Promise.resolve(wake({
       agent: body.agent,
@@ -185,7 +149,7 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, consume
       started.delete(key);
       logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`);
     });
-    json(res, 202, { ok: true, admissionId: body.admissionId, accepted: true });
+    json(res, 202, { ok: true, admissionId: body.admissionId });
   });
 
   const run = async () => {

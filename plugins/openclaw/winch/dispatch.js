@@ -43,7 +43,7 @@ function routeUrl(baseUrl) {
   return `${String(baseUrl).replace(/\/+$/, "")}${ROUTE_PATH}`;
 }
 
-export function registerReceiver({ api, bearer, wake, accept, started, logger = console }) {
+export function registerReceiver({ api, bearer, wake, started, logger = console }) {
   api.registerHttpRoute({
     path: ROUTE_PATH,
     auth: "plugin",
@@ -77,27 +77,18 @@ export function registerReceiver({ api, bearer, wake, accept, started, logger = 
         json(res, 202, { ok: true, admissionId: body.admissionId, duplicate: true });
         return;
       }
-      let accepted;
-      try {
-        accepted = await accept(body);
-      } catch (err) {
-        json(res, 503, { error: `dispatch accept failed: ${err?.message ?? err}` });
-        return;
-      }
-      if (accepted?.accepted) {
-        started?.set(key, now);
-        Promise.resolve(wake({
-          agent: body.agent,
-          message: body.itemId,
-          kind: body.kind,
-          admissionId: body.admissionId,
-          attemptNo: body.attemptNo,
-        })).catch((err) => {
-          started?.delete(key);
-          logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`);
-        });
-      }
-      json(res, 202, { ok: true, admissionId: body.admissionId, accepted: Boolean(accepted?.accepted) });
+      started?.set(key, now);
+      Promise.resolve(wake({
+        agent: body.agent,
+        message: body.itemId,
+        kind: body.kind,
+        admissionId: body.admissionId,
+        attemptNo: body.attemptNo,
+      })).catch((err) => {
+        started?.delete(key);
+        logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`);
+      });
+      json(res, 202, { ok: true, admissionId: body.admissionId });
     },
   });
 }
@@ -110,17 +101,6 @@ export async function registerExecutor({ baseUrl, harness, consumerId, executorI
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch register ${res.status}`);
-  return res.json();
-}
-
-export async function acceptOffer({ baseUrl, admissionId, attemptNo, consumerId, executorId, timeoutMs = 5000 }) {
-  const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/accept`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ admissionId, attemptNo, consumerId, executorId }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`dispatch accept ${res.status}`);
   return res.json();
 }
 
@@ -157,14 +137,6 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
     if (!row?.admissionId || !row?.itemId) continue;
     const key = `start:${row.admissionId}:${row.attemptNo ?? "none"}`;
     if (started.has(key)) continue;
-    let accepted;
-    try {
-      accepted = await acceptOffer({ baseUrl, admissionId: row.admissionId, attemptNo: row.attemptNo, consumerId, executorId, timeoutMs });
-    } catch (err) {
-      logger?.warn?.(`winch: accept ${row.itemId} failed: ${err?.message ?? err}`);
-      continue;
-    }
-    if (!accepted?.accepted) continue;
     started.set(key, now);
     Promise.resolve(wake({
       agent: row.agent,
@@ -199,14 +171,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
   const publicBaseUrl = cfg.dispatchPublicBaseUrl ?? process.env.WINCH_DISPATCH_PUBLIC_BASE_URL ?? "http://127.0.0.1:18789";
   const started = new Map();
 
-  const accept = (body) => acceptOffer({
-    baseUrl,
-    admissionId: body.admissionId,
-    attemptNo: body.attemptNo,
-    consumerId,
-    executorId,
-  });
-  registerReceiver({ api, bearer, wake, accept, started, logger });
+  registerReceiver({ api, bearer, wake, started, logger });
 
   const run = async () => {
     try {
