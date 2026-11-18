@@ -59,7 +59,9 @@ export async function deliverWake(store, row, { config = store.config, logger = 
   const failed = results.filter((r) => !r.ok);
   for (const r of failed) {
     logger?.warn?.(`winch: dispatch wake ${row.id} -> ${r.executorId} failed (${r.status || r.error})`);
-    if (r.status === 404 || r.status === 410) store.webhook.remove({ topic: "dispatch", id: r.id });
+    if (r.status === 0 || r.status === 404 || r.status === 410) {
+      store.webhook.remove({ topic: "dispatch", id: r.id });
+    }
   }
   if (delivered.length === 0) store.admission.fail(row.id, Date.now());
   return { ok: delivered.length > 0, delivered, failed };

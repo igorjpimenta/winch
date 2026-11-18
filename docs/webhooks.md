@@ -66,7 +66,8 @@ executor is metadata, so a consumer never needs a second webhook:
 Re-registering a consumer replaces its URL and refreshes `lastSeenAt`. Adapters
 re-register on every reconcile; the server drops a dispatch webhook whose
 `lastSeenAt` is older than `WINCH_DISPATCH_CONSUMER_TTL_MS` (default 90s). A
-`404` or `410` from a wake URL drops that row immediately. A legacy
+wake URL that cannot be reached, or answers `404`/`410`, drops that row
+immediately; the adapter re-registers on its next reconcile. A legacy
 executor-keyed row for the same executor is removed on the first consumer
 registration. Multiple consumers may share a harness; each gets the wake.
 

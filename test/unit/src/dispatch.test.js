@@ -172,6 +172,16 @@ test("delivery drops a webhook that answers 410", async () => {
   assert.equal(store.webhook.list({ topic: "dispatch" }).length, 0);
 });
 
+test("delivery drops a webhook that cannot be reached", async () => {
+  store.webhook.upsert({ topic: "dispatch", id: "exec-gone", harness: "test", executorId: "exec-gone", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, false);
+  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 0);
+});
+
 test("stale dispatch registrations are pruned by last-seen", () => {
   store.webhook.upsert({ topic: "dispatch", id: "c-old", harness: "test", url: "http://127.0.0.1:1/wake", bearer: "tok", at: 1000 });
   store.webhook.upsert({ topic: "dispatch", id: "c-new", harness: "test", url: "http://127.0.0.1:2/wake", bearer: "tok", at: 5000 });
