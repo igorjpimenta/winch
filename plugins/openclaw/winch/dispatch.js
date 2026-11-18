@@ -4,12 +4,8 @@
 // 202 immediately. A wake only starts a turn: the agent's MCP claim is the
 // work guard, so duplicate delivery is harmless.
 
-import fs from "node:fs";
-import crypto from "node:crypto";
-import os from "node:os";
-import path from "node:path";
-
 export const ROUTE_PATH = "/api/winch/dispatch";
+export const DEFAULT_DISPATCH_URL = "http://127.0.0.1:38291";
 const MAX_BODY_BYTES = 1024 * 1024;
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
 
@@ -41,29 +37,6 @@ function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
-}
-
-export function defaultStatePath() {
-  return path.join(os.homedir(), ".openclaw", "state", "winch-dispatch.json");
-}
-
-export function loadExecutorState(statePath = defaultStatePath()) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    if (typeof parsed?.executorId === "string" && parsed.executorId.trim()
-      && typeof parsed?.bearer === "string" && parsed.bearer.trim()) {
-      return { executorId: parsed.executorId.trim(), bearer: parsed.bearer.trim() };
-    }
-  } catch {
-    // first boot
-  }
-  const state = {
-    executorId: `openclaw-${crypto.randomUUID()}`,
-    bearer: crypto.randomBytes(32).toString("hex"),
-  };
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-  return state;
 }
 
 function routeUrl(baseUrl) {
@@ -172,31 +145,34 @@ export function resumePrompt(row) {
   return `Resume ${taskId} attempt ${attemptId}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}" and attemptId "${attemptId}", heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
 }
 
-export function startDispatch({ api, cfg = {}, wake, logger = console }) {
+export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, logger = console }) {
   if (cfg.dispatchEnabled === false) return null;
-  const harness = cfg.dispatchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
-  const baseUrl = cfg.dispatchUrl ?? process.env.WINCH_DISPATCH_URL ?? "http://127.0.0.1:38291";
+  const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
+  const bearer = process.env.WINCH_DISPATCH_BEARER;
+  if (!executorId || !bearer) {
+    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_DISPATCH_BEARER; receiver disabled");
+    return null;
+  }
+  const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
   const publicBaseUrl = cfg.dispatchPublicBaseUrl ?? process.env.WINCH_DISPATCH_PUBLIC_BASE_URL ?? "http://127.0.0.1:18789";
-  const statePath = cfg.dispatchStatePath ?? defaultStatePath();
-  const state = loadExecutorState(statePath);
   const started = new Map();
 
-  registerReceiver({ api, bearer: state.bearer, wake, logger });
+  registerReceiver({ api, bearer, wake, logger });
 
   const run = async () => {
     try {
       await registerExecutor({
         baseUrl,
         harness,
-        executorId: state.executorId,
+        executorId,
         url: routeUrl(publicBaseUrl),
-        bearer: state.bearer,
+        bearer,
       });
     } catch (err) {
       logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
     }
     try {
-      await recoverOnce({ baseUrl, harness, executorId: state.executorId, wake, started, logger });
+      await recoverOnce({ baseUrl, harness, executorId, wake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }
@@ -211,6 +187,6 @@ export function startDispatch({ api, cfg = {}, wake, logger = console }) {
     close() {
       if (timer) clearInterval(timer);
     },
-    get executorId() { return state.executorId; },
+    get executorId() { return executorId; },
   };
 }

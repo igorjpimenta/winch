@@ -5,10 +5,6 @@
 // delivery is harmless. The reconciler handles restarts.
 
 import http from "node:http";
-import crypto from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 export const DEFAULT_DISPATCH_URL = "http://127.0.0.1:38291";
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -42,29 +38,6 @@ function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
-}
-
-export function defaultStatePath() {
-  return path.join(os.homedir(), ".opencode", "state", "winch-dispatch.json");
-}
-
-export function loadExecutorState(statePath = defaultStatePath()) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    if (typeof parsed?.executorId === "string" && parsed.executorId.trim()
-      && typeof parsed?.bearer === "string" && parsed.bearer.trim()) {
-      return { executorId: parsed.executorId.trim(), bearer: parsed.bearer.trim() };
-    }
-  } catch {
-    // first boot
-  }
-  const state = {
-    executorId: `opencode-${crypto.randomUUID()}`,
-    bearer: crypto.randomBytes(32).toString("hex"),
-  };
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-  return state;
 }
 
 export async function registerExecutor({ baseUrl, harness, executorId, url, bearer, timeoutMs = 5000 }) {
@@ -131,8 +104,8 @@ export function resumePrompt(row) {
   return `Resume ${taskId} attempt ${attemptId}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}" and attemptId "${attemptId}", heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
 }
 
-export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, wake, statePath = defaultStatePath(), logger = console, host = "127.0.0.1", port = 0, reconcileMs = 30000 } = {}) {
-  const state = loadExecutorState(statePath);
+export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, executorId, bearer, wake, logger = console, host = "127.0.0.1", port = 0, reconcileMs = 30000 } = {}) {
+  if (!executorId || !bearer) throw new Error("dispatch needs an executor id and bearer");
   const started = new Map();
   let closed = false;
   let timer = null;
@@ -144,7 +117,7 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, wake, s
       return;
     }
     const auth = req.headers?.authorization ?? "";
-    if (!auth.startsWith("Bearer ") || auth.slice(7) !== state.bearer) {
+    if (!auth.startsWith("Bearer ") || auth.slice(7) !== bearer) {
       json(res, 401, { error: "unauthorized" });
       return;
     }
@@ -173,15 +146,15 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, wake, s
       await registerExecutor({
         baseUrl,
         harness,
-        executorId: state.executorId,
+        executorId,
         url: `http://${host}:${listener.address().port}/wake`,
-        bearer: state.bearer,
+        bearer,
       });
     } catch (err) {
       logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
     }
     try {
-      await recoverOnce({ baseUrl, harness, executorId: state.executorId, wake, started, logger });
+      await recoverOnce({ baseUrl, harness, executorId, wake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }
@@ -196,13 +169,13 @@ export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, wake, s
         timer = setInterval(() => { void run(); }, Number(reconcileMs));
         timer.unref?.();
       }
-      resolve({ port: listener.address().port, executorId: state.executorId });
+      resolve({ port: listener.address().port, executorId });
     });
   });
 
   return {
     ready,
-    get executorId() { return state.executorId; },
+    get executorId() { return executorId; },
     get port() { return listener?.address()?.port ?? null; },
     close() {
       closed = true;

@@ -1,6 +1,6 @@
 import { createWinchHooks } from "./hooks.js";
 import { stampWinchEvent } from "./identity.js";
-import { startDispatch, DEFAULT_DISPATCH_URL, defaultStatePath } from "./dispatch.js";
+import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
 import { spawn } from "node:child_process";
 
 function opencodeWake({ agent, message }) {
@@ -20,12 +20,19 @@ function opencodeWake({ agent, message }) {
   });
 }
 
-function start({ cfg, harness, logger }) {
+function start({ cfg = {}, harness, logger }) {
+  const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
+  const bearer = process.env.WINCH_DISPATCH_BEARER;
+  if (!executorId || !bearer) {
+    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_DISPATCH_BEARER; receiver disabled");
+    return null;
+  }
   const dispatch = startDispatch({
-    baseUrl: cfg.dispatchUrl ?? process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
+    baseUrl: process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
     harness,
+    executorId,
+    bearer,
     wake: opencodeWake,
-    statePath: cfg.dispatchStatePath ?? process.env.WINCH_DISPATCH_STATE_PATH ?? defaultStatePath(),
     port: Number(cfg.dispatchPort ?? process.env.WINCH_DISPATCH_PORT ?? 0),
     reconcileMs: Number(cfg.dispatchReconcileMs ?? process.env.WINCH_DISPATCH_RECONCILE_MS ?? 30000),
     logger,
@@ -48,7 +55,7 @@ export default {
       if (dispatch) return;
       const cfg = ctx.options ?? {};
       if (cfg.dispatchEnabled === false || process.env.WINCH_DISPATCH_ENABLED === "0") return;
-      const harness = cfg.dispatchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
+      const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
       dispatch = start({ cfg, harness, logger: console });
     };
     await ctx.session.hook("context", (event) => {

@@ -51,6 +51,7 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
+  webhook bearer                           generate a dispatch bearer
   webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
                                            register or replace a webhook endpoint
   webhook list [--harness H]              list webhook endpoints (bearer redacted)
@@ -239,8 +240,8 @@ export async function runCli(argv) {
 
     case "webhook": {
       const [sub, ...subRest] = rest;
-      if (!["register", "list", "revoke", "test"].includes(sub)) {
-        fail("usage: winch webhook (register|list|revoke|test) …");
+      if (!["bearer", "register", "list", "revoke", "test"].includes(sub)) {
+        fail("usage: winch webhook (bearer|register|list|revoke|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
@@ -254,6 +255,10 @@ export async function runCli(argv) {
           config: { type: "string" },
         },
       });
+      if (sub === "bearer") {
+        console.log(crypto.randomBytes(32).toString("hex"));
+        return;
+      }
       const store = openStore(loadConfig(values));
       try {
         if (sub === "list") {
@@ -273,8 +278,9 @@ export async function runCli(argv) {
           if (timeoutMs !== null && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
             fail(`winch: --timeout-ms must be a positive integer, got ${JSON.stringify(values["timeout-ms"])}`);
           }
-          const generated = !values.bearer;
-          const bearer = values.bearer ?? crypto.randomBytes(32).toString("hex");
+          const envBearer = (process.env.WINCH_DISPATCH_BEARER ?? "").trim();
+          const generated = !values.bearer && !envBearer;
+          const bearer = values.bearer || envBearer || crypto.randomBytes(32).toString("hex");
           const executorId = values.id ?? values.executor ?? manualExecutorId(values.url);
           const row = store.dispatch.upsert({ harness: values.harness, executorId, url: values.url, bearer, timeoutMs });
           console.log(JSON.stringify({

@@ -81,3 +81,12 @@ test("params is optional — a call with no params still gets stamped", () => {
   const out = buildWinchMeta({ toolName: "mcp__winch__backlog_claim" }, { agentId: "a", sessionKey: "s" });
   assert.equal(out.params._meta.winch.harness, "openclaw");
 });
+
+test("a configured harness feeds identity, not a hardcoded openclaw value", () => {
+  const out = buildWinchMeta(
+    { toolName: "mcp__winch__backlog_claim" },
+    { agentId: "scout", sessionKey: "ses_42" },
+    "custom-harness",
+  );
+  assert.equal(out.params._meta.winch.harness, "custom-harness");
+});

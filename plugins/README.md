@@ -36,9 +36,11 @@ carries no explicit extensions path; the browser-lease extension lives at
    @igorjpimenta/winch-openclaw`. From a checkout instead: copy or symlink
    `plugins/openclaw/winch/` into `~/.openclaw/extensions/winch/`.
    Set `dispatchPublicBaseUrl` (e.g. `http://127.0.0.1:18789`) if the gateway
-   port isn't detectable, and `dispatchHarness` if the winch MCP entry uses a
-   harness other than `openclaw`. The plugin generates its executor id and
-   bearer, persists them, and registers its wake route on boot.
+   port isn't detectable, and `winchHarness` if the winch MCP entry uses a
+   harness other than `openclaw`. Generate a bearer with
+   `winch webhook bearer`; set `WINCH_DISPATCH_BEARER` and a unique
+   `WINCH_EXECUTOR_ID` in the gateway/plugin environment. The adapter fails
+   closed if either is missing, then registers its wake route on boot.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -140,9 +142,10 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 ### Auto-wake dispatch (opencode)
 
 The opencode companion ships its own dispatch receiver
-(`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, generates
-a stable executor id and bearer, registers the listener with winch, and calls
-`POST /dispatch/recover` on startup and on its reconcile interval.
+(`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, registers
+with `WINCH_EXECUTOR_ID` and `WINCH_DISPATCH_BEARER`, and calls
+`POST /dispatch/recover` on startup and on its reconcile interval. Missing
+identity or bearer disables the receiver.
 
 A wake carries the opaque item id; the plugin starts a claimable `opencode run`
 session. Resume wakes carry the task id and `attemptId`, so the prompt fences
@@ -150,9 +153,11 @@ the session with `backlog_update` and `backlog_done` and never re-claims an
 `in_progress` item. Duplicate wakes are harmless because `backlog_claim` is
 the guard; the core treats `202` as delivery, not acceptance.
 
-The plugin config mirrors OpenClaw: `dispatchEnabled`, `dispatchUrl`,
-`dispatchHarness`, `dispatchReconcileMs`, `dispatchStatePath`, and a port for
-the loopback listener.
+The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
+`winchExecutorId`, `dispatchReconcileMs`, and a port for the loopback listener.
+`dispatchUrl` and the state path are gone; use `WINCH_DISPATCH_URL` and
+`WINCH_DISPATCH_BEARER` instead. OpenCode V1 reads only the environment; V2
+reads `ctx.options` first.
 
 ### Local (stdio) — the strong shape
 

@@ -14,29 +14,25 @@
         "type": "boolean",
         "description": "Accept wake webhooks and reconcile assigned in-progress work. Default true."
       },
-      "dispatchUrl": {
-        "type": "string",
-        "description": "Winch HTTP base URL, e.g. http://127.0.0.1:38291."
-      },
       "dispatchPublicBaseUrl": {
         "type": "string",
         "description": "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used to register the wake route."
-      },
-      "dispatchHarness": {
-        "type": "string",
-        "description": "Harness name registered in winch (must match WINCH_HARNESS). Default: openclaw."
       },
       "dispatchReconcileMs": {
         "type": "integer",
         "description": "Reconcile interval in milliseconds. Default: 30000."
       },
-      "dispatchStatePath": {
-        "type": "string",
-        "description": "File holding the stable executor id and bearer (default: ~/.openclaw/state/winch-dispatch.json)."
-      },
       "dispatchOpenclawBin": {
         "type": "string",
         "description": "OpenClaw CLI entry used to start a wake session (default: the shim beside the gateway entry)."
+      },
+      "winchHarness": {
+        "type": "string",
+        "description": "Harness name for identity and dispatch (must match WINCH_HARNESS). Default: openclaw."
+      },
+      "winchExecutorId": {
+        "type": "string",
+        "description": "Unique executor id for this connection. Default: WINCH_EXECUTOR_ID."
       }
     }
   }

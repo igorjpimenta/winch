@@ -4,20 +4,7 @@ import http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadExecutorState, startDispatch } from "./dispatch.js";
-
-test("opencode executor state is stable", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "winch-opencode-dispatch-"));
-  const statePath = path.join(dir, "state.json");
-  try {
-    const first = loadExecutorState(statePath);
-    const second = loadExecutorState(statePath);
-    assert.equal(first.executorId, second.executorId);
-    assert.equal(first.bearer, second.bearer);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+import { startDispatch } from "./dispatch.js";
 
 test("listener registers with core and accepts a wake", async () => {
   const registrations = [];
@@ -32,13 +19,13 @@ test("listener registers with core and accepts a wake", async () => {
   });
   await new Promise((r) => core.listen(0, "127.0.0.1", r));
   const dir = mkdtempSync(path.join(tmpdir(), "winch-opencode-dispatch-"));
-  const statePath = path.join(dir, "state.json");
   const calls = [];
   const dispatch = startDispatch({
     baseUrl: `http://127.0.0.1:${core.address().port}`,
     harness: "opencode",
+    executorId: "e1",
+    bearer: "secret",
     wake: (frame) => { calls.push(frame); },
-    statePath,
     logger: null,
     port: 0,
     reconcileMs: 0,
@@ -51,10 +38,9 @@ test("listener registers with core and accepts a wake", async () => {
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0].harness, "opencode");
     assert.match(registrations[0].url, /^http:\/\/127\.0\.0\.1:\d+\/wake$/);
-    const state = loadExecutorState(statePath);
     const ping = await fetch(registrations[0].url, {
       method: "POST",
-      headers: { authorization: `Bearer ${state.bearer}`, "content-type": "application/json" },
+      headers: { authorization: "Bearer secret", "content-type": "application/json" },
       body: JSON.stringify({ type: "ping" }),
     });
     assert.equal(ping.status, 200);
@@ -62,7 +48,7 @@ test("listener registers with core and accepts a wake", async () => {
 
     const res = await fetch(registrations[0].url, {
       method: "POST",
-      headers: { authorization: `Bearer ${state.bearer}`, "content-type": "application/json" },
+      headers: { authorization: "Bearer secret", "content-type": "application/json" },
       body: JSON.stringify({ type: "wake", admissionId: "ADM-1", itemId: "TASK-1", agent: "worker", kind: "task" }),
     });
     assert.equal(res.status, 202);

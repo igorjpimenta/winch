@@ -5,20 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { loadExecutorState, recoverOnce, registerReceiver, resumePrompt } from "./dispatch.js";
-
-test("executor state is stable and persisted", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "winch-openclaw-dispatch-"));
-  const statePath = path.join(dir, "state.json");
-  try {
-    const first = loadExecutorState(statePath);
-    const second = loadExecutorState(statePath);
-    assert.equal(first.executorId, second.executorId);
-    assert.equal(first.bearer, second.bearer);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+import { recoverOnce, registerReceiver, resumePrompt } from "./dispatch.js";
 
 test("recoverOnce wakes resume and start rows once", async () => {
   const calls = [];

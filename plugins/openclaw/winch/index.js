@@ -21,25 +21,21 @@ export default definePluginEntry({
         type: "boolean",
         description: "Accept wake webhooks and reconcile assigned in-progress work. Default true.",
       },
-      dispatchUrl: {
-        type: "string",
-        description: "Winch HTTP base URL, e.g. http://127.0.0.1:38291.",
-      },
       dispatchPublicBaseUrl: {
         type: "string",
         description: "Gateway address winch can reach, e.g. http://127.0.0.1:18789. Used to register the wake route.",
       },
-      dispatchHarness: {
+      winchHarness: {
         type: "string",
-        description: "Harness name registered in winch (must match WINCH_HARNESS). Default: openclaw.",
+        description: "Harness name for identity and dispatch (must match WINCH_HARNESS). Default: openclaw.",
+      },
+      winchExecutorId: {
+        type: "string",
+        description: "Unique executor id for this connection. Default: WINCH_EXECUTOR_ID.",
       },
       dispatchReconcileMs: {
         type: "integer",
         description: "Reconcile interval in milliseconds. Default: 30000.",
-      },
-      dispatchStatePath: {
-        type: "string",
-        description: "File holding the stable executor id and bearer (default: ~/.openclaw/state/winch-dispatch.json).",
       },
       dispatchOpenclawBin: {
         type: "string",
@@ -48,8 +44,10 @@ export default definePluginEntry({
     },
   }),
   register: (api) => {
+    const cfg = api.pluginConfig ?? {};
+    const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
     if (typeof api.on === "function") {
-      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx));
+      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness));
     } else {
       api.logger.warn("winch: api.on unavailable; identity hook not registered");
     }
@@ -59,7 +57,6 @@ export default definePluginEntry({
       api.registerService({
         id: "winch-dispatch",
         start: async () => {
-          const cfg = api.pluginConfig ?? {};
           if (cfg.dispatchEnabled === false) {
             api.logger.info("winch: dispatch disabled by config");
             return;
@@ -122,7 +119,7 @@ export default definePluginEntry({
               throw last;
             })();
           };
-          dispatch = startDispatch({ api, cfg, wake, logger: api.logger });
+          dispatch = startDispatch({ api, cfg, harness, wake, logger: api.logger });
         },
         stop: async () => {
           dispatch?.close();

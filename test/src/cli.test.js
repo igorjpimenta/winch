@@ -23,6 +23,13 @@ function runDb(dbPath, ...args) {
   });
 }
 
+function runDbWithEnv(dbPath, env, ...args) {
+  return spawnSync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
+    encoding: "utf8",
+    env: { ...process.env, WINCH_DB: dbPath, ...env },
+  });
+}
+
 function runDbAsync(dbPath, ...args) {
   return execFileAsync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
     encoding: "utf8",
@@ -166,6 +173,26 @@ test("webhook test pings each endpoint with its bearer", async () => {
     assert.deepEqual(seen[0].body, { type: "ping", harness: "myapp", executorId: "e1", at: seen[0].body.at });
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("webhook bearer prints a token without touching the store", () => {
+  const r = run("webhook", "bearer");
+  assert.equal(r.status, 0);
+  assert.match(r.stdout.trim(), /^[0-9a-f]{64}$/);
+});
+
+test("webhook register uses WINCH_DISPATCH_BEARER when --bearer is absent", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
+  const db = path.join(dir, "store.sqlite");
+  try {
+    const r = runDbWithEnv(db, { WINCH_DISPATCH_BEARER: "env-secret" }, "webhook", "register", "--harness", "myapp", "--id", "e-env", "--url", "http://127.0.0.1:9/wake");
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(r.stdout).bearer, "<set>");
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
