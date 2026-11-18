@@ -13,6 +13,7 @@ import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
 import { startEventServer } from "./events-ws.js";
+import { startDispatchServer } from "./dispatch-server.js";
 import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 
@@ -51,6 +52,7 @@ const USAGE = `usage: winch <command>
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
+  webhook serve [--port N] [--host H]     serve dispatch registration, recovery and the wake pump
   webhook bearer                           generate a dispatch bearer
   webhook register --harness H --url U [--id E] [--bearer B] [--timeout-ms N]
                                            register or replace a webhook endpoint
@@ -240,8 +242,8 @@ export async function runCli(argv) {
 
     case "webhook": {
       const [sub, ...subRest] = rest;
-      if (!["bearer", "register", "list", "revoke", "test"].includes(sub)) {
-        fail("usage: winch webhook (bearer|register|list|revoke|test) …");
+      if (!["serve", "bearer", "register", "list", "revoke", "test"].includes(sub)) {
+        fail("usage: winch webhook (serve|bearer|register|list|revoke|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
@@ -252,11 +254,34 @@ export async function runCli(argv) {
           id: { type: "string" },
           executor: { type: "string" },
           "timeout-ms": { type: "string" },
+          port: { type: "string" },
+          host: { type: "string" },
           config: { type: "string" },
         },
       });
       if (sub === "bearer") {
         console.log(crypto.randomBytes(32).toString("hex"));
+        return;
+      }
+      if (sub === "serve") {
+        const port = values.port ? Number(values.port) : undefined;
+        if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
+          fail(`winch: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
+        }
+        const store = openStore(loadConfig(values));
+        const logger = {
+          info: (...a) => console.error(...a),
+          warn: (...a) => console.error(...a),
+          error: (...a) => console.error(...a),
+        };
+        const host = values.host ?? "127.0.0.1";
+        try {
+          const srv = await startDispatchServer({ store, port, host, logger });
+          logger.info(`winch: dispatch on http://${host}:${srv.port} (webhooks; queue pump; lease sweep)`);
+        } catch (err) {
+          store.close();
+          fail(String(err?.message ?? err));
+        }
         return;
       }
       const store = openStore(loadConfig(values));

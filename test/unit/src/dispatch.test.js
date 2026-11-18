@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { createStore } from "../../../src/store/index.js";
-import { startEventServer, toEventMessage } from "../../../src/events-ws.js";
+import { toEventMessage } from "../../../src/events-ws.js";
+import { startDispatchServer } from "../../../src/dispatch-server.js";
 import { recover, observe, routesForEvent, tick } from "../../../src/dispatch.js";
 import { deliverWake } from "../../../src/dispatch-webhook.js";
 
@@ -178,7 +179,7 @@ test("recover returns in-progress resume work and fills free slots", () => {
 
 test("register and recover endpoints are available on the server", async () => {
   receiver = await wakeReceiver();
-  srv = await startEventServer({ store, port: 0, intervalMs: 20 });
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 20 });
   const base = `http://127.0.0.1:${srv.port}`;
   const reg = await fetch(`${base}/dispatch/register`, {
     method: "POST",

@@ -11,7 +11,8 @@ overrides starts with dispatch enabled.
 | Claim lease | `WINCH_LEASE_SECONDS` | 1800 (30 min) |
 | Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` | 24h / 72h |
-| WS port / history / poll / sweep | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` / `WINCH_WS_SWEEP_MS` | 38291 / 200 / 1000 / 30000 ms |
+| WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
+| Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
 | Offer TTL / base backoff / max backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
 | Dispatch webhook timeout | `WINCH_DISPATCH_WEBHOOK_TIMEOUT_MS` | 3000 ms |

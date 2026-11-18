@@ -55,7 +55,7 @@ Environment:
 |---|---|
 | `WINCH_EXECUTOR_ID` | unique executor id; required unless `winchExecutorId` is set |
 | `WINCH_DISPATCH_BEARER` | receiver token; generate with `winch webhook bearer` |
-| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38291` |
+| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 | `WINCH_DISPATCH_PUBLIC_BASE_URL` | fallback for `dispatchPublicBaseUrl` |
 
 Requires OpenClaw ≥ 2026.5.18 (declared as `openclaw.install.minHostVersion`).

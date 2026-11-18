@@ -34,6 +34,7 @@ test("resolveConfig with nothing declared returns the documented defaults", () =
     { ms: 72 * 3600 * 1000, label: "72h" },
   ]);
   assert.equal(cfg.wsPort, 38291);
+  assert.equal(cfg.dispatchPort, 38293);
   assert.equal(cfg.wsHistoryLimit, 200);
   assert.equal(cfg.maxActivePerAgent, 2);
   assert.equal(cfg.candidates, 5);

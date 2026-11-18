@@ -1,6 +1,6 @@
-// events-ws.js — read-only event pipe plus the HTTP dispatch endpoints.
+// events-ws.js — the read-only event pipe.
 // Tails the item_events ledger and broadcasts every new row; dispatch wakes
-// leave over executor webhooks, not this socket.
+// leave over executor webhooks served by dispatch-server.js, not this socket.
 //
 // Wire protocol (JSON text frames):
 //   server → client:
@@ -18,8 +18,6 @@ import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
 import { readyTasks } from "./ready-queue.js";
 import { HUMAN_AGENT } from "./reserved.js";
-import { observe, recover, tick as dispatchTick } from "./dispatch.js";
-import { deliverWake } from "./dispatch-webhook.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38291;
@@ -156,29 +154,6 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
   const clients = new Map();
   let closing = false;
   let cursor = lastEventId(store);
-  let pumping = false;
-  // The ws service is the only long-lived process winch guarantees, so it also
-  // sweeps expired leases; without this a crashed worker holds its task until
-  // a human runs the CLI.
-  const sweepMs = cfg.wsSweepMs ?? 30000;
-  const sweeper = sweepMs > 0
-    ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
-    : null;
-  sweeper?.unref?.();
-
-  store.admission.resetOffers();
-  // The queue survives a server restart; events written while it was down do
-  // not. Replay from the last admitted event, bounded to the history window on
-  // a fresh store so an old ledger cannot replay everything.
-  let since = store.admission.lastEventId();
-  if (!since) since = Math.max(0, cursor - histLimit);
-  for (;;) {
-    const rows = eventsSince(store, since, histLimit);
-    if (!rows.length) break;
-    for (const row of rows) observe(store, toEventMessage(store, row), Date.now());
-    since = rows[rows.length - 1].id;
-    if (since >= cursor) break;
-  }
 
   function send(socket, obj) {
     if (socket.destroyed || !socket.writable) return false;
@@ -202,80 +177,9 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
     }
   }
 
-  async function pump() {
-    if (pumping) return;
-    pumping = true;
-    try {
-      const offered = dispatchTick(store, {
-        at: Date.now(),
-        reachable: store.dispatch.harnesses(),
-        config: cfg,
-      });
-      for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
-    } catch (err) {
-      logger?.warn?.(`winch: dispatch pump failed: ${err?.message ?? err}`);
-    } finally {
-      pumping = false;
-    }
-  }
-
-  function json(res, status, body) {
-    res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify(body));
-  }
-
-  async function readJson(req, res) {
-    let size = 0;
-    let raw = "";
-    for await (const chunk of req) {
-      size += chunk.length;
-      if (size > 1024 * 1024) {
-        json(res, 413, { error: "body too large" });
-        return undefined;
-      }
-      raw += chunk;
-    }
-    if (!raw) return {};
-    try {
-      return JSON.parse(raw);
-    } catch {
-      json(res, 400, { error: "invalid json body" });
-      return undefined;
-    }
-  }
-
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (req.method === "POST" && url.pathname === "/dispatch/register") {
-      const body = await readJson(req, res);
-      if (body === undefined) return;
-      try {
-        const row = store.dispatch.upsert({
-          harness: body.harness,
-          executorId: body.executorId,
-          url: body.url,
-          bearer: body.bearer,
-          timeoutMs: body.timeoutMs ?? null,
-        });
-        json(res, 201, { ok: true, harness: row.harness, executorId: row.executorId });
-        void pump();
-      } catch (err) {
-        json(res, 400, { error: String(err?.message ?? err) });
-      }
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/dispatch/recover") {
-      const body = await readJson(req, res);
-      if (body === undefined) return;
-      try {
-        const result = recover(store, { harness: String(body.harness ?? "").trim(), at: Date.now(), config: cfg });
-        json(res, 200, result);
-      } catch (err) {
-        json(res, 400, { error: String(err?.message ?? err) });
-      }
-      return;
-    }
-    json(res, 404, { error: "not found" });
+  const server = http.createServer((req, res) => {
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
   });
 
   server.on("upgrade", (req, socket) => {
@@ -314,12 +218,9 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
       if (rows.length) {
         cursor = rows[rows.length - 1].id;
         for (const row of rows) {
-          const msg = toEventMessage(store, row);
-          broadcast(msg);
-          observe(store, msg, Date.now());
+          broadcast(toEventMessage(store, row));
         }
       }
-      void pump();
     } catch (err) {
       logger?.warn?.(`winch: event poll failed: ${err?.message ?? err}`);
     }
@@ -337,7 +238,6 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
           new Promise((res) => {
             closing = true;
             clearInterval(timer);
-            if (sweeper) clearInterval(sweeper);
             for (const client of clients.values()) client.socket.destroy();
             server.close(() => res());
           }),

@@ -4,9 +4,9 @@ Winch delivers dispatch wakes over HTTP. A receiver answers `202` (or any 2xx)
 to accept delivery; the agent's MCP `backlog_claim` remains the work guard, so
 duplicate wakes are safe.
 
-`winch serve --ws` starts both the HTTP dispatch endpoints and the read-only
-WebSocket feed. The flag name is historical: wakes leave over executor webhooks,
-not the socket. The event-stream contract is in [WebSocket event
+`winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
+and the wake pump. It is separate from `winch serve --ws`, which serves only the
+read-only event stream; that contract is in [WebSocket event
 stream](websocket.md).
 
 ## Routing
@@ -25,6 +25,16 @@ The server routes `task.assigned`, `story.assigned`, `task.restored`,
   requeues with exponential backoff. Offer TTL, backoff, attempts, per-harness
   cap and global cap are in [Configuration](configuration.md).
 
+## Serving
+
+The dispatch server listens on `WINCH_DISPATCH_PORT` (default `38293`) and
+localhost-only unless `--host` says otherwise:
+
+    winch webhook serve [--port N] [--host H]
+
+It also sweeps expired leases on `WINCH_DISPATCH_SWEEP_MS`. The read-only
+event stream is a separate process: `winch serve --ws`.
+
 ## Registration
 
 Each adapter exposes a wake route and registers its URL with a stable executor
@@ -40,7 +50,7 @@ The adapter environment supplies the identity:
 | `WINCH_HARNESS` | harness name; must match the MCP connection |
 | `WINCH_EXECUTOR_ID` | unique id for this executor; use a distinct value for every live connection |
 | `WINCH_DISPATCH_BEARER` | receiver token; generate with `winch webhook bearer` |
-| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38291` |
+| `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 
 Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_DISPATCH_BEARER` is
 missing. Plugin config can supply `winchHarness` and `winchExecutorId`; the

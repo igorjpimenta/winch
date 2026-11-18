@@ -135,6 +135,16 @@ test("plain HTTP hits get 404, not a hijacked upgrade", async () => {
   assert.equal(status, 404);
 });
 
+test("websocket server does not expose dispatch endpoints", async () => {
+  srv = await startEventServer({ store, port: 0, intervalMs: 50 });
+  const res = await fetch(`http://127.0.0.1:${srv.port}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(res.status, 404);
+});
+
 test("empty store: welcome id 0, empty history, still streams later rows", async () => {
   srv = await startEventServer({ store, port: 0, intervalMs: 50 });
   const ws = await connect(srv.port);
