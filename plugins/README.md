@@ -79,15 +79,15 @@ The winch server routes and the plugin receives. On boot the plugin registers
 `POST /api/winch/dispatch` and reconciles once; every
 `dispatchReconcileMs` (default 30s) it calls `POST /dispatch/recover` and
 resumes assigned `in_progress` work. A wake carries the opaque item id, or a
-`resume` wake carries the task id and `attemptId`; the row's `kind` says
-whether to claim, break down, or review. The session is started through the
-gateway's own CLI entry (`agent --session-key agent:<agent>:winch:<id>`),
+`resume` wake carries the task id, `attemptId`, `leaseEpoch`, and owner; the
+row's `kind` says whether to claim, break down, or review. The session is
+started through the gateway's own CLI entry (`agent --session-key agent:<agent>:winch:<id>`),
 because the host only lets bundled plugins schedule turns in-process.
 
 Routing, one row per decision:
 
-- `task.assigned` → the assignee (never the planner itself)
-- `story.assigned` → the story owner, to append its tasks
+- `task.created` / `task.assigned` / `task.released` / `task.restored` / `gate.resolved` → the assignee (never the planner itself)
+- `story.created` / `story.assigned` → the story owner, to append its tasks
 - `task.appended` → the epic's creator, to route the new work
 - a close (`done`/`cancelled`) → every assigned task the envelope reports as
   `unblocked`, so dependents start without a scheduler
@@ -125,20 +125,22 @@ Tasks use `backlog_claim`; the claim records `consumerId`, `ownerInstance`, and
 missing or stale epoch. An unaccepted planner wake requeues at the offer TTL.
 
 The admission queue holds an offer until it is claimed, closes, or expires;
-failed deliveries and expired offers requeue with backoff. Append/review wakes
-are one-shot. Tasks still use `backlog_claim` as the work-level guard; the
-active-consumer lease is the guard for wakes with no claim.
+failed deliveries and expired offers requeue with backoff. Story/append/review
+wakes are one-shot only after `backlog_accept_wake`; an unaccepted offer
+requeues. Tasks still use `backlog_claim` as the work-level guard; the accepted
+execution lease is the guard for wakes with no claim.
 
 ## Restart recovery
 
 The core query is `POST /dispatch/recover`; it returns assigned `in_progress`
-work with `attemptId`, `sessionId`, `sessionKey` and lease expiry. The winning
-claim records its consumer on the work attempt, so only that consumer gets the
-resume. A legacy claim with no owner falls back to the active dispatch lease
-holder. The plugin dedupes by task id and resumes the same attempt. Its first
-action is `backlog_update` with the returned `attemptId`; a stale attempt gets
-`stale_claim`, and only an expired lease returns the item to `ready` for a
-normal wake and claim.
+work with `attemptId`, `leaseEpoch`, `ownerInstance`, `sessionId`, `sessionKey`
+and lease expiry. The winning claim records its consumer on the work attempt,
+so only that consumer gets the resume. A legacy claim with no owner falls back
+to the active dispatch lease holder, and fails closed if there is no holder.
+The plugin dedupes by task id and resumes the same attempt. Its first action is
+`backlog_update` with the returned `attemptId` and `leaseEpoch`; a stale attempt
+or epoch gets `stale_claim`, and only an expired lease returns the item to
+`ready` for a normal wake and claim.
 
 ## opencode
 
@@ -171,10 +173,10 @@ identity or bearer disables the receiver.
 
 A wake carries the opaque item id; the plugin starts a claimable `opencode run`
 session after local dedupe by `admissionId + attemptNo`, and only when
-`execution` is `"active"`. Resume wakes carry the task id and `attemptId`, so
-the prompt fences the session with `backlog_update` and `backlog_done` and
-never re-claims an `in_progress` item. `202` is delivery; the claim or the
-active lease picks the winner.
+`execution` is `"active"`. Resume wakes carry the task id, `attemptId`,
+`leaseEpoch`, and owner, so the prompt fences the session with
+`backlog_update` and `backlog_done` and never re-claims an `in_progress` item.
+`202` is delivery; the task claim or planner acceptance picks the winner.
 
 The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
 `winchConsumerId`, `winchExecutorId`, `dispatchReconcileMs`, and a port for the

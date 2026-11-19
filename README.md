@@ -76,17 +76,19 @@ them from the running server.
   events; its frame protocol is in [WebSocket event
   stream](docs/websocket.md).
 - The **Dispatch server** (`winch webhook serve`) accepts executor
-  registration and recovery, pumps `admission_queue`, and POSTs wakes to
-  consumer webhooks. The agent's MCP `backlog_claim` accepts the work.
+  registration and recovery, pumps `admission_queue`, and fans wakes out to
+  consumer webhooks. Tasks accept with MCP `backlog_claim`; planner wakes accept
+  with `backlog_accept_wake`.
 - **Harness adapters** (`@igorjpimenta/winch-openclaw`, `@igorjpimenta/winch-opencode`)
   stamp identity, checkpoint on turn end (OpenClaw), receive dispatch webhooks
   on a plugin-local listener, and reconcile assigned `in_progress` work after a
   restart.
 
     harness agent --MCP (stdio | HTTP + X-Winch-Harness)--> MCP server --> SQLite store
-                                                              |  dispatch webhook
+                                                              |
+                                                    admission_queue / delivery ledger
                                                               v
-                                                        wake -> plugin listener -> agent
+                         dispatch server --> consumer webhook --> plugin listener --> agent
 
 ## Identity
 
@@ -111,8 +113,10 @@ stamping automatically. Full contract, per-dimension table and adapter setup:
 `winch serve --ws` hosts only the read-only event stream. The dispatch server
 is the single scheduler:
 
-- It routes `task.assigned`, `story.assigned`, `task.restored`, `task.appended`
-  (to the epic creator) and `epic.completed` (to the epic creator).
+- It routes work-making transitions: `task.created`, `task.assigned`,
+  `task.released`, `task.restored`, `gate.resolved`, `story.created`,
+  `story.assigned`, `task.appended` (to the epic creator), and
+  `epic.completed` (to the epic creator).
 - It writes each wake to `admission_queue`, creates a stable `dispatch_events`
   row, one delivery row per consumer, and a per-attempt audit row. The payload
   names one `execution: "active"` consumer and marks the rest `standby`; only
@@ -355,16 +359,16 @@ new row to all connected clients as JSON text frames:
   `winch webhook serve` process; see [Webhooks](docs/webhooks.md) and
   [WebSocket event stream](docs/websocket.md).
 
-Kinds on the wire come in three families - `task.*` for task lifecycle,
-`gate.*` for gate lifecycle, `release.*` for shipment - each declared by its
-producer at write time and stored on the row's `kind` column. A shipped row
+Kinds are declared by their producer at write time and stored on the row's
+`kind` column. Structural inference covers `task.*` and `gate.*`; producers
+also write `story.assigned`, `deps.*`, and `release.shipped`. A shipped row
 asserts a tag exists: merge-detect tags first and writes nothing on tag
 failure. The emitter feeds the stored kind straight through; otherwise a row
 maps by transition structure alone. Notes never classify anything: they are
 free text and can change, so pre-kind rows keep exactly the meanings they
 streamed with - an append-only log keeps its history.
-The closed catalog lives in `src/events-ws.js` and is named here by family
-only, so the two cannot drift. History and live rows share one envelope shape.
+The structural mapping lives in `src/events-ws.js`; stored producer kinds pass
+through unchanged. History and live rows share one envelope shape.
 
 Delivery-dynamics notes the wire will not tell you: heartbeats renew the claim
 lease (only silence gets swept); an unmerged close dissolves its gate (late
@@ -390,7 +394,8 @@ winch's, not the launching harness's.
 Schema lives in `src/schema.js` as Drizzle tables. The schema is one recursive
 `items` tree (`kind` = epic/story/task, `parent_id` for nesting), with
 `item_state`, `item_tags`, `item_edges`, `attempts`, `work_sessions`,
-`artifacts`, `item_events`, `admission_queue`, `admission_attempts` and
+`artifacts`, `item_events`, `admission_queue`, `admission_attempts`,
+`dispatch_events`, `dispatch_deliveries`, `dispatch_delivery_attempts` and
 `webhooks`. Item ids are opaque; `kind`
 is the discriminator, never an id prefix. `npm run db:generate`
 turns schema changes into SQL in `.migrations/`; `src/db.js` applies pending

@@ -67,11 +67,12 @@ recomputing the dependency graph.
 
 ## Kinds
 
-`kind` comes in three families: `task.*` for task lifecycle, `gate.*` for gate
-lifecycle, and `release.*` for shipment. The producer declares the kind at write
-time and it is stored on the row; a stored kind wins over structural inference.
+The producer declares `kind` at write time and it is stored on the row; a
+stored kind wins over structural inference. Structural inference covers `task.*`
+and `gate.*`; producers also write `story.assigned`, `deps.*`, and
+`release.shipped`.
 Notes are free text and never classify anything, so renaming a note cannot
-rewrite history. The closed catalog lives in `src/events-ws.js`.
+rewrite history. Structural inference lives in `src/events-ws.js`.
 
 ## Reconnect and retention
 

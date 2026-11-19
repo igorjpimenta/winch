@@ -116,8 +116,10 @@ missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
 
 ## Dispatch routing
 
-The server routes `task.assigned`, `story.assigned`, `task.restored`,
-`task.appended` and `epic.completed` into `admission_queue`.
+The server routes work-making transitions into `admission_queue`:
+`task.created`, `task.assigned`, `task.released`, `task.restored`,
+`gate.resolved`, `story.created`, `story.assigned`, `task.appended` (to the
+epic creator), and `epic.completed` (to the epic creator).
 
 - Each dispatch attempt has a stable `dispatch_events` row, one
   `dispatch_deliveries` row per consumer, and a `dispatch_delivery_attempts`
@@ -147,6 +149,31 @@ The server routes `task.assigned`, `story.assigned`, `task.restored`,
   lease, so two servers cannot send the same row concurrently. Offer TTL,
   delivery backoff, attempts, per-harness cap and global cap are in
   [Configuration](configuration.md).
+
+## Delivery and execution states
+
+```mermaid
+flowchart LR
+  E[event or assignment] --> Q[admission queued]
+  Q -->|offer| O[attempt offered]
+  O -->|fan out| A[delivery: active]
+  O -->|fan out| S[delivery: standby]
+  A -->|2xx| AD[delivered]
+  A -->|5xx / timeout| AR[pending / backoff] --> A
+  A -->|4xx or attempts exhausted| AX[dead]
+  AD -->|task: backlog_claim| T[in_progress<br/>owner + epoch]
+  AD -->|planner: backlog_accept_wake| P[accepted<br/>epoch]
+  AD -->|no accept, lease expiry| PR[promote standby<br/>epoch + 1]
+  PR --> A
+  T -->|close| D[done]
+  P -->|close| D
+  T -->|lease expires| Q
+  P -->|accepted TTL| D
+```
+
+`dead` is a delivery outcome, not a task outcome: it is visible in
+`winch webhook deliveries --status dead`, and a standby can still be promoted
+from the same attempt.
 
 ## Wake payload
 

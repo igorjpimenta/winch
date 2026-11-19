@@ -60,12 +60,12 @@ export function eventsLatest(store, limit = HISTORY_LIMIT) {
   return store.event.latest(limit);
 }
 
-// Stable kind for a stored transition. The closed catalog lives here, in
-// one place — task.*: created, claimed, progressed, completed, released,
-// blocked, cancelled, updated; gate.*: opened, resolved, dissolved — and
-// the README names it by family only so the two cannot drift. A stored
-// `kind` wins; otherwise the row maps by transition structure alone. Notes
-// are free text and can change, so no branch here may read note content —
+// Stable kind for a stored transition. Structural inference covers task.*
+// (created, claimed, progressed, completed, released, blocked, cancelled,
+// updated) and gate.* (opened, resolved, dissolved); producers may store
+// story.*, deps.* and release.*. A stored `kind` wins; otherwise the row maps
+// by transition structure alone. Notes are free text and can change, so no
+// branch here may read note content —
 // a renamed note must never reclassify history.
 //
 // Pre-standardization rows still carry `todo` as a task status; map it with
