@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/winch-openclaw",
-  "version": "2026.11.18-beta.2",
+  "version": "2026.11.19-beta.1",
   "description": "OpenClaw companion for winch: stamps caller identity on winch MCP tool calls, receives HTTP dispatch wakes, and reconciles in-progress work.",
   "license": "MIT",
   "type": "module",
@@ -28,7 +28,7 @@
     }
   },
   "dependencies": {
-    "@igorjpimenta/winch": "^2026.11.18-beta.2"
+    "@igorjpimenta/winch": "^2026.11.19-beta.1"
   },
   "peerDependencies": {
     "openclaw": ">=2026.5.18"
