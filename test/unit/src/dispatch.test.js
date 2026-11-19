@@ -131,6 +131,23 @@ test("in_progress activates and done releases the slot", () => {
   assert.equal(store.admission.slotCount("test"), 0);
 });
 
+test("completion wakes the unblocked task, not the completed task", () => {
+  const first = seedAssigned({ agent: "worker" });
+  const second = seedAssigned({ agent: "worker" });
+
+  store.task.claim({ id: first.task.id, agentId: "worker", harness: "test", session: "s" });
+  store.task.update(first.task.id, { status: "done", result_summary: "ok", actor: "worker" });
+
+  const live = store.db.prepare("SELECT item_id FROM admission_queue WHERE ended_at IS NULL").all();
+  assert.equal(live.some((row) => row.item_id === first.task.id), false, "a completed item must not be re-admitted");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM admission_attempts WHERE admission_id IN (SELECT id FROM admission_queue WHERE item_id=?) AND ended_at IS NULL").get(first.task.id).n, 0);
+  assert.ok(live.some((row) => row.item_id === second.task.id), "ready work remains admitted");
+
+  store.task.claim({ id: second.task.id, agentId: "worker", harness: "test", session: "s" });
+  store.task.update(second.task.id, { status: "done", result_summary: "ok", actor: "worker" });
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM admission_queue WHERE ended_at IS NULL").get().n, 0);
+});
+
 test("an expired offer releases capacity and retries with backoff", () => {
   const { row } = seedAssigned();
   observeEvent(row);

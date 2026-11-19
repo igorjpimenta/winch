@@ -21,9 +21,9 @@ export function routesForEvent(ev) {
   const item = ev?.item;
   if (!item?.id) return out;
 
-  const addTask = (agent, harness, reason) => {
+  const addTask = (itemId, agent, harness, reason) => {
     if (!agent) return;
-    add(out, item.id, "task", agent, harness, reason);
+    add(out, itemId, "task", agent, harness, reason);
   };
 
   switch (ev.kind) {
@@ -32,7 +32,7 @@ export function routesForEvent(ev) {
     case "task.released":
     case "gate.resolved": {
       if (item.status !== "ready") break;
-      addTask(item.assigned, item.assigneeHarness, ev.kind);
+      addTask(item.id, item.assigned, item.assigneeHarness, ev.kind);
       break;
     }
     case "story.created":
@@ -43,7 +43,7 @@ export function routesForEvent(ev) {
     }
     case "task.restored": {
       if (item.status !== "ready") break;
-      addTask(item.assigned, item.assigneeHarness, ev.kind);
+      addTask(item.id, item.assigned, item.assigneeHarness, ev.kind);
       break;
     }
     case "task.appended": {
@@ -65,7 +65,7 @@ export function routesForEvent(ev) {
   }
 
   for (const u of ev?.unblocked ?? []) {
-    addTask(u.assigned, u.assigneeHarness, "unblocked");
+    addTask(u.id, u.assigned, u.assigneeHarness, "unblocked");
   }
   const seen = new Set();
   return out.filter((r) => {
