@@ -17,6 +17,11 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const sweepMs = cfg.dispatchSweepMs ?? 30000;
   const consumerTtlMs = cfg.dispatchConsumerTtlMs ?? 90000;
   const histLimit = cfg.wsHistoryLimit ?? HISTORY_LIMIT;
+  const authToken = String(process.env.WINCH_DISPATCH_TOKEN ?? "").trim() || null;
+  const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
+  if (!loopback && !authToken) {
+    throw new Error("winch: dispatch server refuses a non-loopback host without WINCH_DISPATCH_TOKEN");
+  }
   let closing = false;
   let pumping = false;
 
@@ -49,6 +54,12 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   function json(res, status, body) {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
+  }
+
+  function unauthorized(req) {
+    if (!authToken) return false;
+    const auth = req.headers?.authorization ?? "";
+    return auth !== `Bearer ${authToken}`;
   }
 
   async function readJson(req, res) {
@@ -93,6 +104,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (req.method === "POST" && url.pathname === "/dispatch/register") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
@@ -100,6 +112,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
         const executorId = typeof body.executorId === "string" ? body.executorId.trim() : "";
         const consumerId = typeof body.consumerId === "string" ? body.consumerId.trim() : "";
         const instanceId = typeof body.instanceId === "string" ? body.instanceId.trim() : "";
+        const fresh = body.fresh === true;
         if (!harness || (!consumerId && !executorId)) throw new Error("dispatch registration requires harness and consumerId or executorId");
         const id = consumerId || executorId;
         const row = store.webhook.upsert({
@@ -112,6 +125,8 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           bearer: body.bearer,
           timeoutMs: body.timeoutMs ?? null,
           leaseMs: consumerTtlMs,
+          managed: true,
+          fresh,
         });
         if (executorId && id !== executorId) {
           const legacy = store.webhook.get({ topic: "dispatch", id: executorId });
@@ -125,7 +140,11 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
         void pump();
       } catch (err) {
         if (err instanceof StaleRegistrationError || err?.code === "stale_instance") {
-          json(res, 409, { error: String(err.message ?? err), code: "stale_instance", current: err.current ?? null });
+          const current = err.current
+            ? { instanceId: err.current.instanceId ?? null, generation: err.current.generation ?? null,
+                state: err.current.state ?? null, leaseUntil: err.current.leaseUntil ?? null }
+            : null;
+          json(res, 409, { error: String(err.message ?? err), code: "stale_instance", current });
         } else {
           json(res, 400, { error: String(err?.message ?? err) });
         }
@@ -133,12 +152,14 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       return;
     }
     if (req.method === "POST" && url.pathname === "/dispatch/notify") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       req.resume();
       json(res, 202, { ok: true });
       void pump();
       return;
     }
     if (req.method === "POST" && url.pathname === "/dispatch/recover") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {

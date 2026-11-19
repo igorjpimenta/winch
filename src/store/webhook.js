@@ -47,6 +47,7 @@ function toWebhook(row) {
     lastError: row.last_error,
     disabledAt: row.disabled_at,
     leaseUntil: row.lease_until,
+    managed: Boolean(row.managed),
   };
 }
 
@@ -57,12 +58,15 @@ export function createWebhookApi({ core }) {
     upsert({
       topic, id, harness = null, executorId = null, instanceId = null,
       url, bearer, timeoutMs = null, at = now(), leaseMs = DEFAULT_LEASE_MS,
+      managed = false, fresh = false,
     }) {
       const t = required(topic, "a topic");
       const i = required(id, "an id");
       const h = optional(harness, "harness");
       const e = optional(executorId, "executorId");
-      const inst = optional(instanceId, "instanceId") ?? e ?? i;
+      const explicitInstance = optional(instanceId, "instanceId");
+      const isManaged = managed === true || explicitInstance != null;
+      const inst = explicitInstance ?? e ?? i;
       if (!Number.isInteger(leaseMs) || leaseMs <= 0) throw new Error("webhook leaseMs must be a positive integer");
       let u;
       try { u = new URL(url); } catch { throw new Error(`invalid webhook url: ${JSON.stringify(url)}`); }
@@ -76,23 +80,35 @@ export function createWebhookApi({ core }) {
         throw new Error(`webhook timeoutMs must be a positive integer, got ${JSON.stringify(timeoutMs)}`);
       }
       const existing = api.get({ topic: t, id: i });
-      if (existing?.instanceId && existing.instanceId !== inst && existing.state !== "disabled"
-          && (existing.leaseUntil ?? 0) > at) {
+      if (isManaged && existing?.managed && existing.instanceId && existing.instanceId !== inst
+          && existing.state !== "disabled" && (existing.leaseUntil ?? 0) > at) {
         throw new StaleRegistrationError(existing);
       }
       const generation = existing
-        ? existing.generation + (existing.instanceId && existing.instanceId !== inst ? 1 : 0)
+        ? existing.generation + (isManaged && existing.instanceId && existing.instanceId !== inst ? 1 : 0)
         : 0;
+      // A heartbeat refreshes the lease; it must not erase a failure or
+      // re-enable a disabled endpoint. Only a fresh process start (or an
+      // explicit CLI registration) resets the state.
+      const state = fresh ? "active" : (existing?.state ?? "active");
+      const failureCount = fresh ? 0 : (existing?.failureCount ?? 0);
+      const lastError = fresh ? null : (existing?.lastError ?? null);
+      const disabledAt = fresh ? null : (existing?.disabledAt ?? null);
+      const managedValue = isManaged ? 1 : (existing?.managed ? 1 : 0);
+      const instanceValue = isManaged ? inst : (existing?.instanceId ?? null);
+      const leaseUntil = managedValue ? at + leaseMs : null;
       db.prepare(`
         INSERT INTO webhooks(topic, id, harness, executor_id, url, bearer, timeout_ms, created_at, updated_at, last_seen_at,
-                             instance_id, generation, state, failure_count, last_error, disabled_at, lease_until)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, NULL, NULL, ?)
+                             instance_id, generation, state, failure_count, last_error, disabled_at, lease_until, managed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(topic, id) DO UPDATE SET harness=excluded.harness, executor_id=excluded.executor_id,
           url=excluded.url, bearer=excluded.bearer, timeout_ms=excluded.timeout_ms,
           updated_at=excluded.updated_at, last_seen_at=excluded.last_seen_at,
           instance_id=excluded.instance_id, generation=excluded.generation,
-          state='active', failure_count=0, last_error=NULL, disabled_at=NULL, lease_until=excluded.lease_until
-      `).run(t, i, h, e, u.toString(), bearer, timeoutMs ?? null, at, at, at, inst, generation, at + leaseMs);
+          state=excluded.state, failure_count=excluded.failure_count, last_error=excluded.last_error,
+          disabled_at=excluded.disabled_at, lease_until=excluded.lease_until, managed=excluded.managed
+      `).run(t, i, h, e, u.toString(), bearer, timeoutMs ?? null, at, at, at, instanceValue, generation,
+        state, failureCount, lastError, disabledAt, leaseUntil, managedValue);
       return api.get({ topic: t, id: i });
     },
 
@@ -151,7 +167,9 @@ export function createWebhookApi({ core }) {
     },
 
     prune({ topic, before = now() } = {}) {
-      return db.prepare("DELETE FROM webhooks WHERE topic=? AND last_seen_at < ?")
+      // Disabled rows are retained as audit evidence. Manual subscriptions have
+      // no heartbeat and must not be swept just because traffic is quiet.
+      return db.prepare("DELETE FROM webhooks WHERE topic=? AND managed=1 AND state != 'disabled' AND last_seen_at < ?")
         .run(required(topic, "a topic"), Number(before)).changes;
     },
 

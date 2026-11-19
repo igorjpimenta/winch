@@ -15,13 +15,15 @@ stream](websocket.md).
 
 The core stores subscriptions in `webhooks`, keyed by `(topic, id)`.
 `harness` and `executor_id` are optional target metadata, so one id can carry
-independent endpoints for different purposes. A dispatch subscription is a
-lease: one live instance owns the route, and another instance may take over
-only after the lease expires.
+independent endpoints for different purposes. A managed dispatch subscription
+is a lease: one live instance owns the route, and another instance may take over
+only after the lease expires. Manual `winch webhook register` rows are stable
+subscriptions, not leases; they have no heartbeat and are never swept.
 
     winch webhook bearer
     winch webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
     winch webhook list [--topic T] [--harness H]
+    winch webhook deliveries [--status S] [--admission ID] [--consumer ID] [--limit N]
     winch webhook revoke [--topic T] --id I
     winch webhook test [--topic T] [--harness H] [--id I]
 
@@ -33,8 +35,11 @@ later `list` output redacts it. The bearer is sent as
 `Authorization: Bearer …` on every delivery.
 
 `list` shows every topic unless `--topic` is given, including disabled rows.
+`deliveries` reads the per-consumer ledger; `--status dead` is the dead-letter
+view, and `--admission` scopes it to one wake across retries.
 `revoke` and `test` default to `dispatch`; `test` pings every subscription in
-the selected topic or id.
+the selected topic or id. A managed row is `managed: true`; manual rows are
+`managed: false` and retained regardless of last-seen.
 
 ## Serving
 
@@ -43,8 +48,12 @@ localhost-only unless `--host` says otherwise:
 
     winch webhook serve [--port N] [--host H]
 
-It also sweeps expired leases on `WINCH_DISPATCH_SWEEP_MS`. The read-only
-event stream is a separate process: `winch serve --ws`.
+It also sweeps expired managed leases on `WINCH_DISPATCH_SWEEP_MS`. Disabled
+rows are retained for audit; manual rows are never swept. The read-only event
+stream is a separate process: `winch serve --ws`.
+
+Management endpoints accept `Authorization: Bearer $WINCH_DISPATCH_TOKEN` when
+that variable is set. A non-loopback `--host` refuses to start without it.
 
 ## Live enqueue
 
@@ -64,14 +73,15 @@ Each adapter exposes one wake route for its consumer and registers it on the
 executor is the live instance, so a consumer never needs a second webhook:
 
     POST /dispatch/register
-    {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1","instanceId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…"}
+    {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1","instanceId":"openclaw-1","url":"http://127.0.0.1:18789/api/winch/dispatch","bearer":"…","fresh":true}
 
 `consumerId` is the webhook identity; `executorId`/`instanceId` is the live
-process. Registration is a lease. Re-registering the same instance refreshes
-`lastSeenAt` and the lease. A different instance gets `409 {"code":
-"stale_instance"}` while the current lease is live; once the lease expires it
-takes over and `generation` increments. This prevents two gateways on one host
-from alternating ownership of the route.
+process. Registration is a lease. `fresh: true` is sent once on process start;
+later reconciles send `fresh: false` and only refresh `lastSeenAt`/the lease.
+A heartbeat never clears `suspect`/`disabled` or the failure count. A different
+instance gets `409 {"code":"stale_instance"}` while the current lease is live;
+once the lease expires it takes over and `generation` increments. A fresh
+registration re-enables a disabled row.
 
 The server keeps a `state`:
 
@@ -79,11 +89,14 @@ The server keeps a `state`:
 - `suspect` — a transient failure occurred; still receives retries and is
   disabled after `WINCH_DISPATCH_DELIVERY_FAILURE_THRESHOLD` (default 4).
 - `disabled` — no deliveries. A `4xx` (except `408`, `425`, `429`) disables
-  immediately; `404`/`410` therefore stop cleanly. Re-registration re-enables.
+  immediately; `404`/`410` therefore stop cleanly. A plain heartbeat does not
+  re-enable it; a fresh process registration does, after which the normal
+  failure policy applies again.
 
-A stale `lastSeenAt` older than `WINCH_DISPATCH_CONSUMER_TTL_MS` (default 90s)
-is pruned by the sweep. A legacy executor-keyed row for the same executor is
-removed on the first consumer registration. Multiple consumers may share a
+A stale **managed** `lastSeenAt` older than `WINCH_DISPATCH_CONSUMER_TTL_MS`
+(default 90s) is pruned by the sweep. Disabled rows are retained for audit and
+manual rows are never swept. A legacy executor-keyed row for the same executor
+is removed on the first consumer registration. Multiple consumers may share a
 harness; each gets a delivery.
 
 The adapter environment supplies the identity:
@@ -95,6 +108,7 @@ The adapter environment supplies the identity:
 | `WINCH_EXECUTOR_ID` | unique id for this live connection |
 | `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
+| `WINCH_DISPATCH_TOKEN` | optional management bearer for register/recover/notify; required for a non-loopback bind |
 
 Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
 missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
@@ -105,25 +119,34 @@ missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
 The server routes `task.assigned`, `story.assigned`, `task.restored`,
 `task.appended` and `epic.completed` into `admission_queue`.
 
-- Each delivery attempt is an `admission_attempts` row plus one
-  `dispatch_deliveries` row per consumer. A queued wake is POSTed to every
-  dispatch subscription for its harness. `202` means the receiver accepted the
-  request; it does **not** mean the work was claimed.
+- Each dispatch attempt has a stable `dispatch_events` row, one
+  `dispatch_deliveries` row per consumer, and a `dispatch_delivery_attempts`
+  audit row per HTTP try. A queued wake is POSTed to every dispatch
+  subscription for its harness. `202` means the receiver accepted the request;
+  it does **not** mean the work was claimed.
 - The payload names one `execution: "active"` consumer and marks the rest
   `standby`. Standby receivers acknowledge and stop; only the active receiver
-  starts a session. If the active delivery dies, the dispatcher promotes a
-  standby, increments `leaseEpoch`, and re-delivers it as active.
-- Tasks still use the agent's MCP `backlog_claim` as the work CAS. The winning
-  claim records `consumerId` on the work attempt, so resume goes only to that
-  consumer. Append/review wakes have no claim; the active-consumer lease is
-  their single-flight guard.
+  starts a session. If the active delivery dies or its lease expires, the
+  dispatcher promotes a standby, increments `leaseEpoch`, and re-delivers it as
+  active.
+- Tasks still use the agent's MCP `backlog_claim` as the work CAS. A wake-owned
+  claim records `consumerId`, `ownerInstance`, and a positive `leaseEpoch` on
+  the work attempt; `backlog_update`/`backlog_done`/`backlog_block` reject a
+  missing or stale epoch. The winning consumer is the only one that resumes.
+- Append/review/story wakes have no task claim. The active receiver must call
+  `backlog_accept_wake` with `admissionId`, `attemptNo`, and `leaseEpoch`; that
+  CAS sets `accepted_at`, renews the execution lease, and is the single-flight
+  guard. An unaccepted planner wake requeues at the offer TTL instead of
+  disappearing.
 - Each delivery retries independently: one 202 does not hide a peer's 500.
-  The row becomes `active` when the item is claimed and closes when the item
-  closes. Append and review wakes are one-shot after a successful active
-  delivery, and the offer TTL ends the row instead of retrying it.
+  The delivery row moves `pending → delivering → delivered|dead` (or back to
+  `pending` for retry); the admission row becomes `active` when the item is
+  claimed and closes when the item closes.
 - A failed delivery, an expired offer, or a wake that is never claimed
-  requeues with exponential backoff. Offer TTL, delivery backoff, attempts,
-  per-harness cap and global cap are in [Configuration](configuration.md).
+  requeues with exponential backoff. The relay claims rows with a delivery
+  lease, so two servers cannot send the same row concurrently. Offer TTL,
+  delivery backoff, attempts, per-harness cap and global cap are in
+  [Configuration](configuration.md).
 
 ## Wake payload
 
@@ -146,11 +169,12 @@ Winch POSTs this JSON body:
 
 The receiver should verify the bearer, keep the request bounded, and return 2xx
 once the wake is queued locally. If `execution` is `"standby"`, acknowledge
-without starting a session. The active receiver is the only one that starts;
-tasks still finish the election with `backlog_claim`. A non-2xx response
+without starting a session. The active receiver is the only one that starts.
+For `task` wakes, the agent wins the work with `backlog_claim`; for
+`story`/`append`/`review`, it must first call `backlog_accept_wake` with the
+payload's `admissionId`, `attemptNo`, and `leaseEpoch`. A non-2xx response
 retries that consumer independently with backoff. The payload is a pointer,
-not a brief: the agent reads the record with `backlog_get` and wins the work
-with `backlog_claim`.
+not a brief: the agent reads the record with `backlog_get`.
 
 ## Testing
 
@@ -173,18 +197,20 @@ offer, retry and cap mutation, so a consumer cannot re-drive the global queue:
 It returns:
 
 - `resume`: assigned `in_progress` work with `task`, `attemptId`,
-  `sessionId`, `sessionKey`, and `leaseExpiresAt`. The winning claim records
-  the consumer on the work attempt; only that consumer gets its resume. A
-  legacy claim with no consumer falls back to the active dispatch lease holder;
+  `sessionId`, `sessionKey`, `leaseEpoch`, `ownerInstance`, and
+  `leaseExpiresAt`. The winning claim records the consumer on the work
+  attempt; only that consumer gets its resume. A legacy claim with no owner
+  falls back to the active dispatch lease holder; if there is no active holder,
+  the row is **not** fanned out to every consumer (fail closed);
 - `start`: already-offered wakes whose `activeConsumerId` is this consumer. A
   standby consumer receives none;
 - `free`: remaining capacity after active and offered work. The server pump
   performs any expiry, cap trim, or free-slot fill; this endpoint does not.
 
 The harness resumes the same attempt, never re-claims an `in_progress` item.
-Its first action is `backlog_update` with the returned `attemptId`; a stale
-attempt gets `stale_claim`. Only an expired lease returns the item to `ready`,
-where normal wake and claim apply.
+Its first action is `backlog_update` with the returned `attemptId` **and
+`leaseEpoch`**; a stale attempt or epoch gets `stale_claim`. Only an expired
+lease returns the item to `ready`, where normal wake and claim apply.
 
 ## Receiver requirements
 
@@ -194,9 +220,13 @@ where normal wake and claim apply.
   a second local session.
 - Start only when `execution` is `"active"` (or absent for older servers).
   Acknowledge `"standby"` without spawning.
-- Register on boot with a stable `instanceId` and re-register on every
-  reconcile so the lease stays fresh. A `409` means another live instance owns
-  this consumer; do not call recover until the lease is yours.
+- For `story`/`append`/`review`, call `backlog_accept_wake` before doing the
+  work; a 202 without acceptance is retried, not treated as completed.
+- Register on boot with `fresh: true` and a stable `instanceId`, then
+  re-register with `fresh: false` on every reconcile so the lease stays fresh.
+  A `409` means another live instance owns this consumer; do not call recover
+  until the lease is yours. A heartbeat must not clear a failure or re-enable a
+  disabled receiver.
 
 ## Delegation
 

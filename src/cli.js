@@ -57,6 +57,8 @@ const USAGE = `usage: winch <command>
   webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
                                            register or replace a webhook subscription
   webhook list [--topic T] [--harness H]  list webhook subscriptions (bearer redacted)
+  webhook deliveries [--status S] [--admission ID] [--consumer ID] [--limit N]
+                                           list per-consumer delivery ledger rows
   webhook revoke [--topic T] --id I       remove a webhook subscription
   webhook test [--topic T] [--harness H] [--id I]
                                            POST a ping to webhook subscriptions`;
@@ -243,8 +245,8 @@ export async function runCli(argv) {
 
     case "webhook": {
       const [sub, ...subRest] = rest;
-      if (!["serve", "bearer", "register", "list", "revoke", "test"].includes(sub)) {
-        fail("usage: winch webhook (serve|bearer|register|list|revoke|test) …");
+      if (!["serve", "bearer", "register", "list", "deliveries", "revoke", "test"].includes(sub)) {
+        fail("usage: winch webhook (serve|bearer|register|list|deliveries|revoke|test) …");
       }
       const { values } = parseArgs({
         args: subRest,
@@ -256,6 +258,10 @@ export async function runCli(argv) {
           id: { type: "string" },
           executor: { type: "string" },
           "timeout-ms": { type: "string" },
+          status: { type: "string" },
+          admission: { type: "string" },
+          consumer: { type: "string" },
+          limit: { type: "string" },
           port: { type: "string" },
           host: { type: "string" },
           config: { type: "string" },
@@ -307,7 +313,38 @@ export async function runCli(argv) {
             failureCount: r.failureCount,
             disabledAt: r.disabledAt,
             leaseUntil: r.leaseUntil,
+            managed: r.managed,
           })), null, 2));
+          return;
+        }
+        if (sub === "deliveries") {
+          const limit = values.limit !== undefined ? Number(values.limit) : null;
+          if (limit !== null && (!Number.isInteger(limit) || limit <= 0)) {
+            fail(`winch: --limit must be a positive integer, got ${JSON.stringify(values.limit)}`);
+          }
+          const rows = store.delivery.list({
+            admissionId: values.admission ?? null,
+            consumerId: values.consumer ?? null,
+            status: values.status ?? null,
+            limit,
+          });
+          console.log(JSON.stringify({
+            count: rows.length,
+            rows: rows.map((r) => ({
+              id: r.id,
+              admissionId: r.admission_id,
+              attemptNo: r.attempt_no,
+              eventId: r.event_id,
+              consumerId: r.consumer_id,
+              status: r.status,
+              attempts: r.attempts,
+              nextAt: r.next_at,
+              lastStatus: r.last_status,
+              lastError: r.last_error,
+              deliveredAt: r.delivered_at,
+              deadAt: r.dead_at,
+            })),
+          }, null, 2));
           return;
         }
         if (sub === "register") {
@@ -334,6 +371,8 @@ export async function runCli(argv) {
             url: values.url,
             bearer,
             timeoutMs,
+            managed: false,
+            fresh: true,
           });
           console.log(JSON.stringify({
             topic: row.topic,
@@ -348,6 +387,7 @@ export async function runCli(argv) {
             generation: row.generation,
             state: row.state,
             failureCount: row.failureCount,
+            managed: row.managed,
           }, null, 2));
           return;
         }

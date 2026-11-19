@@ -3,6 +3,24 @@ import { addDep } from "../deps.js";
 import { identitySessionKey } from "../identity.js";
 import { ok, err, clampNote } from "./shared.js";
 
+function checkAttemptLease(store, task, args) {
+  if (!args?.attemptId) {
+    const live = task?.attempt_id ? store.attempt.get(task.attempt_id) : null;
+    if ((live?.lease_epoch ?? 0) > 0) {
+      return err(`${task.id} is wake-owned; pass attemptId and leaseEpoch from claim or recovery.`, "stale_claim", { taskId: task.id });
+    }
+    return null;
+  }
+  const attempt = store.attempt.get(args.attemptId);
+  if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
+    return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
+  }
+  if ((attempt.lease_epoch ?? 0) > 0 && args?.leaseEpoch !== attempt.lease_epoch) {
+    return err(`${task.id} attempt ${args.attemptId} is fenced by lease epoch ${attempt.lease_epoch}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
+  }
+  return null;
+}
+
 export function createReportTools({ store, logger }) {
   return {
     async backlog_update(args, identity, cfg) {
@@ -12,15 +30,11 @@ export function createReportTools({ store, logger }) {
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress — claim it with backlog_claim first.`, "not_claimed", { taskId: task.id });
       if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
       try {
-        if (args?.attemptId && args?.heartbeat === false) {
-          const attempt = store.attempt.get(args.attemptId);
-          if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
-            return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
-          }
-        }
+        const stale = checkAttemptLease(store, task, args);
+        if (stale) return stale;
         const wantHeartbeat = args?.heartbeat !== false;
         if (wantHeartbeat) {
-          const beat = store.task.heartbeat(task.id, agentId, args?.attemptId ?? null);
+          const beat = store.task.heartbeat(task.id, agentId, args?.attemptId ?? null, args?.leaseEpoch ?? null);
           if (beat === null) return err(`${task.id} is not running attempt ${args?.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args?.attemptId ?? null });
         }
         const noteParts = [];
@@ -51,12 +65,8 @@ export function createReportTools({ store, logger }) {
       if (!task) return err(`backlog_done: not found: ${args?.taskId}`, "not_found");
       if (task.status !== "in_progress") return err(`${task.id} is ${task.status}, not in_progress.`, "not_claimed", { taskId: task.id });
       if (task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id, assigned: task.assignee_agent });
-      if (args?.attemptId) {
-        const attempt = store.attempt.get(args.attemptId);
-        if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
-          return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
-        }
-      }
+      const stale = checkAttemptLease(store, task, args);
+      if (stale) return stale;
       try {
         const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
@@ -104,12 +114,8 @@ export function createReportTools({ store, logger }) {
       if (!task) return err(`backlog_block: not found: ${args?.taskId}`, "not_found");
       if (task.assignee_agent && task.assignee_agent !== agentId) return err(`${task.id} is assigned to ${task.assignee_agent}, not ${agentId}.`, "not_assignee", { taskId: task.id });
       if (task.status !== "in_progress" && task.status !== "ready") return err(`${task.id} is ${task.status}; blocking applies to ready/in_progress only.`, "wrong_status", { taskId: task.id });
-      if (args?.attemptId) {
-        const attempt = store.attempt.get(args.attemptId);
-        if (!attempt || attempt.item_id !== task.id || attempt.ended_at != null) {
-          return err(`${task.id} is not running attempt ${args.attemptId}; stop and re-read the task.`, "stale_claim", { taskId: task.id, attemptId: args.attemptId });
-        }
-      }
+      const stale = checkAttemptLease(store, task, args);
+      if (stale) return stale;
       try {
         const reason = clampNote(args.reason, cfg.noteReasonLimit);
         let updated;

@@ -59,6 +59,7 @@ export default {
     const cfg = ctx.options ?? {};
     const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "opencode";
     const consumerId = consumerIdFor(harness, cfg);
+    const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID ?? null;
     const agents = new Map();
     let dispatch = null;
     const ensureDispatch = () => {
@@ -74,13 +75,14 @@ export default {
       const agent = agents.get(event.sessionID) ?? process.env.WINCH_AGENT ?? null;
       // Unconditional: unknown agent blanks the slot, the server refuses
       // rather than trusting whatever the model wrote there.
-      stampWinchEvent(event, agent, consumerId);
+      stampWinchEvent(event, agent, consumerId, executorId);
     });
   },
   async server() {
     const harness = process.env.WINCH_HARNESS ?? "opencode";
     const consumerId = consumerIdFor(harness);
-    const hooks = createWinchHooks({ consumerId });
+    const executorId = process.env.WINCH_EXECUTOR_ID ?? null;
+    const hooks = createWinchHooks({ consumerId, instanceId: executorId });
     let dispatch = null;
     const ensureDispatch = () => {
       if (dispatch) return;

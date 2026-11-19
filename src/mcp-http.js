@@ -25,6 +25,7 @@ function fieldFromJson(schema) {
   if (!schema || typeof schema !== "object") return z.unknown();
   if (schema.enum && Array.isArray(schema.enum)) return z.enum(schema.enum);
   if (schema.type === "string") return z.string();
+  if (schema.type === "integer" || schema.type === "number") return z.number();
   if (schema.type === "boolean") return z.boolean();
   if (schema.type === "array") return z.array(fieldFromJson(schema.items));
   if (schema.type === "object") return z.object(shapeFromJson(schema));
@@ -41,6 +42,7 @@ function shapeFromJson(schema) {
   shape.winch_agent = z.optional(z.string());
   shape.winch_session = z.optional(z.string());
   shape.winch_consumer = z.optional(z.string());
+  shape.winch_instance = z.optional(z.string());
   shape._meta = z.optional(z.unknown());
   return shape;
 }

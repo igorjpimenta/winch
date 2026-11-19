@@ -16,7 +16,7 @@ export function isWinchTool(name) {
 // call, so a half-stamped call fails loudly instead of minting a default
 // key. With no resolvable dimension at all the hook returns undefined and
 // the call proceeds unstamped, for the server to refuse.
-export function buildWinchMeta(event, ctx, harness = "openclaw", consumerId = null) {
+export function buildWinchMeta(event, ctx, harness = "openclaw", consumerId = null, instanceId = null) {
   const toolName = event?.toolName ?? ctx?.toolName;
   if (!isWinchTool(toolName)) return undefined;
   const agent = ctx?.agentId ?? event?.agentId ?? null;
@@ -28,7 +28,7 @@ export function buildWinchMeta(event, ctx, harness = "openclaw", consumerId = nu
       ...params,
       _meta: {
         ...(params._meta ?? {}),
-        winch: { harness, agent, session, ...(consumerId ? { consumer: consumerId } : {}) },
+        winch: { harness, agent, session, ...(consumerId ? { consumer: consumerId } : {}), ...(instanceId ? { instance: instanceId } : {}) },
       },
     },
   };

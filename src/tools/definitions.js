@@ -269,6 +269,22 @@ export const TOOL_DEFS = [
       },
     },
     {
+      name: "backlog_accept_wake",
+      description:
+        "Acquire the execution lease for a story/append/review wake. Call this once before doing planner work. " +
+        "The dispatcher marks one consumer active; this CAS makes it the only session allowed to act.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["admissionId", "attemptNo", "leaseEpoch"],
+        properties: {
+          admissionId: { type: "string", description: "Admission id from the wake payload." },
+          attemptNo: { type: "integer", description: "Attempt number from the wake payload." },
+          leaseEpoch: { type: "integer", description: "Lease epoch from the wake payload; stale epochs are rejected." },
+        },
+      },
+    },
+    {
       name: "backlog_update",
       description:
         "Report liveness and progress on a task you have claimed. `heartbeat: true` refreshes last_heartbeat " +
@@ -281,6 +297,7 @@ export const TOOL_DEFS = [
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
           attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
+          leaseEpoch: { type: "integer", description: "Execution lease epoch from claim or recovery; required for wake-owned attempts." },
           heartbeat: { type: "boolean", description: "Refresh liveness (default true)." },
           progressSummary: { type: "string", description: "One-line progress note for the audit trail." },
           comment: { type: "string", description: "Freeform note appended as an audit event." },
@@ -300,6 +317,7 @@ export const TOOL_DEFS = [
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
           attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
+          leaseEpoch: { type: "integer", description: "Execution lease epoch from claim or recovery; required for wake-owned attempts." },
           resultSummary: { type: "string", description: "One-paragraph outcome (success or failure)." },
           artifacts: { type: "array", items: { type: "string" }, description: "Paths/URLs of produced artifacts (diff, doc, PR)." },
         },
@@ -318,6 +336,7 @@ export const TOOL_DEFS = [
         properties: {
           taskId: { type: "string", description: "Task item id (opaque)." },
           attemptId: { type: "string", description: "Attempt id from recovery or claim; fences a stale session out of a newer attempt." },
+          leaseEpoch: { type: "integer", description: "Execution lease epoch from claim or recovery; required for wake-owned attempts." },
           reason: { type: "string", description: "Why the task cannot proceed." },
           gateType: { type: "string", description: "Human gate being opened (roadmap|architecture|release|custom) — stamps gate_type; resume clears it." },
           blockedBy: {

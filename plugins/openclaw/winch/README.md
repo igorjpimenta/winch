@@ -7,14 +7,15 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    meta cannot impersonate an agent.
 2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
    executor bearer, acknowledges standby deliveries, deduplicates on
-   `admissionId + attemptNo`, and starts a
-   one-shot session. The active-consumer lease, or the agent's
-   `backlog_claim` for tasks, picks the single winner.
+   `admissionId + attemptNo`, and starts a one-shot session. Tasks use
+   `backlog_claim`; planner wakes must call `backlog_accept_wake` with the
+   payload lease before working.
 3. **Self-registration and recovery** — registers one wake URL per
    `WINCH_CONSUMER_ID` with `WINCH_WEBHOOK_BEARER`, then reconciles assigned
-   `in_progress` work through `POST /dispatch/recover`. `WINCH_EXECUTOR_ID`
+   `in_progress` work through `POST /dispatch/recover`. The first run is
+   `fresh: true`; later heartbeats preserve failure state. `WINCH_EXECUTOR_ID`
    identifies the live connection; the event's `kind` selects the listener
-   action.
+   action. Set `WINCH_DISPATCH_TOKEN` for authenticated management calls.
 
 ## Install
 

@@ -52,8 +52,9 @@ export default definePluginEntry({
     const cfg = api.pluginConfig ?? {};
     const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
     const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
+    const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID ?? null;
     if (typeof api.on === "function") {
-      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness, consumerId));
+      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness, consumerId, executorId));
     } else {
       api.logger.warn("winch: api.on unavailable; identity hook not registered");
     }

@@ -120,7 +120,7 @@ function trimOffers(store, harness, at, config) {
   return { offered, keptOffers, activeHarness, activeGlobal, otherReserved };
 }
 
-export function recover(store, { harness, consumerId = null, at = Date.now(), config = store.config, mutate = true } = {}) {
+export function recover(store, { harness, consumerId = null, at = Date.now(), config = store.config, mutate = false } = {}) {
   if (mutate) store.admission.expire({
     at,
     offerMs: config.dispatchOfferMs,
@@ -140,20 +140,23 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
   const resume = store.db.prepare(`
     SELECT s.item_id, s.assignee_agent, s.assignee_harness,
            a.id AS attempt_id, a.attempt_no, a.claimed_at, a.heartbeat_at, a.expires_at,
+           a.lease_epoch, a.owner_instance,
            ws.id AS session_id, ws.external_session_id, ws.session_key,
            ${ownerForItem} AS consumer_id
       FROM item_state s
       LEFT JOIN attempts a ON a.item_id=s.item_id AND a.ended_at IS NULL
       LEFT JOIN work_sessions ws ON ws.id=a.session_id
      WHERE s.status='in_progress' AND s.deleted_at IS NULL AND s.assignee_harness=?
-       AND (? IS NULL OR COALESCE(${ownerForItem}, ?) = ?)
+       AND (? IS NULL OR ${ownerForItem} = ?)
      ORDER BY a.claimed_at ASC, s.updated_at ASC
-  `).all(harness, consumerId, consumerId, consumerId).map((r) => ({
+  `).all(harness, consumerId, consumerId).map((r) => ({
     task: store.task.get(r.item_id),
     attemptId: r.attempt_id ?? null,
     attemptNo: r.attempt_no ?? null,
     sessionId: r.session_id ?? null,
     sessionKey: r.session_key ?? null,
+    leaseEpoch: r.lease_epoch ?? 0,
+    ownerInstance: r.owner_instance ?? null,
     leaseExpiresAt: r.expires_at ?? null,
     consumerId: r.consumer_id ?? null,
     needsRepair: r.attempt_id == null,

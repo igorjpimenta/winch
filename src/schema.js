@@ -122,6 +122,8 @@ export const attempts = sqliteTable("attempts", {
   attemptNo: integer("attempt_no").notNull(),
   sessionId: text("session_id").notNull().references(() => workSessions.id, { onDelete: "restrict" }),
   consumerId: text("consumer_id"),
+  ownerInstance: text("owner_instance"),
+  leaseEpoch: integer("lease_epoch").notNull().default(0),
   status: text("status").notNull(),
   claimedAt: integer("claimed_at").notNull(),
   heartbeatAt: integer("heartbeat_at"),
@@ -243,16 +245,32 @@ export const webhooks = sqliteTable("webhooks", {
   lastError: text("last_error"),
   disabledAt: integer("disabled_at"),
   leaseUntil: integer("lease_until"),
+  managed: integer("managed").notNull().default(0),
 }, (table) => [
   primaryKey({ columns: [table.topic, table.id] }),
   check("webhooks_state", sql`${table.state} IN (${inList(WEBHOOK_STATES)})`),
   index("idx_webhooks_topic_harness").on(table.topic, table.harness, table.state, table.lastSeenAt),
 ]);
 
+export const dispatchEvents = sqliteTable("dispatch_events", {
+  id: text("id").primaryKey(),
+  admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no").notNull(),
+  itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  sourceEventId: integer("source_event_id"),
+  payloadJson: text("payload_json").notNull().default("{}"),
+  createdAt: integer("created_at").notNull(),
+  publishedAt: integer("published_at"),
+}, (table) => [
+  uniqueIndex("uq_dispatch_event_attempt").on(table.admissionId, table.attemptNo),
+  index("idx_dispatch_events_created").on(table.createdAt),
+]);
+
 export const dispatchDeliveries = sqliteTable("dispatch_deliveries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
   attemptNo: integer("attempt_no").notNull(),
+  eventId: text("event_id"),
   consumerId: text("consumer_id").notNull(),
   status: text("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
@@ -268,4 +286,17 @@ export const dispatchDeliveries = sqliteTable("dispatch_deliveries", {
   uniqueIndex("uq_delivery_grain").on(table.admissionId, table.attemptNo, table.consumerId),
   index("idx_delivery_due").on(table.status, table.nextAt),
   index("idx_delivery_attempt").on(table.admissionId, table.attemptNo),
+  index("idx_delivery_event").on(table.eventId, table.consumerId),
+]);
+
+export const dispatchDeliveryAttempts = sqliteTable("dispatch_delivery_attempts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  deliveryId: integer("delivery_id").notNull().references(() => dispatchDeliveries.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no").notNull(),
+  status: text("status").notNull(),
+  responseStatus: integer("response_status"),
+  error: text("error"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("idx_delivery_attempts_delivery").on(table.deliveryId, table.attemptNo),
 ]);

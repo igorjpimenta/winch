@@ -27,3 +27,20 @@ test("remove is scoped to one topic and requires a topic and id", (t) => {
   assert.throws(() => store.webhook.remove({ id: "e1" }), /requires a topic/);
   assert.throws(() => store.webhook.upsert({ topic: "dispatch", url: "http://127.0.0.1:1", bearer: "a" }), /requires an id/);
 });
+
+test("a heartbeat preserves failures; only a fresh registration re-enables", (t) => {
+  const store = makeStore(t);
+  const base = { topic: "dispatch", id: "c", harness: "openclaw", instanceId: "i1", url: "http://127.0.0.1:1/wake", bearer: "tok" };
+  store.webhook.upsert({ ...base, managed: true, fresh: true, at: 1000, leaseMs: 100 });
+  for (let i = 1; i <= 3; i++) store.webhook.recordFailure({ topic: "dispatch", id: "c", status: 500, threshold: 4, at: 1000 + i });
+  let row = store.webhook.upsert({ ...base, managed: true, fresh: false, at: 2000, leaseMs: 100 });
+  assert.equal(row.state, "suspect");
+  assert.equal(row.failureCount, 3);
+  store.webhook.recordFailure({ topic: "dispatch", id: "c", status: 500, threshold: 4, at: 2001 });
+  row = store.webhook.upsert({ ...base, managed: true, fresh: false, at: 3000, leaseMs: 100 });
+  assert.equal(row.state, "disabled");
+  assert.equal(row.failureCount, 4);
+  row = store.webhook.upsert({ ...base, managed: true, fresh: true, at: 4000, leaseMs: 100 });
+  assert.equal(row.state, "active");
+  assert.equal(row.failureCount, 0);
+});

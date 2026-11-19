@@ -2,13 +2,14 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { makeHarness, ATLAS } from "./_harness.js";
+import { observe, tick } from "../../../../src/dispatch.js";
 
 let h;
 beforeEach(() => { h = makeHarness("winch-index-"); });
 afterEach(() => h.teardown());
 
 test("createToolHandlers exposes the same surface the definitions declare", () => {
-  assert.equal(h.TOOL_DEFS.length, 12);
+  assert.equal(h.TOOL_DEFS.length, 13);
   for (const def of h.TOOL_DEFS) {
     const handler = h.call(def.name, {}, ATLAS);
     assert.ok(handler instanceof Promise, `${def.name} did not dispatch`);
@@ -56,4 +57,23 @@ test("per-call meta config reaches the handler without touching the store config
   assert.equal(updated.details.status, "ok");
   const ev = h.store.db.prepare("SELECT note FROM item_events WHERE item_id=? AND note LIKE 'progress:%'").get(task.id);
   assert.equal(ev.note.length, "progress: ".length + 11);
+});
+
+test("backlog_accept_wake takes the planner lease once and fences the stale epoch", async () => {
+  const epic = h.store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
+  observe(h.store, {
+    type: "event", kind: "epic.completed", id: 2001, epicCreatedBy: "atlas",
+    item: { id: epic.id, kind: "epic", status: "done" },
+  });
+  const [offer] = tick(h.store, { reachable: ["test"] });
+  const identity = { ...ATLAS, consumer: "c1" };
+  const first = await h.call("backlog_accept_wake", {
+    admissionId: offer.id, attemptNo: offer.attempt_no, leaseEpoch: 0,
+  }, identity);
+  assert.equal(first.details.status, "ok");
+  assert.equal(first.details.leaseEpoch, 1);
+  const stale = await h.call("backlog_accept_wake", {
+    admissionId: offer.id, attemptNo: offer.attempt_no, leaseEpoch: 0,
+  }, identity);
+  assert.equal(stale.details.reason, "stale_lease");
 });

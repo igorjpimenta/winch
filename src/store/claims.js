@@ -11,7 +11,7 @@ export function createClaimMethods({ core, apis }) {
   } = core;
 
   return {
-    claim({ id, agentId, harness = null, session = null, sessionKey = null, watchdogMs = null, consumerId = null }) {
+    claim({ id, agentId, harness = null, session = null, sessionKey = null, watchdogMs = null, consumerId = null, ownerInstance = null }) {
       const row = apis.item.get(id);
       if (!row || row.kind !== "task") return null;
       const parsed = splitSessionKey(sessionKey);
@@ -33,7 +33,22 @@ export function createClaimMethods({ core, apis }) {
         const sess = ensureSession({
           harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim", parentSessionId,
         });
-        const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds, consumerId });
+        const liveAdmission = db.prepare(`
+          SELECT aa.lease_epoch, aa.active_consumer_id
+            FROM admission_queue q
+            JOIN admission_attempts aa ON aa.admission_id=q.id AND aa.ended_at IS NULL
+           WHERE q.item_id=? AND q.harness=? AND q.status IN ('offered','accepted') AND q.ended_at IS NULL
+           ORDER BY aa.attempt_no DESC LIMIT 1
+        `).get(id, h);
+        if (consumerId && liveAdmission?.active_consumer_id && liveAdmission.active_consumer_id !== consumerId) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        const leaseEpoch = consumerId ? Math.max(1, liveAdmission?.lease_epoch ?? 0) : 0;
+        const attempt = createAttempt({
+          itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds,
+          consumerId, ownerInstance, leaseEpoch,
+        });
         if (consumerId) {
           db.prepare(`
             UPDATE admission_attempts SET consumer_id=?
@@ -51,6 +66,9 @@ export function createClaimMethods({ core, apis }) {
         });
         db.exec("COMMIT");
         const task = apis.task.get(id);
+        task.attempt_id = attempt.id;
+        task.owner_instance = ownerInstance;
+        task.lease_epoch = leaseEpoch;
         task.lastEvent = eventById(eventId);
         return task;
       } catch (err) {
@@ -96,14 +114,15 @@ export function createClaimMethods({ core, apis }) {
       return apis.task.get(id);
     },
 
-    heartbeat(id, agentId, attemptId = null) {
+    heartbeat(id, agentId, attemptId = null, leaseEpoch = null) {
       const t = now();
       if (attemptId) {
         const exact = db.prepare(`
           UPDATE attempts SET heartbeat_at=?
            WHERE id=? AND item_id=? AND ended_at IS NULL
+             AND (lease_epoch = 0 OR lease_epoch = ?)
              AND session_id IN (SELECT id FROM work_sessions WHERE agent_id=?)
-        `).run(t, attemptId, id, agentId);
+        `).run(t, attemptId, id, leaseEpoch, agentId);
         if (exact.changes === 0) return null;
         db.prepare("UPDATE item_state SET updated_at=? WHERE item_id=?").run(t, id);
         return apis.task.get(id);
@@ -111,9 +130,14 @@ export function createClaimMethods({ core, apis }) {
       let r = db.prepare(`
         UPDATE attempts SET heartbeat_at=?
          WHERE item_id=? AND ended_at IS NULL
+           AND (lease_epoch = 0 OR lease_epoch = ?)
            AND session_id IN (SELECT id FROM work_sessions WHERE agent_id=?)
-      `).run(t, id, agentId);
+      `).run(t, id, leaseEpoch, agentId);
       if (r.changes === 0) {
+        // A live attempt that did not match is a stale session, not a missing
+        // attempt. Only heal when there is genuinely no live attempt.
+        const live = db.prepare("SELECT id FROM attempts WHERE item_id=? AND ended_at IS NULL").get(id);
+        if (live) return null;
         // A live item_state row can exist without an attempt when seeded
         // directly; heal it rather than refusing a heartbeat the row's status
         // allows.

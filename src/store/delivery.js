@@ -10,13 +10,14 @@ export function createDeliveryApi({ core }) {
   }
 
   const api = {
-    ensure({ admissionId, attemptNo, consumerId, at = now() }) {
+    ensure({ admissionId, attemptNo, consumerId, eventId = null, at = now() }) {
       db.prepare(`
-        INSERT INTO dispatch_deliveries(admission_id, attempt_no, consumer_id, status, attempts,
+        INSERT INTO dispatch_deliveries(admission_id, attempt_no, event_id, consumer_id, status, attempts,
                                         next_at, created_at, updated_at)
-        VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)
-        ON CONFLICT(admission_id, attempt_no, consumer_id) DO NOTHING
-      `).run(admissionId, attemptNo, consumerId, at, at, at);
+        VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+        ON CONFLICT(admission_id, attempt_no, consumer_id) DO UPDATE SET
+          event_id=COALESCE(dispatch_deliveries.event_id, excluded.event_id)
+      `).run(admissionId, attemptNo, eventId, consumerId, at, at, at);
       return db.prepare(`
         SELECT * FROM dispatch_deliveries
          WHERE admission_id=? AND attempt_no=? AND consumer_id=?
@@ -38,6 +39,37 @@ export function createDeliveryApi({ core }) {
 
     due(at = now(), limit = 50) {
       return api.list({ status: "pending", dueAt: at, limit });
+    },
+
+    claimDue({ at = now(), limit = 50, admissionId = null } = {}) {
+      const rows = admissionId
+        ? db.prepare(`
+            SELECT * FROM dispatch_deliveries
+             WHERE status='pending' AND next_at<=? AND admission_id=?
+             ORDER BY next_at ASC, id ASC LIMIT ?
+          `).all(at, admissionId, limit)
+        : db.prepare(`
+            SELECT * FROM dispatch_deliveries
+             WHERE status='pending' AND next_at<=?
+             ORDER BY next_at ASC, id ASC LIMIT ?
+          `).all(at, limit);
+      const mark = db.prepare("UPDATE dispatch_deliveries SET status='delivering', updated_at=? WHERE id=? AND status='pending'");
+      return rows.filter((row) => mark.run(at, row.id).changes > 0)
+        .map((row) => ({ ...row, status: "delivering", updated_at: at }));
+    },
+
+    releaseStale({ before, at = now() } = {}) {
+      return db.prepare(`
+        UPDATE dispatch_deliveries SET status='pending', next_at=?, updated_at=?
+         WHERE status='delivering' AND updated_at < ?
+      `).run(at, at, before).changes;
+    },
+
+    recordAttempt({ deliveryId, attemptNo, status, responseStatus = null, error = null, at = now() }) {
+      db.prepare(`
+        INSERT INTO dispatch_delivery_attempts(delivery_id, attempt_no, status, response_status, error, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(deliveryId, attemptNo, status, responseStatus, error == null ? null : String(error), at);
     },
 
     pendingForAttempt(admissionId, attemptNo) {

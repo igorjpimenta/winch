@@ -65,11 +65,20 @@ function permanent(status) {
 
 export function ensureDeliveries(store, row, { at = Date.now() } = {}) {
   const consumers = consumersFor(store, row.harness);
+  const event = row.attempt_no == null ? null : store.dispatchEvent.ensure({
+    admissionId: row.id,
+    attemptNo: row.attempt_no,
+    itemId: row.item_id,
+    sourceEventId: row.event_id ?? null,
+    payload: wakePayload(row, { at, leaseEpoch: row.lease_epoch ?? 0 }),
+    at,
+  });
   for (const consumer of consumers) {
     store.delivery.ensure({
       admissionId: row.id,
       attemptNo: row.attempt_no,
       consumerId: consumer.id,
+      eventId: event?.id ?? null,
       at,
     });
   }
@@ -80,6 +89,7 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
   const endpoint = store.webhook.get({ topic: "dispatch", id: delivery.consumer_id });
   if (!endpoint || endpoint.state === "disabled") {
     store.delivery.markDead(delivery.id, { error: "consumer disabled", at });
+    store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: delivery.attempts + 1, status: "dead", error: "consumer disabled", at });
     return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "consumer disabled" };
   }
   const execution = row.active_consumer_id === delivery.consumer_id ? "active" : "standby";
@@ -94,6 +104,8 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
 
   if (ok) {
     store.delivery.markDelivered(delivery.id, { status: result.status, at });
+    store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: delivery.attempts + 1, status: "delivered", responseStatus: result.status, at });
+    store.dispatchEvent.markPublished({ admissionId: row.id, attemptNo: row.attempt_no, at });
     store.webhook.recordSuccess({ topic: "dispatch", id: endpoint.id, at });
     return { ok: true, consumerId: endpoint.id, status: result.status, execution };
   }
@@ -112,11 +124,13 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
   });
   if (disabled || after?.state === "disabled") {
     store.delivery.markDead(delivery.id, { status: result.status, error: result.error ?? result.body ?? null, at });
+    store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: attempts, status: "dead", responseStatus: result.status, error: result.error ?? result.body ?? null, at });
   } else {
     const base = config.dispatchDeliveryBackoffMs ?? config.dispatchOfferBackoffMs ?? 30000;
     const max = config.dispatchDeliveryMaxBackoffMs ?? config.dispatchOfferMaxBackoffMs ?? 300000;
     const nextAt = at + Math.min(max, base * 2 ** Math.max(0, attempts - 1));
     store.delivery.markRetry(delivery.id, { status: result.status, error: result.error ?? result.body ?? null, nextAt, at });
+    store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: attempts, status: "retry", responseStatus: result.status, error: result.error ?? result.body ?? null, at });
   }
   logger?.warn?.(`winch: dispatch wake ${row.id} -> ${endpoint.id} failed (${result.status || result.error})${disabled ? " disabled" : ""}`);
   return { ok: false, consumerId: endpoint.id, status: result.status, error: result.error ?? result.body ?? null, execution };
@@ -124,7 +138,7 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
 
 export function promoteStranded(store, { at = Date.now(), config = store.config } = {}) {
   const rows = store.db.prepare(`
-    SELECT q.id, q.harness, aa.attempt_no, aa.active_consumer_id
+    SELECT q.id, q.harness, aa.attempt_no, aa.active_consumer_id, aa.lease_until
       FROM admission_queue q
       JOIN admission_attempts aa ON aa.admission_id=q.id AND aa.ended_at IS NULL
      WHERE q.status IN ('offered','accepted') AND q.ended_at IS NULL
@@ -136,7 +150,8 @@ export function promoteStranded(store, { at = Date.now(), config = store.config 
     const activeDelivery = row.active_consumer_id
       ? store.delivery.list({ admissionId: row.id, attemptNo: row.attempt_no, consumerId: row.active_consumer_id })[0]
       : null;
-    if (active && activeDelivery?.status !== "dead") continue;
+    const leaseLive = (row.lease_until ?? 0) > at;
+    if (active && activeDelivery?.status !== "dead" && leaseLive) continue;
     const next = consumers.find((c) => c.id !== row.active_consumer_id) ?? consumers[0];
     if (!next || next.id === row.active_consumer_id) continue;
     store.db.prepare(`
@@ -150,16 +165,24 @@ export function promoteStranded(store, { at = Date.now(), config = store.config 
 
 export async function deliverDue(store, { config = store.config, logger = null, at = Date.now(), admissionId = null } = {}) {
   promoteStranded(store, { at, config });
-  const due = store.delivery.due(at, 200);
+  const leaseMs = config.dispatchDeliveryLeaseMs ?? 300000;
+  store.delivery.releaseStale({ before: at - leaseMs, at });
+  const due = store.delivery.claimDue({ at, limit: 200, admissionId });
   const results = [];
   for (const delivery of due) {
-    if (admissionId && delivery.admission_id !== admissionId) continue;
     const row = store.admission.get(delivery.admission_id);
     if (!row || !["offered", "accepted"].includes(row.status) || row.attempt_no !== delivery.attempt_no) {
       store.delivery.cancelForAttempt(delivery.admission_id, delivery.attempt_no, { at });
       continue;
     }
-    results.push(await deliverOne(store, delivery, row, { config, logger, at }));
+    try {
+      results.push(await deliverOne(store, delivery, row, { config, logger, at }));
+    } catch (err) {
+      const base = config.dispatchDeliveryBackoffMs ?? 30000;
+      store.delivery.markRetry(delivery.id, { error: String(err?.message ?? err), nextAt: at + base, at });
+      store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: delivery.attempts + 1, status: "retry", error: String(err?.message ?? err), at });
+      logger?.warn?.(`winch: delivery ${delivery.id} crashed: ${err?.message ?? err}`);
+    }
   }
 
   if (admissionId) {
@@ -169,6 +192,18 @@ export async function deliverDue(store, { config = store.config, logger = null, 
       if (all.length && all.every((d) => d.status === "dead")) store.admission.fail(row.id, at);
     }
   }
+  const exhausted = store.db.prepare(`
+    SELECT q.id
+      FROM admission_queue q
+      JOIN admission_attempts aa ON aa.admission_id=q.id AND aa.ended_at IS NULL
+     WHERE q.status IN ('offered','accepted') AND q.ended_at IS NULL
+       AND EXISTS (SELECT 1 FROM dispatch_deliveries d
+                    WHERE d.admission_id=q.id AND d.attempt_no=aa.attempt_no)
+       AND NOT EXISTS (SELECT 1 FROM dispatch_deliveries d
+                        WHERE d.admission_id=q.id AND d.attempt_no=aa.attempt_no
+                          AND d.status != 'dead')
+  `).all();
+  for (const row of exhausted) store.admission.fail(row.id, at);
   return results;
 }
 

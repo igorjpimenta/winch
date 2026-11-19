@@ -35,6 +35,7 @@ import { createWebhookApi } from "./webhook.js";
 import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
 import { createDeliveryApi } from "./delivery.js";
+import { createDispatchEventApi } from "./dispatch-events.js";
 import { observe } from "../dispatch.js";
 import { toEventMessage } from "../events-ws.js";
 
@@ -68,6 +69,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
   apis.delivery = createDeliveryApi({ core });
+  apis.dispatchEvent = createDispatchEventApi({ core });
 
   const notifyBase = process.env.WINCH_DISPATCH_URL ?? `http://127.0.0.1:${cfg.dispatchPort}`;
   const targetUrl = notifyUrl ?? `${notifyBase.replace(/\/+$/, "")}/dispatch/notify`;
@@ -78,9 +80,12 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
     notifyScheduled = true;
     queueMicrotask(() => {
       notifyScheduled = false;
+      const headers = { "content-type": "application/json" };
+      const token = String(process.env.WINCH_DISPATCH_TOKEN ?? "").trim();
+      if (token) headers.authorization = `Bearer ${token}`;
       fetch(targetUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ type: "notify" }),
         signal: AbortSignal.timeout(500),
       }).catch(() => {});
@@ -109,6 +114,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
     event: apis.event,
     admission: apis.admission,
     delivery: apis.delivery,
+    dispatchEvent: apis.dispatchEvent,
     epic: apis.epic,
     story: apis.story,
     task: apis.task,

@@ -111,11 +111,18 @@ Two more rows matter to the dispatcher:
   not on every replay.
 
 Dispatch is delivered by HTTP, not polled. `202` means the receiver accepted
-the request. Each consumer gets its own delivery row; one consumer's failure
-does not suppress another's retry. The payload marks one consumer
-`execution: "active"` and the rest `"standby"`; only the active consumer starts
-a session. Standby receivers acknowledge and stop. If the active route dies,
-the dispatcher promotes a standby and bumps `leaseEpoch`.
+the request. Each consumer gets its own delivery row and per-attempt audit row;
+one consumer's failure does not suppress another's retry. The payload marks one
+consumer `execution: "active"` and the rest `"standby"`; only the active
+consumer starts a session. Standby receivers acknowledge and stop. If the
+active route dies or its lease expires, the dispatcher promotes a standby and
+bumps `leaseEpoch`.
+
+Planner wakes (`story`, `append`, `review`) require `backlog_accept_wake` with
+the payload's `admissionId`, `attemptNo`, and `leaseEpoch` before doing work.
+Tasks use `backlog_claim`; the claim records `consumerId`, `ownerInstance`, and
+`leaseEpoch`, and `backlog_update`/`backlog_done`/`backlog_block` reject a
+missing or stale epoch. An unaccepted planner wake requeues at the offer TTL.
 
 The admission queue holds an offer until it is claimed, closes, or expires;
 failed deliveries and expired offers requeue with backoff. Append/review wakes
@@ -156,9 +163,11 @@ with `WINCH_CONSUMER_ID` (default `harness:hostname`),
 `WINCH_EXECUTOR_ID` as the instance id, and `WINCH_WEBHOOK_BEARER`, and calls
 `POST /dispatch/recover` on startup and on its reconcile interval. The wake
 payload's `kind` selects the listener action; many consumers may share one
-harness, each with its own route. A second live instance for the same consumer
-gets `409` until the current lease expires. Missing identity or bearer disables
-the receiver.
+harness, each with its own route. The first registration sends `fresh: true`;
+later heartbeats send `fresh: false` and preserve failure/disabled state. A
+second live instance for the same consumer gets `409` until the current lease
+expires. Set `WINCH_DISPATCH_TOKEN` to authenticate management calls. Missing
+identity or bearer disables the receiver.
 
 A wake carries the opaque item id; the plugin starts a claimable `opencode run`
 session after local dedupe by `admissionId + attemptNo`, and only when
