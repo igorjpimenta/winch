@@ -13,10 +13,12 @@ overrides starts with dispatch enabled.
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` | 24h / 72h |
 | WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
 | Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
-| Dispatch notify URL | `WINCH_DISPATCH_NOTIFY_URL` | `http://127.0.0.1:38293/dispatch/notify` |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
+| Dispatch consumer heartbeat TTL | `WINCH_DISPATCH_CONSUMER_TTL_MS` | 90000 ms |
 | Offer TTL / base backoff / max backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
+| Delivery base backoff / max / attempts / failure threshold / claim lease | `WINCH_DISPATCH_DELIVERY_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_ATTEMPTS` / `WINCH_DISPATCH_DELIVERY_FAILURE_THRESHOLD` / `WINCH_DISPATCH_DELIVERY_LEASE_MS` | 30000 / 300000 ms / 5 / 4 / 300000 ms |
 | Webhook delivery timeout | `WINCH_WEBHOOK_TIMEOUT_MS` | 3000 ms |
+| Dispatch management auth | `WINCH_DISPATCH_TOKEN` | unset (loopback) |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | DB path | `WINCH_DB` | `~/.winch/store.sqlite` |
 | Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |

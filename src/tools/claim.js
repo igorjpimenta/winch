@@ -22,7 +22,7 @@ export function createClaimTools({ store, logger }) {
             return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: c.task.id });
           }
           for (const c of candidates) {
-            const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
+            const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000, consumerId: identity.consumer, ownerInstance: identity.instance });
             if (!claimed) continue;
             logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} from the ready queue`);
             const artifacts = collectStoryArtifacts(store, c.story.id);
@@ -60,7 +60,7 @@ export function createClaimTools({ store, logger }) {
         if (args?.dryRun) {
           return ok(JSON.stringify({ dryRun: true, task: c.task, story: { id: c.story.id, title: c.story.title, acceptance: c.story.acceptance }, epic: { id: c.epic.id, title: c.epic.title } }), { status: "ok", dryRun: true, agentId, taskId: task.id });
         }
-        const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000 });
+        const claimed = store.task.claim({ id: c.task.id, agentId, harness: identity.harness, session: identity.session, sessionKey, watchdogMs: cfg.leaseSeconds * 1000, consumerId: identity.consumer, ownerInstance: identity.instance });
         if (!claimed) return ok(JSON.stringify({ empty: true, raced: true }), { status: "empty", reason: "claim_raced", agentId, taskId: task.id });
         logger?.info?.(`backlog: ${agentId} claimed ${claimed.id} by id`);
         const artifacts = collectStoryArtifacts(store, c.story.id);

@@ -6,11 +6,16 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
    meta cannot impersonate an agent.
 2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
-   executor bearer, and starts a one-shot session for the assigned agent. The
-   agent's `backlog_claim` is the work guard, so duplicate delivery is safe.
-3. **Self-registration and recovery** — registers the wake URL with
-   `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, then reconciles assigned
-   `in_progress` work through `POST /dispatch/recover`.
+   executor bearer, acknowledges standby deliveries, deduplicates on
+   `admissionId + attemptNo`, and starts a one-shot session. Tasks use
+   `backlog_claim`; planner wakes must call `backlog_accept_wake` with the
+   payload lease before working.
+3. **Self-registration and recovery** — registers one wake URL per
+   `WINCH_CONSUMER_ID` with `WINCH_WEBHOOK_BEARER`, then reconciles assigned
+   `in_progress` work through `POST /dispatch/recover`. The first run is
+   `fresh: true`; later heartbeats preserve failure state. `WINCH_EXECUTOR_ID`
+   identifies the live connection; the event's `kind` selects the listener
+   action. Set `WINCH_DISPATCH_TOKEN` for authenticated management calls.
 
 ## Install
 
@@ -28,8 +33,10 @@ server version alongside it.
 
 Set `dispatchPublicBaseUrl` if the gateway port isn't detectable. Generate the
 bearer with `winch webhook bearer`, then set `WINCH_WEBHOOK_BEARER` and a unique
-`WINCH_EXECUTOR_ID` in the gateway/plugin environment. The receiver stays
-disarmed and logs a warning if either is missing.
+`WINCH_EXECUTOR_ID` in the gateway/plugin environment. `WINCH_CONSUMER_ID`
+defaults to `harness:hostname`, so the gateway keeps one route across restarts.
+The receiver stays disarmed and logs a warning if the executor or bearer is
+missing.
 
 ## Releases
 
@@ -45,7 +52,8 @@ its `@igorjpimenta/winch` dependency floor together.
 | `dispatchEnabled` | `true` | receive wakes and reconcile assigned `in_progress` work |
 | `dispatchPublicBaseUrl` | `http://127.0.0.1:<gateway.port>` | gateway address winch can reach |
 | `winchHarness` | `WINCH_HARNESS` or `openclaw` | harness name for identity and dispatch |
-| `winchExecutorId` | `WINCH_EXECUTOR_ID` | unique executor id for this connection |
+| `winchExecutorId` | `WINCH_EXECUTOR_ID` | unique instance id for this connection; also the registration lease owner |
+| `winchConsumerId` | `WINCH_CONSUMER_ID` or `harness:hostname` | stable webhook identity |
 | `dispatchReconcileMs` | `30000` | recovery interval |
 | `dispatchOpenclawBin` | shim beside the gateway entry | CLI used to start a wake session |
 
@@ -53,9 +61,11 @@ Environment:
 
 | variable | meaning |
 |---|---|
-| `WINCH_EXECUTOR_ID` | unique executor id; required unless `winchExecutorId` is set |
+| `WINCH_EXECUTOR_ID` | unique instance id; required unless `winchExecutorId` is set |
+| `WINCH_CONSUMER_ID` | stable webhook identity; default `harness:hostname` |
 | `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |
 | `WINCH_DISPATCH_PUBLIC_BASE_URL` | fallback for `dispatchPublicBaseUrl` |
+| `WINCH_DISPATCH_TOKEN` | management bearer for register/recover/notify; required for a non-loopback winch bind |
 
 Requires OpenClaw ≥ 2026.5.18 (declared as `openclaw.install.minHostVersion`).

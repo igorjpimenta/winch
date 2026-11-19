@@ -10,6 +10,7 @@ import { resolveRequestConfig } from "../config.js";
 import { TOOL_DEFS } from "./definitions.js";
 import { err } from "./shared.js";
 import { createClaimTools } from "./claim.js";
+import { createAcceptWakeTools } from "./accept-wake.js";
 import { createAssignTools } from "./assign.js";
 import { createDelegateTools } from "./delegate.js";
 import { createPlanTools } from "./plan.js";
@@ -23,6 +24,7 @@ export function createToolHandlers(store, logger) {
   const baseConfig = store.config;
   const handlers = {
     ...createClaimTools({ store, logger }),
+    ...createAcceptWakeTools({ store, logger }),
     ...createAssignTools({ store, logger }),
     ...createDelegateTools({ store, logger }),
     ...createPlanTools({ store, logger }),

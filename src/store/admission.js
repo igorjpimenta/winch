@@ -30,6 +30,9 @@ export function createAdmissionApi({ core }) {
       offers: attemptCount(id),
       attempt_no: attempt?.attempt_no ?? null,
       executor_id: attempt?.executor_id ?? null,
+      active_consumer_id: attempt?.active_consumer_id ?? null,
+      lease_epoch: attempt?.lease_epoch ?? 0,
+      lease_until: attempt?.lease_until ?? null,
       offered_at: attempt?.offered_at ?? null,
       accepted_at: attempt?.accepted_at ?? null,
     };
@@ -94,14 +97,15 @@ export function createAdmissionApi({ core }) {
                         ORDER BY created_at ASC, id ASC`).all(harness);
   }
 
-  function markOffered(id, at = now()) {
+  function markOffered(id, at = now(), { activeConsumerId = null, leaseMs = null, pickActive = null } = {}) {
     const row = db.prepare("SELECT * FROM admission_queue WHERE id=? AND status='queued' AND ended_at IS NULL").get(id);
     if (!row) return null;
     const attemptNo = db.prepare(
       "SELECT COALESCE(MAX(attempt_no),0)+1 AS n FROM admission_attempts WHERE admission_id=?"
     ).get(id).n;
-    db.prepare("INSERT INTO admission_attempts(admission_id, attempt_no, offered_at) VALUES (?, ?, ?)")
-      .run(id, attemptNo, at);
+    const active = activeConsumerId ?? (typeof pickActive === "function" ? pickActive(attemptNo) : null);
+    db.prepare("INSERT INTO admission_attempts(admission_id, attempt_no, offered_at, active_consumer_id, lease_until) VALUES (?, ?, ?, ?, ?)")
+      .run(id, attemptNo, at, active, leaseMs == null ? null : at + leaseMs);
     const r = db.prepare("UPDATE admission_queue SET status='offered' WHERE id=? AND status='queued' AND ended_at IS NULL")
       .run(id);
     if (r.changes === 0) {
@@ -114,6 +118,14 @@ export function createAdmissionApi({ core }) {
   function fail(id, at = now()) {
     endAttempts([id], at);
     db.prepare("UPDATE admission_queue SET status='expired' WHERE id=? AND status='offered' AND ended_at IS NULL").run(id);
+  }
+
+  function requeue(id, at = now()) {
+    endAttempts([id], at);
+    db.prepare(`
+      UPDATE admission_queue SET status='queued'
+       WHERE id=? AND status IN ('offered','accepted') AND ended_at IS NULL
+    `).run(id);
   }
 
   function activate(itemId, harness, at = now()) {
@@ -153,9 +165,11 @@ export function createAdmissionApi({ core }) {
     for (const row of rows) {
       db.prepare("UPDATE admission_attempts SET ended_at=? WHERE admission_id=? AND attempt_no=?")
         .run(at, row.id, row.attempt_no);
-      // Append and review wakes have no claim to confirm; once offered, they
-      // are one-shot, so TTL ends them instead of re-waking the planner.
-      if ((row.status === "offered" || row.status === "accepted") && (row.kind === "append" || row.kind === "review")) {
+      // Planner wakes have no task CAS. Once a planner has accepted the wake
+      // lease they are one-shot; an unaccepted offer must retry, or a 202 from
+      // a receiver that never spawned a session would silently lose the wake.
+      const planner = row.kind === "story" || row.kind === "append" || row.kind === "review";
+      if (planner && row.accepted_at != null) {
         db.prepare("UPDATE admission_queue SET status='done', ended_at=? WHERE id=?").run(at, row.id);
         continue;
       }
@@ -176,6 +190,51 @@ export function createAdmissionApi({ core }) {
       if ((row.last_ended ?? 0) + backoff <= at) {
         db.prepare("UPDATE admission_queue SET status='queued' WHERE id=? AND status='expired'").run(row.id);
       }
+    }
+  }
+
+
+  function acceptWake({ id, attemptNo, consumerId, leaseEpoch = null, leaseMs = 90000, at = now() }) {
+    if (!id || !consumerId || !Number.isInteger(attemptNo)) return { error: "bad_request" };
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = db.prepare(`
+        SELECT * FROM admission_queue WHERE id=? AND ended_at IS NULL
+      `).get(id);
+      const attempt = row ? liveAttempt(id) : null;
+      if (!row || !attempt || attempt.attempt_no !== attemptNo) {
+        db.exec("ROLLBACK");
+        return { error: "not_live" };
+      }
+      if (row.kind !== "story" && row.kind !== "append" && row.kind !== "review") {
+        db.exec("ROLLBACK");
+        return { error: "wrong_kind" };
+      }
+      if (attempt.active_consumer_id && attempt.active_consumer_id !== consumerId) {
+        db.exec("ROLLBACK");
+        return { error: "stale_lease" };
+      }
+      const currentEpoch = attempt.lease_epoch ?? 0;
+      let nextEpoch = currentEpoch;
+      if (!Number.isInteger(leaseEpoch) || leaseEpoch !== currentEpoch) {
+        db.exec("ROLLBACK");
+        return { error: "stale_lease" };
+      }
+      if (currentEpoch === 0) nextEpoch = 1;
+      db.prepare(`
+        UPDATE admission_attempts
+           SET active_consumer_id=?, lease_epoch=?, lease_until=?, accepted_at=?
+         WHERE admission_id=? AND attempt_no=? AND ended_at IS NULL
+      `).run(consumerId, nextEpoch, at + leaseMs, at, id, attemptNo);
+      db.prepare("UPDATE admission_queue SET status='accepted' WHERE id=? AND status IN ('offered','accepted')").run(id);
+      db.exec("COMMIT");
+      return {
+        admissionId: id, attemptNo, consumerId, leaseEpoch: nextEpoch,
+        leaseUntil: at + leaseMs, acceptedAt: at,
+      };
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
     }
   }
 
@@ -240,10 +299,12 @@ export function createAdmissionApi({ core }) {
     offers,
     markOffered,
     fail,
+    requeue,
     activate,
     release,
     expire,
     resetOffers,
+    acceptWake,
     lastEventId,
     setParentCursor,
     slots,

@@ -1,0 +1,1 @@
+ALTER TABLE `admission_attempts` ADD `consumer_id` text;

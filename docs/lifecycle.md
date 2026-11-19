@@ -59,6 +59,31 @@ flowchart TD
 
 At `MAX_ATTEMPTS` the sweeper blocks the task instead of requeueing it.
 
+## Dispatch execution lifecycle
+
+Delivery fans out to every consumer; execution is single-flight. A task uses
+`backlog_claim`; a story/append/review wake uses `backlog_accept_wake`. Tasks
+stamp owner and epoch on the work attempt; planner acceptance stamps them on
+the admission attempt.
+
+```mermaid
+flowchart TD
+  A[admission offered] -->|task: backlog_claim| B[in_progress<br/>ownerInstance + leaseEpoch]
+  A -->|story/append/review: backlog_accept_wake| C[accepted<br/>leaseEpoch]
+  A -->|offer TTL, no winner| Q[queued / retry]
+  B -->|update / done / block with current epoch| B
+  B -->|missing or stale epoch| X[stale_claim]
+  B -->|close| D[done]
+  B -->|lease expires| Q
+  C -->|work completes| D
+  C -->|accepted TTL expires| D
+  X -->|re-read recover| B
+```
+
+A stale epoch is a refusal, not a takeover: the old session stops and re-reads
+`POST /dispatch/recover`. A standby consumer never gets the attempt or start
+row.
+
 ## Gate lifecycle
 
 ```mermaid
@@ -78,3 +103,4 @@ Claim leases, attempt caps, and gate checks:
 - **Close**: closing the last task closes its story; closing the last story closes the epic and wakes the planner.
 - **Starvation**: lives in the watcher manifest (deferred list, per-task idleMs).
 - **Lease sweeper**: claims self-heal on next tick when the lease expires without heartbeats.
+- **Fencing**: wake-owned attempts carry `ownerInstance` and `leaseEpoch`; `backlog_update`, `backlog_done` and `backlog_block` refuse a missing or stale epoch, and the relay promotes a standby with a new epoch when the active lease expires.

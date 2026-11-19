@@ -10,7 +10,8 @@ import { createStore } from "../../../src/store/index.js";
 import { toEventMessage } from "../../../src/events-ws.js";
 import { startDispatchServer } from "../../../src/dispatch-server.js";
 import { recover, observe, routesForEvent, tick } from "../../../src/dispatch.js";
-import { deliverWake } from "../../../src/dispatch-webhook.js";
+import { deliverDue, deliverWake } from "../../../src/dispatch-webhook.js";
+import { StaleRegistrationError } from "../../../src/store/webhook.js";
 
 let dir, store, srv, receiver;
 
@@ -18,7 +19,7 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "winch-dispatch-"));
   store = createStore({
     dbPath: path.join(dir, "store.sqlite"),
-    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, webhookTimeoutMs: 1000 },
+    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, dispatchDeliveryBackoffMs: 10, dispatchDeliveryMaxBackoffMs: 20, dispatchDeliveryMaxAttempts: 3, dispatchDeliveryFailureThreshold: 4, webhookTimeoutMs: 1000 },
   });
 });
 afterEach(async () => {
@@ -50,15 +51,15 @@ function observeEvent(row) {
   return msg;
 }
 
-async function wakeReceiver({ bearer = "tok" } = {}) {
+async function wakeReceiver({ bearer = "tok", status = 202 } = {}) {
   const rows = [];
   const server = http.createServer((req, res) => {
     let raw = "";
     req.on("data", (d) => { raw += d; });
     req.on("end", () => {
       rows.push({ auth: req.headers.authorization, body: JSON.parse(raw) });
-      res.statusCode = 202;
-      res.end(JSON.stringify({ ok: true }));
+      res.statusCode = status;
+      res.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -157,7 +158,60 @@ test("webhook delivery sends the admission id and bearer", async () => {
   assert.equal(receiver.rows[0].body.type, "wake");
   assert.equal(receiver.rows[0].body.admissionId, offer.id);
   assert.equal(receiver.rows[0].body.itemId, row.item_id);
+  assert.equal(receiver.rows[0].body.attemptNo, offer.attempt_no);
   assert.equal(store.admission.get(offer.id).status, "offered");
+});
+
+test("delivery disables a webhook that answers 410", async () => {
+  receiver = await wakeReceiver({ status: 410 });
+  store.webhook.upsert({ topic: "dispatch", id: "exec-dead", harness: "test", executorId: "exec-dead", url: receiver.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, false);
+  assert.equal(store.webhook.get({ topic: "dispatch", id: "exec-dead" }).state, "disabled");
+  assert.equal(store.webhook.forHarness("test").length, 0);
+});
+
+test("delivery marks an unreachable webhook suspect, not gone", async () => {
+  store.webhook.upsert({ topic: "dispatch", id: "exec-gone", harness: "test", executorId: "exec-gone", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, false);
+  const current = store.webhook.get({ topic: "dispatch", id: "exec-gone" });
+  assert.equal(current.state, "suspect");
+  assert.equal(current.failureCount, 1);
+});
+
+test("stale managed registrations are pruned; manual and disabled rows stay", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "c-old", harness: "test", instanceId: "i1", url: "http://127.0.0.1:1/wake", bearer: "tok", at: 1000, leaseMs: 100 });
+  store.webhook.upsert({ topic: "dispatch", id: "c-new", harness: "test", instanceId: "i2", url: "http://127.0.0.1:2/wake", bearer: "tok", at: 5000, leaseMs: 100 });
+  store.webhook.upsert({ topic: "dispatch", id: "manual", harness: "test", url: "http://127.0.0.1:3/wake", bearer: "tok", at: 1000 });
+  store.webhook.upsert({ topic: "dispatch", id: "off", harness: "test", instanceId: "i3", url: "http://127.0.0.1:4/wake", bearer: "tok", at: 1000, leaseMs: 100 });
+  store.webhook.recordFailure({ topic: "dispatch", id: "off", status: 500, permanent: true, at: 1001 });
+  assert.equal(store.webhook.prune({ topic: "dispatch", before: 3000 }), 1);
+  assert.deepEqual(store.webhook.list({ topic: "dispatch" }).map((w) => w.id), ["c-new", "manual", "off"]);
+});
+
+test("claim records the winning consumer for resume", () => {
+  const { task, row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s", consumerId: "consumer-a" });
+  const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  observeEvent(claimRow);
+
+  const attempt = store.db.prepare("SELECT consumer_id FROM admission_attempts WHERE admission_id=? ORDER BY attempt_no DESC LIMIT 1").get(offer.id);
+  assert.equal(attempt.consumer_id, "consumer-a");
+  const mine = recover(store, { harness: "test", consumerId: "consumer-a" });
+  assert.deepEqual(mine.resume.map((r) => r.task.id), [task.id]);
+  assert.equal(mine.resume[0].consumerId, "consumer-a");
+  assert.equal(mine.resume[0].leaseEpoch, 1);
+  const other = recover(store, { harness: "test", consumerId: "consumer-b" });
+  assert.deepEqual(other.resume, []);
 });
 
 test("recover returns in-progress resume work and fills free slots", () => {
@@ -175,6 +229,37 @@ test("recover returns in-progress resume work and fills free slots", () => {
   assert.equal(result.resume[0].task.id, first.task.id);
   assert.ok(result.resume[0].attemptId);
   assert.ok(result.start.some((r) => r.admissionId === offer.id || r.itemId === second.task.id));
+});
+
+test("recover requeues offers beyond the cap, keeping the oldest", () => {
+  for (let i = 0; i < 4; i++) {
+    const { row } = seedAssigned({ agent: `worker-${i}` });
+    observeEvent(row);
+  }
+  const offers = tick(store, {
+    reachable: ["test"],
+    at: 1000,
+    config: { ...store.config, dispatchHarnessMax: 4, dispatchGlobalMax: 4 },
+  });
+  assert.equal(offers.length, 4);
+  for (let i = 0; i < offers.length; i++) {
+    store.db.prepare("UPDATE admission_attempts SET offered_at=? WHERE admission_id=? AND ended_at IS NULL")
+      .run(1000 + i, offers[i].id);
+  }
+
+  const result = recover(store, {
+    harness: "test",
+    at: 1010,
+    mutate: true,
+    config: { ...store.config, dispatchHarnessMax: 2, dispatchGlobalMax: 2 },
+  });
+  assert.equal(result.start.length, 2);
+  assert.deepEqual(result.start.map((r) => r.admissionId), offers.slice(0, 2).map((r) => r.id));
+  assert.equal(result.free, 0);
+  assert.equal(store.admission.get(offers[0].id).status, "offered");
+  assert.equal(store.admission.get(offers[1].id).status, "offered");
+  assert.equal(store.admission.get(offers[2].id).status, "queued");
+  assert.equal(store.admission.get(offers[3].id).status, "queued");
 });
 
 test("register and recover endpoints are available on the server", async () => {
@@ -202,6 +287,39 @@ test("register and recover endpoints are available on the server", async () => {
   assert.equal(rec.status, 200);
   const body = await rec.json();
   assert.ok(Array.isArray(body.start));
+});
+
+test("dispatch registration is one row per consumer, with executor metadata", async () => {
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const register = (body) => fetch(`${base}/dispatch/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  let res = await register({ harness: "test", executorId: "exec-legacy", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 1, "legacy executor registration exists");
+
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-legacy", url: "http://127.0.0.1:2/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-new", url: "http://127.0.0.1:3/wake", bearer: "tok" });
+  assert.equal(res.status, 409, "a different live instance cannot steal the lease");
+  const conflict = await res.json();
+  assert.equal(conflict.current.bearer, undefined, "409 never returns the receiver bearer");
+  assert.equal(conflict.current.instanceId, "exec-legacy");
+
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-new", instanceId: "exec-new", url: "http://127.0.0.1:3/wake", bearer: "tok" });
+  assert.equal(res.status, 409);
+
+  res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-legacy", instanceId: "exec-legacy", url: "http://127.0.0.1:4/wake", bearer: "tok" });
+  assert.equal(res.status, 201);
+  const rows = store.webhook.list({ topic: "dispatch" });
+  assert.equal(rows.length, 1, "one consumer owns one wake route");
+  assert.equal(rows[0].id, "test:host");
+  assert.equal(rows[0].executorId, "exec-legacy");
+  assert.equal(rows[0].url, "http://127.0.0.1:4/wake");
 });
 
 test("a live assignment reaches the queue and the receiver without a restart", async () => {
@@ -237,7 +355,7 @@ test("the store rings the dispatcher after a committed write", async () => {
   const notifyUrl = `http://127.0.0.1:${doorbell.address().port}/dispatch/notify`;
   const notifying = createStore({
     dbPath: path.join(dir, "notify.sqlite"),
-    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, webhookTimeoutMs: 1000 },
+    config: { dispatchOfferMs: 50, dispatchOfferBackoffMs: 10, dispatchOfferMaxBackoffMs: 20, dispatchOfferMaxAttempts: 3, dispatchDeliveryBackoffMs: 10, dispatchDeliveryMaxBackoffMs: 20, dispatchDeliveryMaxAttempts: 3, dispatchDeliveryFailureThreshold: 4, webhookTimeoutMs: 1000 },
     notifyDispatch: true,
     notifyUrl,
   });
@@ -253,7 +371,7 @@ test("the store rings the dispatcher after a committed write", async () => {
   }
 });
 
-test("a review wake is one-shot after a successful delivery", () => {
+test("an unaccepted review wake requeues instead of disappearing", () => {
   const epic = store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
   observe(store, {
     type: "event", kind: "epic.completed", id: 999, epicCreatedBy: "atlas",
@@ -262,7 +380,22 @@ test("a review wake is one-shot after a successful delivery", () => {
   const [offer] = tick(store, { reachable: ["test"] });
   assert.ok(offer);
   assert.equal(store.admission.get(offer.id).status, "offered");
-  assert.equal(store.admission.globalSlotCount(), 1);
+  tick(store, { at: Date.now() + 10_000, reachable: [] });
+  assert.equal(store.admission.get(offer.id).status, "expired");
+});
+
+test("an accepted review wake is one-shot after its lease TTL", () => {
+  const epic = store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
+  observe(store, {
+    type: "event", kind: "epic.completed", id: 999, epicCreatedBy: "atlas",
+    item: { id: epic.id, kind: "epic", status: "done" },
+  });
+  const [offer] = tick(store, { reachable: ["test"] });
+  assert.ok(offer);
+  const lease = store.admission.acceptWake({
+    id: offer.id, attemptNo: offer.attempt_no, consumerId: "c", leaseEpoch: 0, leaseMs: 1000,
+  });
+  assert.equal(lease.leaseEpoch, 1);
   tick(store, { at: Date.now() + 10_000, reachable: [] });
   assert.equal(store.admission.get(offer.id).status, "done");
   assert.equal(store.admission.globalSlotCount(), 0);
@@ -291,4 +424,227 @@ test("offering a child moves the parent cursor to its childKey", () => {
   const [offer] = tick(store, { reachable: ["test"] });
   assert.ok(offer);
   assert.equal(store.item.get(parent.id).current_child_key, "docs");
+});
+
+
+test("partial fan-out retries only the failed consumer", async (t) => {
+  const good = await wakeReceiver({ status: 202 });
+  const bad = await wakeReceiver({ status: 500 });
+  t.after(async () => { await good.close(); await bad.close(); });
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: good.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: bad.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const result = await deliverWake(store, offer);
+  assert.equal(result.ok, true, "at least one receiver accepted");
+  assert.equal(result.delivered.length, 1);
+  assert.equal(result.failed.length, 1);
+  const rows = store.delivery.allForAttempt(offer.id, offer.attempt_no);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter((r) => r.status === "delivered").length, 1);
+  assert.equal(rows.filter((r) => r.status === "pending").length, 1);
+  const goodHits = good.rows.length;
+  await deliverDue(store, { at: Date.now() + 20 });
+  assert.equal(good.rows.length, goodHits, "the delivered consumer is not retried");
+  assert.equal(bad.rows.length, 2, "the failed consumer gets its own retry");
+});
+
+test("an active consumer that is gone is replaced by its standby", async (t) => {
+  const gone = await wakeReceiver({ status: 410 });
+  const standby = await wakeReceiver({ status: 202 });
+  t.after(async () => { await gone.close(); await standby.close(); });
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: gone.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: standby.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.db.prepare("UPDATE admission_attempts SET active_consumer_id='a' WHERE admission_id=?").run(offer.id);
+  const live = store.admission.get(offer.id);
+  await deliverWake(store, live);
+  assert.equal(store.webhook.get({ topic: "dispatch", id: "a" }).state, "disabled");
+  assert.equal(standby.rows.at(-1).body.execution, "standby");
+
+  await deliverDue(store, { at: Date.now() + 20 });
+  const promoted = store.admission.get(offer.id);
+  assert.equal(promoted.active_consumer_id, "b");
+  assert.ok(promoted.lease_epoch >= 1);
+  assert.equal(standby.rows.at(-1).body.execution, "active");
+  assert.equal(standby.rows.at(-1).body.leaseEpoch, promoted.lease_epoch);
+});
+
+test("a subscription lease fences a second live instance", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "c", harness: "test", instanceId: "i1", url: "http://127.0.0.1:1/wake", bearer: "tok", at: 1000, leaseMs: 100 });
+  assert.throws(() => store.webhook.upsert({
+    topic: "dispatch", id: "c", harness: "test", instanceId: "i2", url: "http://127.0.0.1:2/wake", bearer: "tok", at: 1050, leaseMs: 100,
+  }), StaleRegistrationError);
+  const taken = store.webhook.upsert({
+    topic: "dispatch", id: "c", harness: "test", instanceId: "i2", url: "http://127.0.0.1:2/wake", bearer: "tok", at: 1101, leaseMs: 100,
+  });
+  assert.equal(taken.instanceId, "i2");
+  assert.equal(taken.generation, 1);
+  assert.equal(taken.state, "active");
+});
+
+test("four transient failures disable the subscription", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "c", harness: "test", instanceId: "i1", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  for (let i = 1; i <= 4; i++) {
+    const row = store.webhook.recordFailure({ topic: "dispatch", id: "c", status: 500, threshold: 4, at: 1000 + i });
+    assert.equal(row.state, i === 4 ? "disabled" : "suspect");
+    assert.equal(row.failureCount, i);
+  }
+});
+
+test("the work attempt carries the consumer, and resume falls back to the active lease", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: "http://127.0.0.1:2/wake", bearer: "tok" });
+  const { task, row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s" });
+  const claimRow = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  observeEvent(claimRow);
+
+  const attempt = store.db.prepare("SELECT consumer_id FROM attempts WHERE item_id=? AND ended_at IS NULL").get(task.id);
+  assert.equal(attempt.consumer_id, null, "a manual claim has no wake consumer");
+  const mine = recover(store, { harness: "test", consumerId: offer.active_consumer_id });
+  assert.equal(mine.resume.length, 1, "unowned resume goes to the active lease holder");
+  const other = recover(store, { harness: "test", consumerId: "not-the-active" });
+  assert.equal(other.resume.length, 0, "the standby does not resume the same attempt");
+});
+
+test("read-only recover does not mutate the queue", () => {
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const before = store.admission.queued("test").length;
+  const result = recover(store, { harness: "test", mutate: false });
+  assert.equal(result.start.length, 0);
+  assert.equal(store.admission.queued("test").length, before, "no offer was minted by a read-only recover");
+});
+
+
+test("tick trims offers when the cap is lowered", () => {
+  for (let i = 0; i < 4; i++) {
+    const { row } = seedAssigned({ agent: `worker-${i}` });
+    observeEvent(row);
+  }
+  const offers = tick(store, { reachable: ["test"], at: 1000, config: { ...store.config, dispatchHarnessMax: 4, dispatchGlobalMax: 4 } });
+  assert.equal(offers.length, 4);
+  tick(store, { reachable: ["test"], at: 1010, config: { ...store.config, dispatchHarnessMax: 2, dispatchGlobalMax: 2 } });
+  assert.equal(store.admission.offers("test").length, 2);
+  assert.equal(store.admission.queued("test").length, 2);
+});
+
+
+test("only the active consumer gets a start row", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: "http://127.0.0.1:2/wake", bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const active = recover(store, { harness: "test", consumerId: offer.active_consumer_id, mutate: false });
+  const standbyId = offer.active_consumer_id === "a" ? "b" : "a";
+  const standby = recover(store, { harness: "test", consumerId: standbyId, mutate: false });
+  assert.deepEqual(active.start.map((r) => r.admissionId), [offer.id]);
+  assert.deepEqual(standby.start, []);
+});
+
+test("ownerless resume fails closed when no active lease names a holder", () => {
+  const { task, row } = seedAssigned();
+  // No observeEvent: this is the legacy/manual shape the old fallback fanned out.
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "legacy" });
+  const a = recover(store, { harness: "test", consumerId: "a", mutate: false });
+  const b = recover(store, { harness: "test", consumerId: "b", mutate: false });
+  assert.deepEqual(a.resume, []);
+  assert.deepEqual(b.resume, []);
+  assert.equal(recover(store, { harness: "test", mutate: false }).resume.length, 1, "operator view still sees it");
+});
+
+test("a wake-owned task records and enforces its lease epoch", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  const { task, row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  const claimed = store.task.claim({
+    id: task.id, agentId: "worker", harness: "test", session: "wake",
+    consumerId: offer.active_consumer_id, ownerInstance: "instance-a",
+  });
+  assert.equal(claimed.lease_epoch, 1);
+  assert.equal(claimed.owner_instance, "instance-a");
+  assert.equal(store.task.heartbeat(task.id, "worker", claimed.attempt_id, null), null, "missing epoch is rejected");
+  assert.equal(store.task.heartbeat(task.id, "worker", claimed.attempt_id, 99), null, "wrong epoch is rejected");
+  assert.ok(store.task.heartbeat(task.id, "worker", claimed.attempt_id, 1));
+});
+
+test("accepting a planner wake is single-flight and one-shot", () => {
+  const epic = store.epic.create({ title: "E", status: "done", createdBy: "atlas" });
+  observe(store, {
+    type: "event", kind: "epic.completed", id: 1001, epicCreatedBy: "atlas",
+    item: { id: epic.id, kind: "epic", status: "done" },
+  });
+  const [offer] = tick(store, { reachable: ["test"] });
+  const accepted = store.admission.acceptWake({
+    id: offer.id, attemptNo: offer.attempt_no, consumerId: "a", leaseEpoch: 0, leaseMs: 1000,
+  });
+  assert.equal(accepted.leaseEpoch, 1);
+  assert.equal(store.admission.acceptWake({
+    id: offer.id, attemptNo: offer.attempt_no, consumerId: "a", leaseEpoch: 0, leaseMs: 1000,
+  }).error, "stale_lease");
+  assert.equal(store.admission.acceptWake({
+    id: offer.id, attemptNo: offer.attempt_no, consumerId: "b", leaseEpoch: 1, leaseMs: 1000,
+  }).error, "stale_lease");
+  tick(store, { at: Date.now() + 10_000, reachable: [] });
+  assert.equal(store.admission.get(offer.id).status, "done");
+});
+
+test("an expired active lease promotes a standby even after a 2xx delivery", async (t) => {
+  const active = await wakeReceiver({ status: 202 });
+  const standby = await wakeReceiver({ status: 202 });
+  t.after(async () => { await active.close(); await standby.close(); });
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: active.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: standby.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  store.db.prepare("UPDATE admission_attempts SET active_consumer_id='a', lease_until=? WHERE admission_id=?")
+    .run(Date.now() - 1, offer.id);
+  await deliverWake(store, store.admission.get(offer.id));
+  assert.equal(store.delivery.allForAttempt(offer.id, offer.attempt_no).find((d) => d.consumer_id === "a").status, "delivered");
+  await deliverDue(store, { at: Date.now() + 1 });
+  assert.equal(store.admission.get(offer.id).active_consumer_id, "b");
+  assert.equal(standby.rows.at(-1).body.execution, "active");
+});
+
+test("delivery keeps a stable event and a per-attempt audit row", async (t) => {
+  const receiver = await wakeReceiver({ status: 202 });
+  t.after(() => receiver.close());
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: receiver.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  await deliverWake(store, offer);
+  const delivery = store.delivery.allForAttempt(offer.id, offer.attempt_no)[0];
+  const event = store.dispatchEvent.get({ admissionId: offer.id, attemptNo: offer.attempt_no });
+  assert.ok(event);
+  assert.equal(delivery.event_id, event.id);
+  assert.equal(store.db.prepare("SELECT status FROM dispatch_delivery_attempts WHERE delivery_id=? ORDER BY id DESC LIMIT 1").get(delivery.id).status, "delivered");
+});
+
+test("dispatch management endpoints require WINCH_DISPATCH_TOKEN when set", async () => {
+  const previous = process.env.WINCH_DISPATCH_TOKEN;
+  process.env.WINCH_DISPATCH_TOKEN = "secret";
+  try {
+    srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
+    const base = `http://127.0.0.1:${srv.port}`;
+    const body = { harness: "test", executorId: "exec", url: "http://127.0.0.1:1/wake", bearer: "tok" };
+    let res = await fetch(`${base}/dispatch/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal(res.status, 401);
+    res = await fetch(`${base}/dispatch/register`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer secret" }, body: JSON.stringify(body) });
+    assert.equal(res.status, 201);
+    assert.equal((await fetch(`${base}/dispatch/recover`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ harness: "test" }) })).status, 401);
+    assert.equal((await fetch(`${base}/dispatch/recover`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer secret" }, body: JSON.stringify({ harness: "test" }) })).status, 200);
+  } finally {
+    if (previous === undefined) delete process.env.WINCH_DISPATCH_TOKEN;
+    else process.env.WINCH_DISPATCH_TOKEN = previous;
+  }
 });

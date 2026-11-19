@@ -4,7 +4,8 @@
 
 import http from "node:http";
 import { observe, recover, tick as dispatchTick } from "./dispatch.js";
-import { deliverWake } from "./dispatch-webhook.js";
+import { deliverDue, deliverWake } from "./dispatch-webhook.js";
+import { StaleRegistrationError } from "./store/webhook.js";
 import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./events-ws.js";
 
 export const DEFAULT_DISPATCH_PORT = 38293;
@@ -14,16 +15,29 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const listenPort = port ?? cfg.dispatchPort ?? DEFAULT_DISPATCH_PORT;
   const pollMs = intervalMs ?? cfg.dispatchIntervalMs ?? 1000;
   const sweepMs = cfg.dispatchSweepMs ?? 30000;
+  const consumerTtlMs = cfg.dispatchConsumerTtlMs ?? 90000;
   const histLimit = cfg.wsHistoryLimit ?? HISTORY_LIMIT;
+  const authToken = String(process.env.WINCH_DISPATCH_TOKEN ?? "").trim() || null;
+  const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
+  if (!loopback && !authToken) {
+    throw new Error("winch: dispatch server refuses a non-loopback host without WINCH_DISPATCH_TOKEN");
+  }
   let closing = false;
   let pumping = false;
 
+  const pruneConsumers = () => {
+    try { store.webhook.prune({ topic: "dispatch", before: Date.now() - consumerTtlMs }); } catch {}
+  };
   const sweeper = sweepMs > 0
-    ? setInterval(() => { try { store.task.sweepExpired({}); } catch {} }, sweepMs)
+    ? setInterval(() => {
+        try { store.task.sweepExpired({}); } catch {}
+        pruneConsumers();
+      }, sweepMs)
     : null;
   sweeper?.unref?.();
 
   store.admission.resetOffers();
+  pruneConsumers();
   // Repair a queue written before write-time routing existed. `enqueue` is
   // idempotent per event, so replaying tells the same story without minting a
   // second wake for rows the write hook already admitted.
@@ -40,6 +54,12 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   function json(res, status, body) {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
+  }
+
+  function unauthorized(req) {
+    if (!authToken) return false;
+    const auth = req.headers?.authorization ?? "";
+    return auth !== `Bearer ${authToken}`;
   }
 
   async function readJson(req, res) {
@@ -66,12 +86,14 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
     if (pumping) return;
     pumping = true;
     try {
+      pruneConsumers();
       const offered = dispatchTick(store, {
         at: Date.now(),
         reachable: store.webhook.harnesses({ topic: "dispatch" }),
         config: cfg,
       });
       for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
+      await deliverDue(store, { config: cfg, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch pump failed: ${err?.message ?? err}`);
     } finally {
@@ -82,39 +104,72 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (req.method === "POST" && url.pathname === "/dispatch/register") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
         const harness = typeof body.harness === "string" ? body.harness.trim() : "";
         const executorId = typeof body.executorId === "string" ? body.executorId.trim() : "";
-        if (!harness || !executorId) throw new Error("dispatch registration requires harness and executorId");
+        const consumerId = typeof body.consumerId === "string" ? body.consumerId.trim() : "";
+        const instanceId = typeof body.instanceId === "string" ? body.instanceId.trim() : "";
+        const fresh = body.fresh === true;
+        if (!harness || (!consumerId && !executorId)) throw new Error("dispatch registration requires harness and consumerId or executorId");
+        const id = consumerId || executorId;
         const row = store.webhook.upsert({
           topic: "dispatch",
-          id: executorId,
+          id,
           harness,
-          executorId,
+          executorId: executorId || null,
+          instanceId: instanceId || executorId || id,
           url: body.url,
           bearer: body.bearer,
           timeoutMs: body.timeoutMs ?? null,
+          leaseMs: consumerTtlMs,
+          managed: true,
+          fresh,
         });
-        json(res, 201, { ok: true, topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId });
+        if (executorId && id !== executorId) {
+          const legacy = store.webhook.get({ topic: "dispatch", id: executorId });
+          if (legacy?.executorId === executorId) store.webhook.remove({ topic: "dispatch", id: executorId });
+        }
+        json(res, 201, {
+          ok: true, topic: row.topic, id: row.id, harness: row.harness,
+          executorId: row.executorId, instanceId: row.instanceId,
+          generation: row.generation, leaseUntil: row.leaseUntil,
+        });
         void pump();
       } catch (err) {
-        json(res, 400, { error: String(err?.message ?? err) });
+        if (err instanceof StaleRegistrationError || err?.code === "stale_instance") {
+          const current = err.current
+            ? { instanceId: err.current.instanceId ?? null, generation: err.current.generation ?? null,
+                state: err.current.state ?? null, leaseUntil: err.current.leaseUntil ?? null }
+            : null;
+          json(res, 409, { error: String(err.message ?? err), code: "stale_instance", current });
+        } else {
+          json(res, 400, { error: String(err?.message ?? err) });
+        }
       }
       return;
     }
     if (req.method === "POST" && url.pathname === "/dispatch/notify") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       req.resume();
       json(res, 202, { ok: true });
       void pump();
       return;
     }
     if (req.method === "POST" && url.pathname === "/dispatch/recover") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       const body = await readJson(req, res);
       if (body === undefined) return;
       try {
-        const result = recover(store, { harness: String(body.harness ?? "").trim(), at: Date.now(), config: cfg });
+        const result = recover(store, {
+          harness: String(body.harness ?? "").trim(),
+          consumerId: String(body.consumerId ?? "").trim() || null,
+          at: Date.now(),
+          config: cfg,
+          mutate: false,
+        });
         json(res, 200, result);
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });

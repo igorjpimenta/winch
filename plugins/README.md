@@ -39,8 +39,9 @@ carries no explicit extensions path; the browser-lease extension lives at
    port isn't detectable, and `winchHarness` if the winch MCP entry uses a
    harness other than `openclaw`. Generate a bearer with
    `winch webhook bearer`; set `WINCH_WEBHOOK_BEARER` and a unique
-   `WINCH_EXECUTOR_ID` in the gateway/plugin environment. The adapter fails
-   closed if either is missing, then registers its wake route on boot.
+   `WINCH_EXECUTOR_ID` in the gateway/plugin environment; `WINCH_CONSUMER_ID`
+   defaults to `harness:hostname` and names the single wake route. The adapter
+   fails closed if the executor or bearer is missing, then registers on boot.
 2. In `~/.openclaw/openclaw.json`, add the MCP server (mirrors the `gbrain`
    entry) and the plugin id (mirrors the `browser-lease` line in
    `plugins.allow`):
@@ -78,15 +79,15 @@ The winch server routes and the plugin receives. On boot the plugin registers
 `POST /api/winch/dispatch` and reconciles once; every
 `dispatchReconcileMs` (default 30s) it calls `POST /dispatch/recover` and
 resumes assigned `in_progress` work. A wake carries the opaque item id, or a
-`resume` wake carries the task id and `attemptId`; the row's `kind` says
-whether to claim, break down, or review. The session is started through the
-gateway's own CLI entry (`agent --session-key agent:<agent>:winch:<id>`),
+`resume` wake carries the task id, `attemptId`, `leaseEpoch`, and owner; the
+row's `kind` says whether to claim, break down, or review. The session is
+started through the gateway's own CLI entry (`agent --session-key agent:<agent>:winch:<id>`),
 because the host only lets bundled plugins schedule turns in-process.
 
 Routing, one row per decision:
 
-- `task.assigned` → the assignee (never the planner itself)
-- `story.assigned` → the story owner, to append its tasks
+- `task.created` / `task.assigned` / `task.released` / `task.restored` / `gate.resolved` → the assignee (never the planner itself)
+- `story.created` / `story.assigned` → the story owner, to append its tasks
 - `task.appended` → the epic's creator, to route the new work
 - a close (`done`/`cancelled`) → every assigned task the envelope reports as
   `unblocked`, so dependents start without a scheduler
@@ -110,19 +111,36 @@ Two more rows matter to the dispatcher:
   not on every replay.
 
 Dispatch is delivered by HTTP, not polled. `202` means the receiver accepted
-the request; the agent's `backlog_claim` is the one-winner guard, so duplicate
-wakes are safe. The admission queue holds an offer until it is claimed, closes,
-or expires; failed deliveries and expired offers requeue with backoff.
-Append/review wakes are one-shot. Claim leases remain the work-level guard.
+the request. Each consumer gets its own delivery row and per-attempt audit row;
+one consumer's failure does not suppress another's retry. The payload marks one
+consumer `execution: "active"` and the rest `"standby"`; only the active
+consumer starts a session. Standby receivers acknowledge and stop. If the
+active route dies or its lease expires, the dispatcher promotes a standby and
+bumps `leaseEpoch`.
+
+Planner wakes (`story`, `append`, `review`) require `backlog_accept_wake` with
+the payload's `admissionId`, `attemptNo`, and `leaseEpoch` before doing work.
+Tasks use `backlog_claim`; the claim records `consumerId`, `ownerInstance`, and
+`leaseEpoch`, and `backlog_update`/`backlog_done`/`backlog_block` reject a
+missing or stale epoch. An unaccepted planner wake requeues at the offer TTL.
+
+The admission queue holds an offer until it is claimed, closes, or expires;
+failed deliveries and expired offers requeue with backoff. Story/append/review
+wakes are one-shot only after `backlog_accept_wake`; an unaccepted offer
+requeues. Tasks still use `backlog_claim` as the work-level guard; the accepted
+execution lease is the guard for wakes with no claim.
 
 ## Restart recovery
 
 The core query is `POST /dispatch/recover`; it returns assigned `in_progress`
-work with `attemptId`, `sessionId`, `sessionKey` and lease expiry. The plugin
-dedupes by task id and resumes the same attempt. Its first action is
-`backlog_update` with the returned `attemptId`; a stale attempt gets
-`stale_claim`, and only an expired lease returns the item to `ready` for a
-normal wake and claim.
+work with `attemptId`, `leaseEpoch`, `ownerInstance`, `sessionId`, `sessionKey`
+and lease expiry. The winning claim records its consumer on the work attempt,
+so only that consumer gets the resume. A legacy claim with no owner falls back
+to the active dispatch lease holder, and fails closed if there is no holder.
+The plugin dedupes by task id and resumes the same attempt. Its first action is
+`backlog_update` with the returned `attemptId` and `leaseEpoch`; a stale attempt
+or epoch gets `stale_claim`, and only an expired lease returns the item to
+`ready` for a normal wake and claim.
 
 ## opencode
 
@@ -143,18 +161,26 @@ the session's agent from `ctx.session.hook("context")` and stamps in
 
 The opencode companion ships its own dispatch receiver
 (`plugins/opencode/winch/dispatch.js`). It opens a loopback listener, registers
-with `WINCH_EXECUTOR_ID` and `WINCH_WEBHOOK_BEARER`, and calls
-`POST /dispatch/recover` on startup and on its reconcile interval. Missing
+with `WINCH_CONSUMER_ID` (default `harness:hostname`),
+`WINCH_EXECUTOR_ID` as the instance id, and `WINCH_WEBHOOK_BEARER`, and calls
+`POST /dispatch/recover` on startup and on its reconcile interval. The wake
+payload's `kind` selects the listener action; many consumers may share one
+harness, each with its own route. The first registration sends `fresh: true`;
+later heartbeats send `fresh: false` and preserve failure/disabled state. A
+second live instance for the same consumer gets `409` until the current lease
+expires. Set `WINCH_DISPATCH_TOKEN` to authenticate management calls. Missing
 identity or bearer disables the receiver.
 
 A wake carries the opaque item id; the plugin starts a claimable `opencode run`
-session. Resume wakes carry the task id and `attemptId`, so the prompt fences
-the session with `backlog_update` and `backlog_done` and never re-claims an
-`in_progress` item. Duplicate wakes are harmless because `backlog_claim` is
-the guard; the core treats `202` as delivery, not acceptance.
+session after local dedupe by `admissionId + attemptNo`, and only when
+`execution` is `"active"`. Resume wakes carry the task id, `attemptId`,
+`leaseEpoch`, and owner, so the prompt fences the session with
+`backlog_update` and `backlog_done` and never re-claims an `in_progress` item.
+`202` is delivery; the task claim or planner acceptance picks the winner.
 
 The plugin config mirrors OpenClaw: `dispatchEnabled`, `winchHarness`,
-`winchExecutorId`, `dispatchReconcileMs`, and a port for the loopback listener.
+`winchConsumerId`, `winchExecutorId`, `dispatchReconcileMs`, and a port for the
+loopback listener.
 `dispatchUrl` and the state path are gone; use `WINCH_DISPATCH_URL` and
 `WINCH_WEBHOOK_BEARER` instead. OpenCode V1 reads only the environment; V2
 reads `ctx.options` first.

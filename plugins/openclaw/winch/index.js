@@ -3,6 +3,7 @@ import { buildWinchMeta } from "./meta.js";
 import { startDispatch } from "./dispatch.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
@@ -33,6 +34,10 @@ export default definePluginEntry({
         type: "string",
         description: "Unique executor id for this connection. Default: WINCH_EXECUTOR_ID.",
       },
+      winchConsumerId: {
+        type: "string",
+        description: "Stable consumer id shared by this gateway's executors. Default: harness:hostname.",
+      },
       dispatchReconcileMs: {
         type: "integer",
         description: "Reconcile interval in milliseconds. Default: 30000.",
@@ -46,8 +51,10 @@ export default definePluginEntry({
   register: (api) => {
     const cfg = api.pluginConfig ?? {};
     const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
+    const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
+    const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID ?? null;
     if (typeof api.on === "function") {
-      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness));
+      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness, consumerId, executorId));
     } else {
       api.logger.warn("winch: api.on unavailable; identity hook not registered");
     }

@@ -85,6 +85,10 @@ export function resolveIdentity({ meta, args, base }) {
   const mAgent = usable("agent", m?.agent), mSession = usable("session", m?.session);
   const amAgent = usable("agent", am?.agent), amSession = usable("session", am?.session);
   const aAgent = usable("agent", args?.winch_agent), aSession = usable("session", args?.winch_session);
+  const mConsumer = usable("consumer", m?.consumer), amConsumer = usable("consumer", am?.consumer);
+  const aConsumer = usable("consumer", args?.winch_consumer);
+  const mInstance = usable("instance", m?.instance), amInstance = usable("instance", am?.instance);
+  const aInstance = usable("instance", args?.winch_instance);
   // Whole pairs only: a meta half never splices with an args half, so no
   // call can assemble an identity across trust channels.
   const pair = (mAgent && mSession)
@@ -111,10 +115,18 @@ export function resolveIdentity({ meta, args, base }) {
         "Unidentified callers fail; they are never given default keys."
     );
   }
+  const consumer = pair.source === "meta" ? mConsumer
+    : pair.source === "args-meta" ? amConsumer
+      : aConsumer;
+  const instance = pair.source === "meta" ? mInstance
+    : pair.source === "args-meta" ? amInstance
+      : aInstance;
   return {
     harness: declared.harness,
     agent: pair.agent,
     session: pair.session,
+    consumer: consumer ?? null,
+    instance: instance ?? null,
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
 }

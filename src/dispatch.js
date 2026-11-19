@@ -3,6 +3,7 @@
 // winner starts a session. Item status remains the work acknowledgement.
 
 import { HUMAN_AGENT, HUMAN_HARNESS } from "./reserved.js";
+import { pickConsumer } from "./dispatch-webhook.js";
 
 const RELEASING_STATUSES = new Set(["done", "cancelled", "blocked", "backlog", "review"]);
 
@@ -95,8 +96,32 @@ export function observe(store, ev, at = Date.now()) {
   return routes;
 }
 
-export function recover(store, { harness, at = Date.now(), config = store.config } = {}) {
-  store.admission.expire({
+
+function trimOffers(store, harness, at, config) {
+  const offered = store.admission.offers(harness)
+    .map((row) => store.admission.get(row.id))
+    .filter(Boolean)
+    .sort((a, b) => (a.offered_at ?? 0) - (b.offered_at ?? 0)
+      || (a.attempt_no ?? 0) - (b.attempt_no ?? 0)
+      || String(a.id).localeCompare(String(b.id)));
+
+  const { active, reserved } = store.admission.slots();
+  const activeHarness = active.get(harness) ?? 0;
+  const activeGlobal = [...active.values()].reduce((n, v) => n + v, 0);
+  const reservedGlobal = [...reserved.values()].reduce((n, v) => n + v, 0);
+  const otherReserved = Math.max(0, reservedGlobal - offered.length);
+  const keep = Math.max(0, Math.min(
+    config.dispatchHarnessMax - activeHarness,
+    config.dispatchGlobalMax - activeGlobal - otherReserved,
+    offered.length,
+  ));
+  const keptOffers = offered.slice(0, keep);
+  for (const row of offered.slice(keep)) store.admission.requeue(row.id, at);
+  return { offered, keptOffers, activeHarness, activeGlobal, otherReserved };
+}
+
+export function recover(store, { harness, consumerId = null, at = Date.now(), config = store.config, mutate = false } = {}) {
+  if (mutate) store.admission.expire({
     at,
     offerMs: config.dispatchOfferMs,
     baseBackoffMs: config.dispatchOfferBackoffMs,
@@ -104,63 +129,102 @@ export function recover(store, { harness, at = Date.now(), config = store.config
     maxAttempts: config.dispatchOfferMaxAttempts,
   });
 
+  const ownerForItem = `COALESCE(
+    a.consumer_id,
+    (SELECT aa.active_consumer_id
+       FROM admission_queue q
+       JOIN admission_attempts aa ON aa.admission_id=q.id
+      WHERE q.item_id=s.item_id AND q.status='active' AND q.ended_at IS NULL
+      ORDER BY aa.attempt_no DESC LIMIT 1)
+  )`;
   const resume = store.db.prepare(`
     SELECT s.item_id, s.assignee_agent, s.assignee_harness,
            a.id AS attempt_id, a.attempt_no, a.claimed_at, a.heartbeat_at, a.expires_at,
-           ws.id AS session_id, ws.external_session_id, ws.session_key
+           a.lease_epoch, a.owner_instance,
+           ws.id AS session_id, ws.external_session_id, ws.session_key,
+           ${ownerForItem} AS consumer_id
       FROM item_state s
       LEFT JOIN attempts a ON a.item_id=s.item_id AND a.ended_at IS NULL
       LEFT JOIN work_sessions ws ON ws.id=a.session_id
      WHERE s.status='in_progress' AND s.deleted_at IS NULL AND s.assignee_harness=?
+       AND (? IS NULL OR ${ownerForItem} = ?)
      ORDER BY a.claimed_at ASC, s.updated_at ASC
-  `).all(harness).map((r) => ({
+  `).all(harness, consumerId, consumerId).map((r) => ({
     task: store.task.get(r.item_id),
     attemptId: r.attempt_id ?? null,
     attemptNo: r.attempt_no ?? null,
     sessionId: r.session_id ?? null,
     sessionKey: r.session_key ?? null,
+    leaseEpoch: r.lease_epoch ?? 0,
+    ownerInstance: r.owner_instance ?? null,
     leaseExpiresAt: r.expires_at ?? null,
+    consumerId: r.consumer_id ?? null,
     needsRepair: r.attempt_id == null,
   }));
 
-  const start = store.admission.offers(harness).map((row) => {
-    const live = store.admission.get(row.id);
-    return {
+  let offered, keptOffers, activeHarness, activeGlobal, otherReserved;
+  if (mutate) {
+    ({ offered, keptOffers, activeHarness, activeGlobal, otherReserved } = trimOffers(store, harness, at, config));
+  } else {
+    offered = store.admission.offers(harness)
+      .map((row) => store.admission.get(row.id))
+      .filter(Boolean)
+      .sort((a, b) => (a.offered_at ?? 0) - (b.offered_at ?? 0)
+        || (a.attempt_no ?? 0) - (b.attempt_no ?? 0)
+        || String(a.id).localeCompare(String(b.id)));
+    keptOffers = offered;
+    const slots = store.admission.slots();
+    activeHarness = slots.active.get(harness) ?? 0;
+    activeGlobal = [...slots.active.values()].reduce((n, v) => n + v, 0);
+    otherReserved = Math.max(0, [...slots.reserved.values()].reduce((n, v) => n + v, 0) - offered.length);
+  }
+
+  const start = keptOffers
+    .filter((live) => !consumerId || !live.active_consumer_id || live.active_consumer_id === consumerId)
+    .map((live) => ({
       admissionId: live.id,
       itemId: live.item_id,
+      attemptNo: live.attempt_no ?? null,
       kind: live.kind,
       agent: live.agent_id,
       harness: live.harness,
       eventId: live.event_id ?? null,
       offerExpiresAt: (live.offered_at ?? at) + config.dispatchOfferMs,
-      status: "offered",
-    };
-  });
+      activeConsumerId: live.active_consumer_id ?? null,
+      leaseEpoch: live.lease_epoch ?? 0,
+      status: live.status,
+    }));
 
-  const usedHarness = store.admission.slotCount(harness);
-  const usedGlobal = store.admission.globalSlotCount();
+  const usedHarness = activeHarness + keptOffers.length;
+  const usedGlobal = activeGlobal + otherReserved + keptOffers.length;
   let free = Math.max(0, Math.min(
     config.dispatchHarnessMax - usedHarness,
     config.dispatchGlobalMax - usedGlobal,
   ));
-  for (const row of store.admission.queued(harness, at)) {
+  if (mutate) for (const row of store.admission.queued(harness, at)) {
     if (free <= 0) break;
-    const next = store.admission.markOffered(row.id, at);
+    const next = store.admission.markOffered(row.id, at, {
+      pickActive: (attemptNo) => pickConsumer(store, { ...row, attempt_no: attemptNo }),
+      leaseMs: config.dispatchConsumerTtlMs,
+    });
     if (!next) continue;
     start.push({
       admissionId: next.id,
       itemId: next.item_id,
+      attemptNo: next.attempt_no ?? null,
       kind: next.kind,
       agent: next.agent_id,
       harness: next.harness,
       eventId: next.event_id ?? null,
       offerExpiresAt: at + config.dispatchOfferMs,
+      activeConsumerId: next.active_consumer_id ?? null,
+      leaseEpoch: next.lease_epoch ?? 0,
       status: "offered",
     });
     free--;
   }
 
-  return { resume, start, free };
+  return { resume, start: consumerId ? start.filter((row) => row.activeConsumerId === consumerId) : start, free };
 }
 
 export function tick(store, { at = Date.now(), reachable = [], config = store.config } = {}) {
@@ -173,12 +237,16 @@ export function tick(store, { at = Date.now(), reachable = [], config = store.co
   });
   const offered = [];
   const harnesses = [...new Set(reachable)].filter(Boolean).sort();
+  for (const harness of harnesses) trimOffers(store, harness, at, config);
   let globalUsed = store.admission.globalSlotCount();
   for (const harness of harnesses) {
     let harnessUsed = store.admission.slotCount(harness);
     for (const row of store.admission.queued(harness, at)) {
       if (harnessUsed >= config.dispatchHarnessMax || globalUsed >= config.dispatchGlobalMax) break;
-      const next = store.admission.markOffered(row.id, at);
+      const next = store.admission.markOffered(row.id, at, {
+        pickActive: (attemptNo) => pickConsumer(store, { ...row, attempt_no: attemptNo }),
+        leaseMs: config.dispatchConsumerTtlMs,
+      });
       if (!next) continue;
       store.admission.setParentCursor(next.item_id, at);
       offered.push(next);

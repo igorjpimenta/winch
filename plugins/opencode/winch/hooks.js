@@ -2,7 +2,7 @@ import { stampWinchIdentity } from "./identity.js";
 
 // The agent is not on the tool call, only the session: remember it from the
 // chat events that carry both, then stamp the pair on every winch call.
-export function createWinchHooks() {
+export function createWinchHooks({ consumerId = null, instanceId = null } = {}) {
   const agents = new Map();
 
   return {
@@ -16,7 +16,7 @@ export function createWinchHooks() {
       // Unconditional: when the agent is unknown the slot is blanked, so a
       // model-supplied pair can never ride through as identity. Blank means
       // unstamped, and the server refuses that rather than trusting it.
-      stampWinchIdentity(input, output, { agent: agents.get(input?.sessionID) ?? process.env.WINCH_AGENT ?? null });
+      stampWinchIdentity(input, output, { agent: agents.get(input?.sessionID) ?? process.env.WINCH_AGENT ?? null, consumerId, instanceId });
     },
   };
 }

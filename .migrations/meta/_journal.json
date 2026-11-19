@@ -71,6 +71,27 @@
       "when": 1794936798231,
       "tag": "0009_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795035490048,
+      "tag": "0010_dispatch_consumer_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795046978440,
+      "tag": "0011_dispatch_delivery_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795056387292,
+      "tag": "0012_dispatch_fencing_audit",
+      "breakpoints": true
     }
   ]
 }

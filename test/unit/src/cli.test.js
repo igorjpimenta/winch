@@ -115,6 +115,41 @@ test("webhook revoke requires an id", async () => {
   }
 });
 
+test("webhook deliveries exposes the dead-letter ledger", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { createStore } = await import("../../../src/store/index.js");
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-cli-"));
+  const db = path.join(dir, "store.sqlite");
+  try {
+    const store = createStore({ dbPath: db });
+    const epic = store.epic.create({ title: "E" });
+    const story = store.story.create({ epicId: epic.id, title: "S" });
+    const task = store.task.create({ storyId: story.id, title: "T" });
+    const row = store.admission.enqueue({ kind: "task", itemId: task.id, harness: "test", agentId: "a" });
+    store.admission.markOffered(row.id);
+    const delivery = store.delivery.ensure({ admissionId: row.id, attemptNo: 1, consumerId: "exec-1" });
+    store.delivery.markDead(delivery.id, { status: 500, error: "boom" });
+    store.close();
+
+    let r = runDb(db, "webhook", "deliveries", "--status", "dead");
+    assert.equal(r.status, 0);
+    const { count, rows } = JSON.parse(r.stdout);
+    assert.equal(count, 1);
+    assert.equal(rows[0].admissionId, row.id);
+    assert.equal(rows[0].consumerId, "exec-1");
+    assert.equal(rows[0].status, "dead");
+    assert.equal(rows[0].lastError, "boom");
+
+    r = runDb(db, "webhook", "deliveries", "--status", "pending");
+    assert.equal(JSON.parse(r.stdout).count, 0);
+    r = runDb(db, "webhook", "deliveries", "--limit", "0");
+    assert.equal(r.status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("webhook register creates a manual endpoint and generates a bearer", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
