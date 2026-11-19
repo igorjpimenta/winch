@@ -301,6 +301,12 @@ export async function runCli(argv) {
             bearer: "<set>",
             timeoutMs: r.timeoutMs,
             lastSeenAt: r.lastSeenAt,
+            instanceId: r.instanceId,
+            generation: r.generation,
+            state: r.state,
+            failureCount: r.failureCount,
+            disabledAt: r.disabledAt,
+            leaseUntil: r.leaseUntil,
           })), null, 2));
           return;
         }
@@ -338,6 +344,10 @@ export async function runCli(argv) {
             bearer: generated ? bearer : "<set>",
             timeoutMs: row.timeoutMs,
             lastSeenAt: row.lastSeenAt,
+            instanceId: row.instanceId,
+            generation: row.generation,
+            state: row.state,
+            failureCount: row.failureCount,
           }, null, 2));
           return;
         }

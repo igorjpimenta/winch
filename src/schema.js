@@ -31,6 +31,8 @@ export const SESSION_KINDS = ["claim", "review", "system", "fanout"];
 export const WAKE_KINDS = ["task", "story", "append", "review", "unblocked"];
 export const ADMISSION_STATUSES = ["queued", "offered", "accepted", "active", "done", "cancelled", "expired"];
 export const EDGE_KINDS = ["depends_on"];
+export const DELIVERY_STATUSES = ["pending", "delivering", "delivered", "dead", "cancelled"];
+export const WEBHOOK_STATES = ["active", "suspect", "disabled"];
 
 const inList = (values) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
@@ -119,6 +121,7 @@ export const attempts = sqliteTable("attempts", {
   itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
   attemptNo: integer("attempt_no").notNull(),
   sessionId: text("session_id").notNull().references(() => workSessions.id, { onDelete: "restrict" }),
+  consumerId: text("consumer_id"),
   status: text("status").notNull(),
   claimedAt: integer("claimed_at").notNull(),
   heartbeatAt: integer("heartbeat_at"),
@@ -210,6 +213,9 @@ export const admissionAttempts = sqliteTable("admission_attempts", {
   attemptNo: integer("attempt_no").notNull(),
   executorId: text("executor_id"),
   consumerId: text("consumer_id"),
+  activeConsumerId: text("active_consumer_id"),
+  leaseEpoch: integer("lease_epoch").notNull().default(0),
+  leaseUntil: integer("lease_until"),
   offeredAt: integer("offered_at").notNull(),
   acceptedAt: integer("accepted_at"),
   endedAt: integer("ended_at"),
@@ -230,7 +236,36 @@ export const webhooks = sqliteTable("webhooks", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   lastSeenAt: integer("last_seen_at").notNull(),
+  instanceId: text("instance_id"),
+  generation: integer("generation").notNull().default(0),
+  state: text("state").notNull().default("active"),
+  failureCount: integer("failure_count").notNull().default(0),
+  lastError: text("last_error"),
+  disabledAt: integer("disabled_at"),
+  leaseUntil: integer("lease_until"),
 }, (table) => [
   primaryKey({ columns: [table.topic, table.id] }),
-  index("idx_webhooks_topic_harness").on(table.topic, table.harness, table.lastSeenAt),
+  check("webhooks_state", sql`${table.state} IN (${inList(WEBHOOK_STATES)})`),
+  index("idx_webhooks_topic_harness").on(table.topic, table.harness, table.state, table.lastSeenAt),
+]);
+
+export const dispatchDeliveries = sqliteTable("dispatch_deliveries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no").notNull(),
+  consumerId: text("consumer_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAt: integer("next_at").notNull(),
+  lastStatus: integer("last_status"),
+  lastError: text("last_error"),
+  deliveredAt: integer("delivered_at"),
+  deadAt: integer("dead_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  check("delivery_status", sql`${table.status} IN (${inList(DELIVERY_STATUSES)})`),
+  uniqueIndex("uq_delivery_grain").on(table.admissionId, table.attemptNo, table.consumerId),
+  index("idx_delivery_due").on(table.status, table.nextAt),
+  index("idx_delivery_attempt").on(table.admissionId, table.attemptNo),
 ]);

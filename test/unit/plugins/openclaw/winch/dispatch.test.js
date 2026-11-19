@@ -66,6 +66,16 @@ test("receiver rejects a bad bearer and accepts a wake", async () => {
   await new Promise((r) => setImmediate(r));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].admissionId, "ADM-1");
+
+  const standbyReq = Readable.from([JSON.stringify({
+    type: "wake", admissionId: "ADM-2", itemId: "TASK-2", agent: "worker", kind: "task", execution: "standby",
+  })]);
+  standbyReq.method = "POST";
+  standbyReq.headers = { authorization: "Bearer secret" };
+  const standbyRes = { statusCode: 0, body: "", setHeader() {}, end(body) { this.body = body; } };
+  await handler(standbyReq, standbyRes);
+  assert.equal(standbyRes.statusCode, 202);
+  assert.equal(calls.length, 1, "a standby delivery does not start a session");
 });
 
 test("resume prompt carries the attempt fence", () => {
@@ -73,4 +83,11 @@ test("resume prompt carries the attempt fence", () => {
   assert.match(text, /TASK-9/);
   assert.match(text, /a9/);
   assert.match(text, /backlog_update/);
+});
+
+test("resume prompt repairs a missing attempt without fencing on unknown", () => {
+  const text = resumePrompt({ task: { id: "TASK-9" }, attemptId: null, needsRepair: true });
+  assert.match(text, /Repair TASK-9/);
+  assert.match(text, /no attemptId/);
+  assert.doesNotMatch(text, /attempt \(unknown\)/);
 });

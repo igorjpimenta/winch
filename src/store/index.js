@@ -34,6 +34,7 @@ import { createDepApi } from "./deps.js";
 import { createWebhookApi } from "./webhook.js";
 import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
+import { createDeliveryApi } from "./delivery.js";
 import { observe } from "../dispatch.js";
 import { toEventMessage } from "../events-ws.js";
 
@@ -66,6 +67,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   apis.webhook = createWebhookApi({ core });
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
+  apis.delivery = createDeliveryApi({ core });
 
   const notifyBase = process.env.WINCH_DISPATCH_URL ?? `http://127.0.0.1:${cfg.dispatchPort}`;
   const targetUrl = notifyUrl ?? `${notifyBase.replace(/\/+$/, "")}/dispatch/notify`;
@@ -106,6 +108,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
     artifact: apis.artifact,
     event: apis.event,
     admission: apis.admission,
+    delivery: apis.delivery,
     epic: apis.epic,
     story: apis.story,
     task: apis.task,

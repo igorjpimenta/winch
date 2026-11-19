@@ -4,7 +4,8 @@
 
 import http from "node:http";
 import { observe, recover, tick as dispatchTick } from "./dispatch.js";
-import { deliverWake } from "./dispatch-webhook.js";
+import { deliverDue, deliverWake } from "./dispatch-webhook.js";
+import { StaleRegistrationError } from "./store/webhook.js";
 import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./events-ws.js";
 
 export const DEFAULT_DISPATCH_PORT = 38293;
@@ -81,6 +82,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
         config: cfg,
       });
       for (const row of offered) await deliverWake(store, row, { config: cfg, logger });
+      await deliverDue(store, { config: cfg, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch pump failed: ${err?.message ?? err}`);
     } finally {
@@ -97,6 +99,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
         const harness = typeof body.harness === "string" ? body.harness.trim() : "";
         const executorId = typeof body.executorId === "string" ? body.executorId.trim() : "";
         const consumerId = typeof body.consumerId === "string" ? body.consumerId.trim() : "";
+        const instanceId = typeof body.instanceId === "string" ? body.instanceId.trim() : "";
         if (!harness || (!consumerId && !executorId)) throw new Error("dispatch registration requires harness and consumerId or executorId");
         const id = consumerId || executorId;
         const row = store.webhook.upsert({
@@ -104,18 +107,28 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           id,
           harness,
           executorId: executorId || null,
+          instanceId: instanceId || executorId || id,
           url: body.url,
           bearer: body.bearer,
           timeoutMs: body.timeoutMs ?? null,
+          leaseMs: consumerTtlMs,
         });
         if (executorId && id !== executorId) {
           const legacy = store.webhook.get({ topic: "dispatch", id: executorId });
           if (legacy?.executorId === executorId) store.webhook.remove({ topic: "dispatch", id: executorId });
         }
-        json(res, 201, { ok: true, topic: row.topic, id: row.id, harness: row.harness, executorId: row.executorId });
+        json(res, 201, {
+          ok: true, topic: row.topic, id: row.id, harness: row.harness,
+          executorId: row.executorId, instanceId: row.instanceId,
+          generation: row.generation, leaseUntil: row.leaseUntil,
+        });
         void pump();
       } catch (err) {
-        json(res, 400, { error: String(err?.message ?? err) });
+        if (err instanceof StaleRegistrationError || err?.code === "stale_instance") {
+          json(res, 409, { error: String(err.message ?? err), code: "stale_instance", current: err.current ?? null });
+        } else {
+          json(res, 400, { error: String(err?.message ?? err) });
+        }
       }
       return;
     }
@@ -134,6 +147,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           consumerId: String(body.consumerId ?? "").trim() || null,
           at: Date.now(),
           config: cfg,
+          mutate: false,
         });
         json(res, 200, result);
       } catch (err) {

@@ -6,8 +6,10 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
    meta cannot impersonate an agent.
 2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
-   executor bearer, deduplicates on `admissionId + attemptNo`, and starts a
-   one-shot session. The agent's `backlog_claim` picks the single winner.
+   executor bearer, acknowledges standby deliveries, deduplicates on
+   `admissionId + attemptNo`, and starts a
+   one-shot session. The active-consumer lease, or the agent's
+   `backlog_claim` for tasks, picks the single winner.
 3. **Self-registration and recovery** — registers one wake URL per
    `WINCH_CONSUMER_ID` with `WINCH_WEBHOOK_BEARER`, then reconciles assigned
    `in_progress` work through `POST /dispatch/recover`. `WINCH_EXECUTOR_ID`
@@ -49,7 +51,7 @@ its `@igorjpimenta/winch` dependency floor together.
 | `dispatchEnabled` | `true` | receive wakes and reconcile assigned `in_progress` work |
 | `dispatchPublicBaseUrl` | `http://127.0.0.1:<gateway.port>` | gateway address winch can reach |
 | `winchHarness` | `WINCH_HARNESS` or `openclaw` | harness name for identity and dispatch |
-| `winchExecutorId` | `WINCH_EXECUTOR_ID` | unique executor id for this connection |
+| `winchExecutorId` | `WINCH_EXECUTOR_ID` | unique instance id for this connection; also the registration lease owner |
 | `winchConsumerId` | `WINCH_CONSUMER_ID` or `harness:hostname` | stable webhook identity |
 | `dispatchReconcileMs` | `30000` | recovery interval |
 | `dispatchOpenclawBin` | shim beside the gateway entry | CLI used to start a wake session |
@@ -58,7 +60,7 @@ Environment:
 
 | variable | meaning |
 |---|---|
-| `WINCH_EXECUTOR_ID` | unique executor id; required unless `winchExecutorId` is set |
+| `WINCH_EXECUTOR_ID` | unique instance id; required unless `winchExecutorId` is set |
 | `WINCH_CONSUMER_ID` | stable webhook identity; default `harness:hostname` |
 | `WINCH_WEBHOOK_BEARER` | receiver token; generate with `winch webhook bearer` |
 | `WINCH_DISPATCH_URL` | winch base URL, default `http://127.0.0.1:38293` |

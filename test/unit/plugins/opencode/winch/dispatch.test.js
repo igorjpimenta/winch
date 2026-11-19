@@ -40,6 +40,7 @@ test("listener registers with core and accepts a wake", async () => {
     assert.equal(registrations[0].harness, "opencode");
     assert.equal(registrations[0].consumerId, "opencode:test-host");
     assert.equal(registrations[0].executorId, "e1");
+    assert.equal(registrations[0].instanceId, "e1");
     assert.match(registrations[0].url, /^http:\/\/127\.0\.0\.1:\d+\/wake$/);
     const ping = await fetch(registrations[0].url, {
       method: "POST",
@@ -58,6 +59,15 @@ test("listener registers with core and accepts a wake", async () => {
     await new Promise((r) => setImmediate(r));
     assert.equal(calls.length, 1);
     assert.equal(calls[0].admissionId, "ADM-1");
+
+    const standby = await fetch(registrations[0].url, {
+      method: "POST",
+      headers: { authorization: "Bearer secret", "content-type": "application/json" },
+      body: JSON.stringify({ type: "wake", admissionId: "ADM-2", itemId: "TASK-2", agent: "worker", kind: "task", execution: "standby" }),
+    });
+    assert.equal(standby.status, 202);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls.length, 1, "a standby delivery does not start a session");
   } finally {
     await dispatch.close();
     await new Promise((r) => core.close(r));

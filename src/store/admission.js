@@ -30,6 +30,9 @@ export function createAdmissionApi({ core }) {
       offers: attemptCount(id),
       attempt_no: attempt?.attempt_no ?? null,
       executor_id: attempt?.executor_id ?? null,
+      active_consumer_id: attempt?.active_consumer_id ?? null,
+      lease_epoch: attempt?.lease_epoch ?? 0,
+      lease_until: attempt?.lease_until ?? null,
       offered_at: attempt?.offered_at ?? null,
       accepted_at: attempt?.accepted_at ?? null,
     };
@@ -94,14 +97,15 @@ export function createAdmissionApi({ core }) {
                         ORDER BY created_at ASC, id ASC`).all(harness);
   }
 
-  function markOffered(id, at = now()) {
+  function markOffered(id, at = now(), { activeConsumerId = null, leaseMs = null, pickActive = null } = {}) {
     const row = db.prepare("SELECT * FROM admission_queue WHERE id=? AND status='queued' AND ended_at IS NULL").get(id);
     if (!row) return null;
     const attemptNo = db.prepare(
       "SELECT COALESCE(MAX(attempt_no),0)+1 AS n FROM admission_attempts WHERE admission_id=?"
     ).get(id).n;
-    db.prepare("INSERT INTO admission_attempts(admission_id, attempt_no, offered_at) VALUES (?, ?, ?)")
-      .run(id, attemptNo, at);
+    const active = activeConsumerId ?? (typeof pickActive === "function" ? pickActive(attemptNo) : null);
+    db.prepare("INSERT INTO admission_attempts(admission_id, attempt_no, offered_at, active_consumer_id, lease_until) VALUES (?, ?, ?, ?, ?)")
+      .run(id, attemptNo, at, active, leaseMs == null ? null : at + leaseMs);
     const r = db.prepare("UPDATE admission_queue SET status='offered' WHERE id=? AND status='queued' AND ended_at IS NULL")
       .run(id);
     if (r.changes === 0) {

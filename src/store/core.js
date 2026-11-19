@@ -181,15 +181,15 @@ export function createCore({ db, cfg }) {
     `).run(status, endedAt, jsonOut(result), errorType, jsonOut(gateRecord), attemptId);
   }
 
-  function createAttempt({ itemId, sessionId, status = "running", claimedAt = now(), leaseSeconds, result = null, errorType = null, gateRecord = null, endedAt = null }) {
+  function createAttempt({ itemId, sessionId, status = "running", claimedAt = now(), leaseSeconds, result = null, errorType = null, gateRecord = null, endedAt = null, consumerId = null }) {
     const no = db.prepare("SELECT COALESCE(MAX(attempt_no),0)+1 AS n FROM attempts WHERE item_id=?").get(itemId).n;
     const id = newAttemptId();
     db.prepare(`
       INSERT INTO attempts(id, item_id, attempt_no, session_id, status, claimed_at, heartbeat_at,
-                           lease_seconds, ended_at, result_json, error_type, gate_record_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           lease_seconds, ended_at, result_json, error_type, gate_record_json, consumer_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, itemId, no, sessionId, status, claimedAt, status === "gated" ? null : claimedAt,
-      leaseSeconds, endedAt, jsonOut(result), errorType, jsonOut(gateRecord));
+      leaseSeconds, endedAt, jsonOut(result), errorType, jsonOut(gateRecord), consumerId);
     return db.prepare("SELECT * FROM attempts WHERE id=?").get(id);
   }
 

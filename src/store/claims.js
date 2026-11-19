@@ -33,7 +33,7 @@ export function createClaimMethods({ core, apis }) {
         const sess = ensureSession({
           harness: h, agentId, externalSessionId: extSession, itemId: id, kind: "claim", parentSessionId,
         });
-        const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds });
+        const attempt = createAttempt({ itemId: id, sessionId: sess.id, status: "running", claimedAt: t, leaseSeconds, consumerId });
         if (consumerId) {
           db.prepare(`
             UPDATE admission_attempts SET consumer_id=?

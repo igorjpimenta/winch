@@ -70,6 +70,10 @@ export function registerReceiver({ api, bearer, wake, started, logger = console 
         json(res, 400, { error: "wake payload requires admissionId, itemId, agent" });
         return;
       }
+      if (body.execution === "standby") {
+        json(res, 202, { ok: true, admissionId: body.admissionId, standby: true });
+        return;
+      }
       const key = `start:${body.admissionId}:${body.attemptNo ?? "none"}`;
       const now = Date.now();
       for (const [k, at] of started ?? []) if (now - at > INFLIGHT_TTL_MS) started.delete(k);
@@ -84,6 +88,7 @@ export function registerReceiver({ api, bearer, wake, started, logger = console 
         kind: body.kind,
         admissionId: body.admissionId,
         attemptNo: body.attemptNo,
+        leaseEpoch: body.leaseEpoch ?? 0,
       })).catch((err) => {
         started?.delete(key);
         logger?.warn?.(`winch: wake ${body.itemId} failed: ${err?.message ?? err}`);
@@ -97,7 +102,7 @@ export async function registerExecutor({ baseUrl, harness, consumerId, executorI
   const res = await fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ harness, consumerId, executorId, url, bearer }),
+    body: JSON.stringify({ harness, consumerId, executorId, instanceId: executorId, url, bearer }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`dispatch register ${res.status}`);
@@ -144,6 +149,7 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
       kind: row.kind,
       admissionId: row.admissionId,
       attemptNo: row.attemptNo,
+      leaseEpoch: row.leaseEpoch ?? 0,
     })).catch((err) => {
       started.delete(key);
       logger?.warn?.(`winch: wake ${row.itemId} failed: ${err?.message ?? err}`);
@@ -154,7 +160,10 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
 
 export function resumePrompt(row) {
   const taskId = row?.task?.id ?? "(unknown)";
-  const attemptId = row?.attemptId ?? "(unknown)";
+  const attemptId = row?.attemptId ?? null;
+  if (!attemptId) {
+    return `Repair ${taskId}. The task is in_progress but has no live attempt. Do not call backlog_claim. Call backlog_update with taskId "${taskId}", heartbeat true, and no attemptId so the store repairs the missing attempt. If it returns stale_claim, stop. Then continue from the existing brief.`;
+  }
   return `Resume ${taskId} attempt ${attemptId}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}" and attemptId "${attemptId}", heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
 }
 
@@ -185,6 +194,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       });
     } catch (err) {
       logger?.warn?.(`winch: dispatch register failed: ${err?.message ?? err}`);
+      return;
     }
     try {
       await recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger });
