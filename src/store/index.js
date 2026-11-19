@@ -127,7 +127,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   core.setEventHook((eventId) => {
     const row = core.eventById(eventId);
     if (!row) return;
-    observe(store, toEventMessage(store, row), row.created_at ?? Date.now());
+    observe(store, toEventMessage(store, row, { includeArtifacts: false }), row.created_at ?? Date.now());
     scheduleNotify();
   });
 

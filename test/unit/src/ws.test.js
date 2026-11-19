@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { createStore } from "../../../src/store/index.js";
-import { startEventServer, kindForEvent } from "../../../src/events-ws.js";
+import { startEventServer, kindForEvent, toEventMessage } from "../../../src/events-ws.js";
 
 let dir, store, srv, sockets;
 
@@ -246,4 +246,31 @@ test("task.create writes a birth row the stream picks up", async () => {
   const [live] = await collect(ws, 1);
   assert.equal(live.kind, "task.created");
   assert.equal(live.task.title, "born");
+});
+
+test("a ready birth event does not scan the ready queue", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "builder", assigneeHarness: "test" });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const original = store.item.list;
+  let scans = 0;
+  store.item.list = (...args) => { scans++; return original.apply(store.item, args); };
+  try {
+    const msg = toEventMessage(store, row);
+    assert.equal(scans, 0, "birth does not enumerate ready work");
+    assert.deepEqual(msg.unblocked, []);
+  } finally {
+    store.item.list = original;
+  }
+});
+
+test("dispatch envelopes skip artifact projection", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "builder", assigneeHarness: "test" });
+  store.artifact.add({ itemId: task.id, kind: "link", uri: "https://example.test/artifact" });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  assert.deepEqual(toEventMessage(store, row).task.artifacts, ["https://example.test/artifact"]);
+  assert.deepEqual(toEventMessage(store, row, { includeArtifacts: false }).task.artifacts, []);
 });
