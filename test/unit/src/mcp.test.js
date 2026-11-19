@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createStore } from "../../../src/store/index.js";
 import { startMcpServer, toolErrorResult } from "../../../src/mcp.js";
+import { err, toMcpResult } from "../../../src/tools/shared.js";
 
 let dir, store;
 
@@ -42,4 +43,17 @@ test("toolErrorResult: unexpected failures become isError tool results", () => {
   assert.equal(r.isError, true);
   const body = JSON.parse(r.content[0].text);
   assert.match(body.error, /refused caller identity/);
+});
+
+test("handler rejections are marked isError and do not leak details", () => {
+  const r = toMcpResult(err("backlog_get: not found: TASK-nope", "not_found", { id: "TASK-nope" }));
+  assert.equal(r.isError, true);
+  assert.equal(r.details, undefined);
+  assert.equal(r.content[0].text, "backlog_get: not found: TASK-nope");
+});
+
+test("successful tool results stay non-error", () => {
+  const r = toMcpResult({ content: [{ type: "text", text: "ok" }], details: { status: "ok" } });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.details, undefined);
 });

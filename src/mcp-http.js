@@ -20,6 +20,7 @@ import * as z from "zod/v4-mini";
 import { createToolHandlers } from "./tools/index.js";
 import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 import { toolErrorResult } from "./mcp.js";
+import { toMcpResult } from "./tools/shared.js";
 
 function fieldFromJson(schema) {
   if (!schema || typeof schema !== "object") return z.unknown();
@@ -86,7 +87,7 @@ export async function startMcpHttpServer({ store, port = null, host = "127.0.0.1
             const identity = resolveIdentity({ meta: extra?._meta, args, base });
             logger?.info?.(`winch: ${def.name} from ${identitySessionKey(identity)}`);
             const res = await handle(def.name, args, identity, extra?._meta);
-            return { content: res.content };
+            return toMcpResult(res);
           } catch (err) {
             return toolErrorResult(err);
           }

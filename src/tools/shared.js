@@ -6,7 +6,19 @@ export function ok(text, details) {
 }
 
 export function err(text, reason, extra = {}) {
-  return { content: [{ type: "text", text }], details: { status: "rejected", reason, ...extra } };
+  return {
+    content: [{ type: "text", text }],
+    details: { status: "rejected", reason, ...extra },
+    isError: true,
+  };
+}
+
+// Tool handlers carry internal `details`; MCP results do not. Keep the
+// protocol error bit without leaking bookkeeping into the content.
+export function toMcpResult(res) {
+  return res?.isError
+    ? { content: res.content, isError: true }
+    : { content: res.content };
 }
 
 export function clampNote(s, max = 2000) {
