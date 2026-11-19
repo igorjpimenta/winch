@@ -11,6 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4-mini";
 import { createToolHandlers } from "./tools/index.js";
+import { toMcpResult } from "./tools/shared.js";
 import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 
 // JSON Schema → zod raw shape for the subset the tool defs use (string,
@@ -91,7 +92,7 @@ export async function startMcpServer({ store, base, logger }) {
           // Per-call config overlay rides the same trusted meta channel as
           // agent/session; malformed knobs refuse the call, never the server.
           const res = await handle(def.name, args, identity, extra?._meta);
-          return { content: res.content };
+          return toMcpResult(res);
         } catch (err) {
           return toolErrorResult(err);
         }

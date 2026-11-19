@@ -177,3 +177,96 @@ test("merge completing a held task names the displaced holder in the note", () =
   assert.equal(ev.length, 1);
   assert.match(ev[0].note, /merged: PR #22 \(displaced builder\)/);
 });
+
+test("parseMarkers tolerates missing bodies and reads marker lines with indentation", () => {
+  assert.deepEqual(parseMarkers(null), { epicId: null, taskId: null, version: null });
+  assert.deepEqual(parseMarkers(undefined), { epicId: null, taskId: null, version: null });
+  assert.deepEqual(parseMarkers("  Backlog: E-1\r\n\tBacklog-Task: T-1\n  Release: v1.2.3\n"), {
+    epicId: "E-1", taskId: "T-1", version: "v1.2.3",
+  });
+});
+
+test("merged closes review work; closed-unmerged reopens review work", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  store.task.update(task.id, { status: "review" });
+  const merged = applyMergeOutcomes(store, [pr(30, "merged", body)]);
+  assert.deepEqual(merged.doneTasks, [task.id]);
+  assert.equal(store.task.get(task.id).status, "done");
+
+  const review = store.task.create({ storyId: story.id, title: "review me", status: "review", assigned: "builder", assigneeHarness: "system" });
+  const closed = applyMergeOutcomes(store, [pr(31, "closed", `Backlog-Task: ${review.id}`)]);
+  assert.deepEqual(closed.reopenedTasks, [review.id]);
+  assert.equal(store.task.get(review.id).status, "ready");
+});
+
+test("closed-unmerged leaves a dependency wait alone", () => {
+  store.task.blockOnDeps({ id: task.id, note: "waiting on upstream" });
+  const out = applyMergeOutcomes(store, [pr(32, "CLOSED", `Backlog-Task: ${task.id}`)]);
+  assert.deepEqual(out.reopenedTasks, []);
+  const after = store.task.get(task.id);
+  assert.equal(after.status, "blocked");
+  assert.equal(after.state_json.wait.kind, "deps");
+});
+
+test("mismatched epic and task markers are skipped without closing either", () => {
+  const epic2 = store.epic.create({ title: "E2", status: "in_progress" });
+  const story2 = store.story.create({ epicId: epic2.id, title: "S2", status: "in_progress" });
+  const other = store.task.create({ storyId: story2.id, title: "other", status: "in_progress", assigned: "builder", assigneeHarness: "system" });
+  const tags = [];
+  const exec = (cmd, args) => { tags.push([cmd, ...args]); return ""; };
+  const out = applyMergeOutcomes(store, [{
+    number: 33, state: "MERGED", title: "bad markers",
+    body: `Backlog: ${epic2.id}\nBacklog-Task: ${task.id}\nRelease: v3.0.0`,
+  }], { exec });
+  assert.deepEqual(out.skipped, ["pr#33:task-epic-mismatch"]);
+  assert.deepEqual(out.doneTasks, []);
+  assert.deepEqual(out.closedEpics, []);
+  assert.deepEqual(out.tagged, []);
+  assert.deepEqual(tags, []);
+  assert.equal(store.task.get(task.id).status, "ready");
+  assert.equal(store.epic.get(epic2.id).status, "in_progress");
+  assert.equal(store.task.get(other.id).status, "in_progress");
+});
+
+test("a release without a tag executor is skipped, not reported as shipped", () => {
+  const epic2 = store.epic.create({ title: "E2", status: "in_progress" });
+  const story2 = store.story.create({ epicId: epic2.id, title: "S2", status: "in_progress" });
+  const rel = store.task.create({ storyId: story2.id, title: "release", status: "done", executionKind: "manual" });
+  const out = applyMergeOutcomes(store, [{
+    number: 34, state: "MERGED", title: "ship",
+    body: `Backlog: ${epic2.id}\nBacklog-Task: ${rel.id}\nRelease: v3.1.0`,
+  }]);
+  assert.deepEqual(out.closedEpics, [epic2.id]);
+  assert.deepEqual(out.tagged, []);
+  assert.deepEqual(out.skipped, ["release:v3.1.0 (no tag executor)"]);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM item_events WHERE note LIKE 'release shipped:%'").get().n, 0);
+});
+
+test("dry run reports would-be transitions without mutating or tagging", () => {
+  const tags = [];
+  const exec = (cmd, args) => { tags.push([cmd, ...args]); return ""; };
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}\nRelease: v3.2.0`;
+  const out = applyMergeOutcomes(store, [{ number: 35, state: "MERGED", title: "dry", body }], { exec, dryRun: true });
+  assert.deepEqual(out.doneTasks, [task.id]);
+  assert.deepEqual(out.closedEpics, [epic.id]);
+  assert.deepEqual(out.tagged, ["v3.2.0"]);
+  assert.equal(store.task.get(task.id).status, "ready");
+  assert.equal(store.epic.get(epic.id).status, "in_progress");
+  assert.deepEqual(tags, []);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM item_events WHERE note LIKE 'release shipped:%'").get().n, 0);
+});
+
+test("multiple PRs for one task are order-independent", () => {
+  const body = `Backlog: ${epic.id}\nBacklog-Task: ${task.id}`;
+  store.task.update(task.id, { status: "in_progress" });
+  const closedThenMerged = applyMergeOutcomes(store, [pr(36, "CLOSED", body), pr(37, "MERGED", body)]);
+  assert.deepEqual(closedThenMerged.reopenedTasks, [task.id]);
+  assert.deepEqual(closedThenMerged.doneTasks, [task.id]);
+  assert.equal(store.task.get(task.id).status, "done");
+
+  const second = store.task.create({ storyId: story.id, title: "second", status: "in_progress", assigned: "builder", assigneeHarness: "system" });
+  const mergedThenClosed = applyMergeOutcomes(store, [pr(38, "MERGED", `Backlog-Task: ${second.id}`), pr(39, "CLOSED", `Backlog-Task: ${second.id}`)]);
+  assert.deepEqual(mergedThenClosed.doneTasks, [second.id]);
+  assert.deepEqual(mergedThenClosed.reopenedTasks, []);
+  assert.equal(store.task.get(second.id).status, "done");
+});

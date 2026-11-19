@@ -16,7 +16,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { collectStoryArtifacts } from "./tools/index.js";
-import { readyTasks } from "./ready-queue.js";
+import { depsResolved } from "./deps.js";
 import { HUMAN_AGENT } from "./reserved.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -88,7 +88,33 @@ export function kindForEvent(row) {
 // plus the task, story and epic context a subscriber would otherwise fetch
 // once per row. Artifacts come from the same collector the claim handoff
 // uses, so both paths agree on what "the artifacts" means.
-export function toEventMessage(store, row) {
+function unblockedFor(store, row, kind) {
+  const terminal = row.to_status === "done" || row.to_status === "cancelled";
+  const claims = terminal
+    || kind === "task.released" || kind === "task.appended"
+    || kind === "deps.resolved" || kind === "gate.resolved";
+  if (!claims) return [];
+
+  const ids = new Set();
+  if (terminal) {
+    for (const edge of store.dep.listIncoming(row.item_id)) ids.add(edge.from_id);
+  } else if (row.item_id) {
+    ids.add(row.item_id);
+  }
+
+  const out = [];
+  for (const id of ids) {
+    const task = store.task.get(id);
+    if (!task || task.status !== "ready" || !task.assignee_agent || task.assignee_agent === HUMAN_AGENT) continue;
+    if (!depsResolved(store, id)) continue;
+    out.push({ id: task.id, assigned: task.assignee_agent, assigneeHarness: task.assignee_harness });
+    if (out.length === 20) break;
+  }
+  return out;
+}
+
+export function toEventMessage(store, row, { includeArtifacts = true, includeUnblocked = true } = {}) {
+  const kind = kindForEvent(row);
   const item = !row.item_id ? null : store.item.get(row.item_id);
   const itemKind = item?.kind ?? null;
   const task = itemKind === "task" ? item : null;
@@ -97,7 +123,7 @@ export function toEventMessage(store, row) {
   const actorSession = row.session_id ? store.session.get(row.session_id) : null;
   return {
     type: "event",
-    kind: kindForEvent(row),
+    kind,
     id: row.id,
     at: row.created_at,
     fromStatus: row.from_status ?? null,
@@ -121,14 +147,10 @@ export function toEventMessage(store, row) {
     storyId: story?.id ?? null,
     storyAssigned: story?.assignee_agent ?? null,
     storyAssigneeHarness: story?.assignee_harness ?? null,
-    // Work that a close just made claimable: a dispatcher wakes these without
-    // recomputing the dependency graph. Structural readiness only: capability
-    // tags are the claimant's business, so a tagged task must still appear.
-    // `todo` remains here for pre-standardization rows.
-    unblocked: row.to_status === "done" || row.to_status === "cancelled" || row.to_status === "ready" || row.to_status === "todo"
-      ? readyTasks(store, { ignoreCapabilities: true }).filter((r) => r.task.assignee_agent && r.task.assignee_agent !== HUMAN_AGENT).slice(0, 20)
-          .map((r) => ({ id: r.task.id, assigned: r.task.assignee_agent, assigneeHarness: r.task.assignee_harness }))
-      : [],
+    // Work a transition just made claimable: a dispatcher wakes these without
+    // recomputing the dependency graph. Creation and direct assignment already
+    // route their own item, so only a close looks at incoming edges.
+    unblocked: includeUnblocked ? unblockedFor(store, row, kind) : [],
     task: task
       ? {
           id: task.id,
@@ -136,7 +158,7 @@ export function toEventMessage(store, row) {
           story: story ? story.title : null,
           epic: epic ? epic.title : null,
           acceptance: story ? story.acceptance : null,
-          artifacts: story ? collectStoryArtifacts(store, story.id) : [],
+          artifacts: includeArtifacts && story ? collectStoryArtifacts(store, story.id) : [],
           assignee: task.assignee_agent,
         }
       : null,

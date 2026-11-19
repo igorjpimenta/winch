@@ -143,3 +143,36 @@ test("drop of an unknown id and restore of a live item are refused", async () =>
   assert.equal((await h.call("backlog_drop", { id: "TASK-nope" })).details.reason, "not_found");
   assert.equal((await h.call("backlog_restore", { id: task.id })).details.reason, "not_dropped");
 });
+
+test("story-only append reopens the parent epic", async () => {
+  const res = await h.call("backlog_plan", {
+    epic: { title: "Closed epic" },
+    stories: [{ title: "Closed story", tasks: [{ title: "done task" }] }],
+  });
+  const body = JSON.parse(res.content[0].text);
+  const epicId = body.epic.id;
+  const storyId = body.stories[0].id;
+  h.store.epic.update(epicId, { status: "done" });
+  h.store.story.update(storyId, { status: "done" });
+
+  const appended = await h.call("backlog_append", {
+    storyId,
+    tasks: [{ title: "review fix" }],
+  });
+  assert.equal(appended.details.status, "ok");
+  assert.equal(h.store.epic.get(epicId).status, "in_progress");
+  assert.equal(h.store.story.get(storyId).status, "backlog");
+});
+
+test("append rejects a story that belongs to a different epic", async () => {
+  const first = await h.call("backlog_plan", { epic: { title: "E1" }, stories: [{ title: "S1", tasks: [{ title: "t1" }] }] });
+  const second = await h.call("backlog_plan", { epic: { title: "E2" }, stories: [{ title: "S2", tasks: [{ title: "t2" }] }] });
+  const firstBody = JSON.parse(first.content[0].text);
+  const secondBody = JSON.parse(second.content[0].text);
+  const res = await h.call("backlog_append", {
+    epicId: firstBody.epic.id,
+    storyId: secondBody.stories[0].id,
+    tasks: [{ title: "wrong home" }],
+  });
+  assert.equal(res.details.reason, "rejected");
+});

@@ -7,11 +7,12 @@
 
 export function parseMarkers(body = "") {
   const out = { epicId: null, taskId: null, version: null };
-  const m = body.match(/^\s*Backlog:\s*(\S+)/m);
+  const text = typeof body === "string" ? body : "";
+  const m = text.match(/^\s*Backlog:\s*(\S+)/m);
   if (m) out.epicId = m[1];
-  const t = body.match(/^\s*Backlog-Task:\s*(\S+)/m);
+  const t = text.match(/^\s*Backlog-Task:\s*(\S+)/m);
   if (t) out.taskId = t[1];
-  const v = body.match(/^\s*Release:\s*(\S+)/m);
+  const v = text.match(/^\s*Release:\s*(\S+)/m);
   if (v) out.version = v[1];
   return out;
 }
@@ -29,10 +30,16 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
     const state = String(pr.state ?? "").toUpperCase();
     if (!markers.epicId && !markers.taskId) continue;
 
+    const task = markers.taskId ? store.task.get(markers.taskId) : null;
+    const epic = markers.epicId ? store.epic.get(markers.epicId) : null;
+    if (epic && task && task.epic_id !== epic.id) {
+      out.skipped.push(`pr#${pr.number}:task-epic-mismatch`);
+      continue;
+    }
+
     if (state === "MERGED") {
-      if (markers.taskId) {
-        const task = store.task.get(markers.taskId);
-        if (task && task.status !== "done") {
+      if (task) {
+        if (task.status !== "done") {
           // A merge lands regardless of who holds the claim. When it takes
           // a task out from under a working agent, the note names the
           // displacement — the agent's next tool call would otherwise fail
@@ -50,7 +57,6 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
         }
       }
       if (markers.epicId && markers.version) {
-        const epic = store.epic.get(markers.epicId);
         if (epic && epic.status !== "done") {
           if (!dryRun) store.epic.update(epic.id, { status: "done", actor: "merge-detector", note: `release ${markers.version}` });
           out.closedEpics.push(epic.id);
@@ -58,38 +64,41 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
         // The shipped marker hangs off the release task: events are
         // item-scoped, so a version without a task anchor has nowhere honest
         // to live.
-        const releaseTask = markers.taskId ? store.task.get(markers.taskId) : null;
+        const releaseTask = task;
         const releaseNote = `release shipped: ${markers.version}`;
         const already = releaseTask
           ? store.event.listFor(releaseTask.id).some((e) => e.note === releaseNote)
           : null;
-        if (!releaseTask && !already) out.skipped.push(`release:${markers.version} (no release task)`);
+        if (!releaseTask) out.skipped.push(`release:${markers.version} (no release task)`);
         // Tag before the event: the shipped row asserts a tag exists, so a
         // failed tag records a skip and writes nothing — the wire never
         // claims an untagged shipment.
-        if (exec && !out.tagged.includes(markers.version)) {
-          if (!dryRun) {
-            try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
+        if (exec) {
+          if (!out.tagged.includes(markers.version)) {
+            if (!dryRun) {
+              try { exec("git", ["tag", markers.version], { cwd, stdio: "ignore" }); } catch { out.skipped.push(`tag:${markers.version}`); continue; }
+            }
+            out.tagged.push(markers.version);
           }
-          out.tagged.push(markers.version);
-        }
-        if (releaseTask && !already) {
-          if (!dryRun) {
+          if (releaseTask && !already && !dryRun) {
             const cur = store.task.get(releaseTask.id);
             store.event.append({
               itemId: releaseTask.id, fromStatus: cur.status, toStatus: cur.status,
               kind: "release.shipped", actor: "merge-detector", note: releaseNote,
             });
           }
+        } else if (releaseTask && !already) {
+          out.skipped.push(`release:${markers.version} (no tag executor)`);
         }
       }
     } else if (state === "CLOSED") {
       // Unmerged close = the work did not land. Anything mid-flight on that PR
       // returns to the queue for a fresh claim; 'done' stays done — a later
       // revert is a new ticket, not a rewrite of history.
-      if (markers.taskId) {
-        const task = store.task.get(markers.taskId);
-        if (task && ["in_progress", "review", "blocked"].includes(task.status)) {
+      if (task) {
+        const reopenable = task.status === "in_progress" || task.status === "review"
+          || (task.status === "blocked" && task.gate_type);
+        if (reopenable) {
           // A gate dissolved this way is not a resolution — nobody approved —
           // but it must still stream as a gate ending, not a plain release.
           const dissolved = task.status === "blocked" && task.gate_type;
