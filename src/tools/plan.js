@@ -98,10 +98,14 @@ export function createPlanTools({ store, logger }) {
     },
 
     async backlog_append(args, identity, cfg) {
-      const epic = args?.epicId ? store.epic.get(args.epicId) : null;
+      let epic = args?.epicId ? store.epic.get(args.epicId) : null;
       const story = args?.storyId ? store.story.get(args.storyId) : null;
       if (args?.epicId && !epic) return err(`backlog_append: epic not found: ${args.epicId}`, "not_found");
       if (args?.storyId && !story) return err(`backlog_append: story not found: ${args.storyId}`, "not_found");
+      if (story && !epic) epic = store.epic.get(story.epic_id) ?? null;
+      if (epic && story && story.epic_id !== epic.id) {
+        return err(`backlog_append: story ${story.id} does not belong to epic ${epic.id}`, "rejected");
+      }
       if (args?.stories?.length && !epic) return err("backlog_append: epicId is required to add stories", "rejected");
       if (args?.tasks?.length && !story) return err("backlog_append: storyId is required to add tasks", "rejected");
       if (!args?.stories?.length && !args?.tasks?.length) {
