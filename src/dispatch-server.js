@@ -168,7 +168,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           consumerId: String(body.consumerId ?? "").trim() || null,
           at: Date.now(),
           config: cfg,
-          mutate: false,
+          mutate: true,
         });
         json(res, 200, result);
       } catch (err) {

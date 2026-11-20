@@ -13,6 +13,7 @@
 // GET /health is unauthenticated for load-balancer / HEALTHCHECK probes.
 
 import http from "node:http";
+import net from "node:net";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -21,6 +22,46 @@ import { createToolHandlers } from "./tools/index.js";
 import { resolveIdentity, identitySessionKey, assertDeclaration } from "./identity.js";
 import { toolErrorResult } from "./mcp.js";
 import { toMcpResult } from "./tools/shared.js";
+
+// DNS rebinding: reject non-local Host/Origin before auth so a page served
+// from an attacker domain cannot drive a loopback server. IP literals and the
+// bound host stay allowed so an explicit LAN bind still works.
+function headerHostname(raw) {
+  if (typeof raw !== "string" || !/^[A-Za-z0-9.\-:[\]]+$/.test(raw)) return null;
+  try {
+    return new URL(`http://${raw}`).hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function localHostname(hostname, boundHost, { anyIp = true } = {}) {
+  if (!hostname) return false;
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname === "127.0.0.1" || hostname === "::1") return true;
+  if (anyIp && net.isIP(hostname)) return true;
+  const bound = String(boundHost ?? "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  return bound !== "" && bound !== "0.0.0.0" && bound !== "::" && hostname === bound;
+}
+
+function localRequest(req, boundHost) {
+  const host = headerHostname(req.headers.host);
+  if (!localHostname(host, boundHost)) return false;
+  const origin = req.headers.origin;
+  if (origin === undefined || origin === "") return true;
+  if (typeof origin !== "string" || origin === "null") return false;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    return localHostname(
+      url.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, ""),
+      boundHost,
+      { anyIp: false },
+    );
+  } catch {
+    return false;
+  }
+}
 
 function fieldFromJson(schema) {
   if (!schema || typeof schema !== "object") return z.unknown();
@@ -118,6 +159,11 @@ export async function startMcpHttpServer({ store, port = null, host = "127.0.0.1
       if (url.pathname !== "/mcp") {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("winch mcp-http: POST /mcp only\n");
+        return;
+      }
+      if (!localRequest(req, host)) {
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "forbidden: non-local Host/Origin" }));
         return;
       }
       const auth = req.headers.authorization ?? "";
