@@ -66,6 +66,10 @@ export function createWakeRunner({ logger = console, stateDir = wakeStateDir() }
         forget();
         code === 0 ? resolve() : reject(new Error(`exit ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-2).join(" | ")}` : ""}`));
       });
+      // Unref: an agent run must not hold its caller's event loop open, or a
+      // daemon could not shut down while a wake is in flight. A caller that
+      // awaits wake() must therefore keep its own handle alive — the exit
+      // event will not dispatch on an otherwise empty loop.
       child.unref();
     });
 
