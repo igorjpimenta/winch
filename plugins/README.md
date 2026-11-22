@@ -205,7 +205,7 @@ so nobody but the adapter can write the identity args.
 
 ### Remote (HTTP) — loopback with a bearer
 
-A persistent server (`winch serve --mcp http --port 3899`) avoids per-call
+A persistent server (`winch serve --mcp http --port 38292`) avoids per-call
 spawns. Read the bearer from a `0600` file, not from the environment:
 
 ```jsonc
@@ -213,7 +213,7 @@ spawns. Read the bearer from a `0600` file, not from the environment:
   "mcp": {
     "winch": {
       "type": "remote",
-      "url": "http://127.0.0.1:3899/mcp",
+      "url": "http://127.0.0.1:38292/mcp",
       "headers": {
         "Authorization": "Bearer {file:~/.secrets/winch-bearer}",
         "X-Winch-Harness": "opencode"
