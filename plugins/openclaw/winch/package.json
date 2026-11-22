@@ -10,7 +10,8 @@
     "directory": "plugins/openclaw/winch"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   },
   "files": [
     "index.js",
