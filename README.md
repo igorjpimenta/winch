@@ -29,17 +29,14 @@ planner task id is required. Stable releases publish since `2026.11.9`.
 
 Requires Node.js 22+.
 
-GitHub Packages requires a personal access token with `read:packages` scope
-(classic PAT - fine-grained tokens do not support package read). Configure
-your npmrc with the registry and token, then install:
-
     npm install -g @igorjpimenta/winch
     winch --version
 
 The harness adapters publish on their own release lines and can use the same or
 different winch versions than the daemon:
 `@igorjpimenta/winch-openclaw` and `@igorjpimenta/winch-opencode`.
-A `beta` dist-tag tracks prereleases (`YYYY.MM.DD-beta.N`).
+A `beta` dist-tag tracks prereleases (`YYYY.MM.DD-beta.N`); until an adapter's
+first stable exists, its versionless install serves the newest beta.
 
 From source instead: `npm install`, then `./bin/winch.js <command>` - or
 `npm link` for a global `winch`.

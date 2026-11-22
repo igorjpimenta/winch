@@ -1,25 +1,34 @@
-# Publish the release lines to their registries.
+# Publish the release lines to npmjs.
 #
 # Three independent release lines, each a bare tag (no v prefix):
-#   - `<semver>`               → @igorjpimenta/winch             (core MCP server)
-#   - `winch-openclaw-<semver>`→ @igorjpimenta/winch-openclaw    (OpenClaw plugin)
-#   - `winch-opencode-<semver>`→ @igorjpimenta/winch-opencode    (OpenCode plugin)
-# Each job validates that the tag matches the version in its own package.json
-# and publishes stable to `latest`, prerelease to `beta`. Anything else fails.
+#   - `<semver>`                → @igorjpimenta/winch             (core MCP server)
+#   - `winch-openclaw-<semver>` → @igorjpimenta/winch-openclaw    (OpenClaw plugin)
+#   - `winch-opencode-<semver>` → @igorjpimenta/winch-opencode    (OpenCode plugin)
 #
-# Core and openclaw go to GitHub Packages; GITHUB_TOKEN has packages:write via
-# the `packages` permission below. Consumers need an .npmrc scope line:
-#   @igorjpimenta:registry=https://npm.pkg.github.com
+# Auth is Trusted Publishing (OIDC) on every line: npm exchanges this run's
+# id-token for a short-lived publish token scoped by the package's
+# trusted-publisher entry (repo igorjpimenta/winch, file publish.yml, job
+# core|openclaw|opencode). No stored token. The entry must exist on npmjs
+# BEFORE the first publish of each package or the exchange fails with
+# `package not found`; a freshly created entry can take hours before the
+# exchange accepts it — re-run the job. NODE_AUTH_TOKEN is pinned empty on the
+# publish steps: setup-node's registry-url leaves an XXXXX placeholder in the
+# job env, and a non-empty token changes the failure from ENEEDAUTH into a PUT
+# 404 that hides the exchange. Publish runs --loglevel silly because npm logs
+# OIDC failures at verbose only (npm/cli #9923).
 #
-# The opencode line goes to npmjs through Trusted Publishing (OIDC): npm
-# exchanges this run's id-token for a short-lived token scoped by the package's
-# trusted-publisher entry (repo igorjpimenta/winch, file publish.yml, action
-# publish). NODE_AUTH_TOKEN is pinned empty on the publish step — a
-# non-empty token hides a failed exchange behind a PUT 404 — and publish runs
-# --loglevel silly because npm logs OIDC failures at verbose only. A freshly
-# created entry can take hours before the exchange accepts it; re-run the job.
-# No step moves `latest` for a beta: a beta publishes under its beta tag and
-# `latest` holds the newest stable, taken natively by a stable publish.
+# Tombstone gate (all jobs): a version the registry has ever held is never
+# reusable. `npm view <pkg> time` lists tombstones that `versions` omits; a
+# live version is skipped so re-runs are green, an unpublished tombstone fails
+# hard — npm's own rejection for those arrives only AFTER the upload.
+#
+# dist-tags: a prerelease publishes under beta and a stable under latest,
+# EXCEPT adapter prereleases while the line has no stable — adapters are
+# installed versionless (`npm:@igorjpimenta/winch-opencode@latest`), so their
+# newest beta takes latest until the first stable exists; the stable then takes
+# latest natively and the rule freezes. Core prereleases never move latest.
+#
+# Every tag gets an idempotent GitHub release with the npm link in its notes.
 
 name: publish
 
@@ -31,8 +40,7 @@ on:
       - "winch-opencode-[0-9]*"
 
 permissions:
-  contents: read
-  packages: write
+  contents: write
   id-token: write
 
 jobs:
@@ -44,10 +52,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://npm.pkg.github.com
-          scope: "@igorjpimenta"
-      - run: npm ci
-      - run: npm test
+          registry-url: https://registry.npmjs.org
+      # Node 22 bundles npm 10, which has no trusted publishing at all and
+      # fails the exchange silently — npm >= 11.5.1 is the floor.
+      - run: npm install -g npm@latest && npm --version
       - name: Resolve channel (stable vs beta)
         id: channel
         run: |
@@ -61,19 +69,17 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != package.json $PKG — bump package.json first"
             exit 1
           fi
-          # Versions carry the UTC date of the release; compare against the
-          # tag's own date so a release cut after 00:00 UTC cannot ship
-          # yesterday's date.
           # npm normalizes zero-padded version components (2026.11.03 ->
-          # 2026.11.3), so compare semver-normalized integers on both sides.
-          norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
-          # npm rewrites zero-padded components (2026.11.03 publishes as
           # 2026.11.3), so a padded package.json would ship a version its own
           # tag and consumers cannot address. Refuse the pad at the door.
+          norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
           if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
             echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
             exit 1
           fi
+          # Versions carry the UTC date of the release; compare against the
+          # tag's own date so a release cut after 00:00 UTC cannot ship
+          # yesterday's date.
           TAG_DATE="$(norm "${TAG%%-*}" | tr . -)"
           UTC_DATE="$(norm "$(date -u +%Y.%m.%d)" | tr . -)"
           if [ "$TAG_DATE" != "$UTC_DATE" ]; then
@@ -84,9 +90,46 @@ jobs:
             *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
             * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
-      - run: npm publish --tag ${{ steps.channel.outputs.tag }}
+      - name: Refuse a version the registry has ever seen; skip a live one
+        id: gate
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').name")
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PKG" time --json | grep -q "\"$VERSION\""; then
+            if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+              echo "::notice::$PKG@$VERSION is already published; skipping (tag kept for provenance)"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::$PKG@$VERSION was published before and unpublished — a seen version can never return; pick a new version"
+              exit 1
+            fi
+          else
+            echo "$PKG@$VERSION is unused on the registry"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - run: npm ci
+      - run: npm test
+      - name: Publish (trusted publishing; silly so a failed exchange is visible)
+        if: steps.gate.outputs.skip != 'true'
+        run: npm publish --provenance --tag ${{ steps.channel.outputs.tag }} --loglevel silly
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ""
+      - name: Create GitHub release
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PRERELEASE=""
+          case "$TAG" in
+            *-* ) PRERELEASE="--prerelease" ;;
+          esac
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" $PRERELEASE \
+              --notes "npm: https://www.npmjs.com/package/${PKG_NAME}/v/${PKG_VERSION}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   openclaw:
     if: startsWith(github.ref_name, 'winch-openclaw-')
@@ -99,9 +142,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://npm.pkg.github.com
-          scope: "@igorjpimenta"
-      - name: Resolve channel (stable vs beta)
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest && npm --version
+      - name: Resolve channel
         id: channel
         run: |
           TAG="${GITHUB_REF_NAME#winch-openclaw-}"
@@ -114,12 +157,7 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != plugin package.json $PKG — bump it first"
             exit 1
           fi
-          # npm normalizes zero-padded version components (2026.11.03 ->
-          # 2026.11.3), so compare semver-normalized integers on both sides.
           norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
-          # npm rewrites zero-padded components (2026.11.03 publishes as
-          # 2026.11.3), so a padded package.json would ship a version its own
-          # tag and consumers cannot address. Refuse the pad at the door.
           if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
             echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
             exit 1
@@ -134,9 +172,58 @@ jobs:
             *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
             * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
-      - run: npm publish --tag ${{ steps.channel.outputs.tag }}
+      - name: Refuse a version the registry has ever seen; skip a live one
+        id: gate
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').name")
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PKG" time --json | grep -q "\"$VERSION\""; then
+            if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+              echo "::notice::$PKG@$VERSION is already published; skipping (tag kept for provenance)"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::$PKG@$VERSION was published before and unpublished — a seen version can never return; pick a new version"
+              exit 1
+            fi
+          else
+            echo "$PKG@$VERSION is unused on the registry"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Adapters are installed versionless, so while the line has no stable the
+      # newest beta takes latest (a prerelease under a dist-tag is legal); the
+      # first stable then takes latest natively and the rule freezes. Publishing
+      # under the tag directly avoids `npm dist-tag add`, which needs real
+      # credentials that trusted publishing does not issue.
+      - name: Publish (trusted publishing; silly so a failed exchange is visible)
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          DIST_TAG="${{ steps.channel.outputs.tag }}"
+          if [ "$DIST_TAG" = "beta" ]; then
+            LATEST="$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>/dev/null || true)"
+            if [ -z "$LATEST" ] || printf '%s' "$LATEST" | grep -q -- '-'; then
+              DIST_TAG="latest"
+            fi
+          fi
+          npm publish --provenance --tag "$DIST_TAG" --loglevel silly
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ""
+      - name: Create GitHub release
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PRERELEASE=""
+          case "${GITHUB_REF_NAME#winch-openclaw-}" in
+            *-* ) PRERELEASE="--prerelease" ;;
+          esac
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" $PRERELEASE \
+              --notes "npm: https://www.npmjs.com/package/${PKG_NAME}/v/${PKG_VERSION}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   opencode:
     if: startsWith(github.ref_name, 'winch-opencode-')
@@ -150,10 +237,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      # Node 22 bundles npm 10, which has no trusted publishing at all and
-      # fails the exchange silently — npm >= 11.5.1 is the floor.
       - run: npm install -g npm@latest && npm --version
-      - name: Resolve channel (stable vs beta)
+      - name: Resolve channel
         id: channel
         run: |
           TAG="${GITHUB_REF_NAME#winch-opencode-}"
@@ -166,12 +251,7 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME != opencode package.json $PKG"
             exit 1
           fi
-          # npm normalizes zero-padded version components (2026.11.03 ->
-          # 2026.11.3), so compare semver-normalized integers on both sides.
           norm() { printf '%s' "$1" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}'; }
-          # npm rewrites zero-padded components (2026.11.03 publishes as
-          # 2026.11.3), so a padded package.json would ship a version its own
-          # tag and consumers cannot address. Refuse the pad at the door.
           if [ "$(norm "${TAG%%-*}")" != "${TAG%%-*}" ]; then
             echo "::error::version ${TAG%%-*} has zero-padded components; npm normalizes them (use $(norm "${TAG%%-*}"))"
             exit 1
@@ -186,13 +266,50 @@ jobs:
             *-* ) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
             * )   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
-      - name: Publish unless this version already exists
+      - name: Refuse a version the registry has ever seen; skip a live one
+        id: gate
         run: |
-          V="$(node -p "require('./package.json').version")"
-          if npm view "@igorjpimenta/winch-opencode@$V" version >/dev/null 2>&1; then
-            echo "::notice::$V is already published; skipping (tag kept for provenance)"
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').name")
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PKG" time --json | grep -q "\"$VERSION\""; then
+            if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+              echo "::notice::$PKG@$VERSION is already published; skipping (tag kept for provenance)"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::$PKG@$VERSION was published before and unpublished — a seen version can never return; pick a new version"
+              exit 1
+            fi
           else
-            npm publish --tag ${{ steps.channel.outputs.tag }} --provenance --loglevel silly
+            echo "$PKG@$VERSION is unused on the registry"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Publish (trusted publishing; silly so a failed exchange is visible)
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          DIST_TAG="${{ steps.channel.outputs.tag }}"
+          if [ "$DIST_TAG" = "beta" ]; then
+            LATEST="$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>/dev/null || true)"
+            if [ -z "$LATEST" ] || printf '%s' "$LATEST" | grep -q -- '-'; then
+              DIST_TAG="latest"
+            fi
+          fi
+          npm publish --provenance --tag "$DIST_TAG" --loglevel silly
         env:
           NODE_AUTH_TOKEN: ""
+      - name: Create GitHub release
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PRERELEASE=""
+          case "${GITHUB_REF_NAME#winch-opencode-}" in
+            *-* ) PRERELEASE="--prerelease" ;;
+          esac
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" $PRERELEASE \
+              --notes "npm: https://www.npmjs.com/package/${PKG_NAME}/v/${PKG_VERSION}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
