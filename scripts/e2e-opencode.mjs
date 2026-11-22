@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store/index.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MODEL = process.env.WINCH_E2E_MODEL;
@@ -105,7 +105,7 @@ function writeConfig({ port, withMcp }) {
 
 function seedTask() {
   const store = createStore({ dbPath });
-  const epic = store.epic.create({ title: "e2e", status: "planned", priority: 50 });
+  const epic = store.epic.create({ title: "e2e", status: "backlog", priority: 50 });
   const story = store.story.create({ epicId: epic.id, title: "roundtrip" });
   const task = store.task.create({ storyId: story.id, title: "winch-e2e-marker", executionKind: "manual" });
   return task;
