@@ -3,8 +3,11 @@
 // real winch MCP server. Not part of `npm test`: it needs a model, credentials,
 // and a live server, so it is a check a person runs deliberately.
 //
-//   WINCH_E2E_MODEL=anthropic/claude-sonnet-4 node scripts/e2e-opencode.mjs
-//   WINCH_E2E_MODEL=... node scripts/e2e-opencode.mjs --harness opencode2 --reload
+//   node scripts/e2e-opencode.mjs
+//   node scripts/e2e-opencode.mjs --harness opencode2 --reload
+//
+// The model is whichever the harness instance resolves for itself — the
+// script never names one, so a run exercises the agent's own configuration.
 //
 // The claim under test is the one the plugin exists for: a winch call made by a
 // session reaches the server with the session's own agent and session stamped,
@@ -21,7 +24,6 @@ import { fileURLToPath } from "node:url";
 import { createStore } from "../src/store/index.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const MODEL = process.env.WINCH_E2E_MODEL;
 const TIMEOUT_MS = Number(process.env.WINCH_E2E_TIMEOUT_MS ?? 240_000);
 const args = process.argv.slice(2);
 const harness = args.includes("--harness")
@@ -29,10 +31,6 @@ const harness = args.includes("--harness")
   : "opencode";
 const reload = args.includes("--reload");
 
-if (!MODEL) {
-  console.error("e2e-opencode: set WINCH_E2E_MODEL (provider/model) — refusing to guess one.");
-  process.exit(2);
-}
 if (harness !== "opencode" && harness !== "opencode2") {
   console.error(`e2e-opencode: --harness must be opencode or opencode2, got ${JSON.stringify(harness)}`);
   process.exit(2);
@@ -139,7 +137,7 @@ async function waitForServer(port) {
 
 function runHarness(prompt, { continueSession }) {
   const bin = harness === "opencode" ? "opencode" : "opencode2";
-  const argv = ["run", "--auto", "--model", MODEL];
+  const argv = ["run", "--auto"];
   if (continueSession) argv.push("--continue");
   if (harness === "opencode2") argv.push("--standalone");
   argv.push(prompt);
