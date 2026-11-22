@@ -1,6 +1,6 @@
 # WebSocket event stream
 
-`winch serve --ws [--port N] [--host H]` tails the `item_events` ledger and
+`winch serve --ws [--port N] [--host H] [--config JSON|PATH]` tails the `item_events` ledger and
 broadcasts new rows to every connected client as JSON text frames. The stream
 is read-only: clients observe, they do not claim or dispatch work.
 

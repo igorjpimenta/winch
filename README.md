@@ -300,8 +300,8 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 
 | command | what it does |
 | --- | --- |
-| `serve --mcp stdio` | serve the backlog tools over MCP stdio (env-only harness) |
-| `serve --mcp http --port N [--host H]` | serve the same tools over Streamable HTTP (shared daemon) |
+| `serve --mcp stdio [--config JSON\|PATH]` | serve the backlog tools over MCP stdio (env-only harness) |
+| `serve --mcp http --port N [--host H] [--config JSON\|PATH]` | serve the same tools over Streamable HTTP (shared daemon) |
 | `watch` | one watcher tick (JSON manifest on stdout) |
 | `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to ready |
 | `next` | list the current ready queue |
@@ -313,8 +313,8 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `webhook deliveries [--status S] [--admission ID] [--consumer ID] [--limit N]` | inspect the per-consumer delivery ledger; `--status dead` lists dead letters |
 | `webhook revoke [--topic T] --id I` | remove a webhook subscription |
 | `webhook test [--topic T] [--harness H] [--id I]` | POST a ping to webhook subscriptions |
-| `serve --ws --port N [--host H]` | stream store events over WebSocket |
-| `webhook serve [--port N] [--host H]` | serve dispatch registration, recovery and the wake pump |
+| `serve --ws --port N [--host H] [--config JSON\|PATH]` | stream store events over WebSocket |
+| `webhook serve [--port N] [--host H] [--config JSON\|PATH]` | serve dispatch registration, recovery and the wake pump |
 
 ## Deploy (any server)
 
@@ -343,7 +343,7 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
 
 ## Events stream
 
-`winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
+`winch serve --ws [--port N] [--host H] [--config JSON|PATH]` (default port 38291, localhost-only
 unless `--host` says otherwise) tails the `item_events` ledger and broadcasts every
 new row to all connected clients as JSON text frames:
 

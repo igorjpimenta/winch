@@ -43,16 +43,18 @@ function loadConfig(values) {
 
 const USAGE = `usage: winch <command>
 
-  serve --mcp stdio|http [--port N] [--host H]
+  serve --mcp stdio|http [--port N] [--host H] [--config JSON|PATH]
                                       serve the backlog tools over MCP stdio or Streamable HTTP
                                       (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
-  serve --ws --port N [--host H]         stream store events over WebSocket
+  serve --ws --port N [--host H] [--config JSON|PATH]
+                                      stream store events over WebSocket
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → ready
   next                                   list the current ready queue
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
-  webhook serve [--port N] [--host H]     serve dispatch registration, recovery and the wake pump
+  webhook serve [--port N] [--host H] [--config JSON|PATH]
+                                      serve dispatch registration, recovery and the wake pump
   webhook bearer                           generate a dispatch bearer
   webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B] [--timeout-ms N]
                                            register or replace a webhook subscription
