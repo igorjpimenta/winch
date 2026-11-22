@@ -44,7 +44,7 @@ function withEnv(vars, fn) {
     });
 }
 
-test("a wake child is denied its own dispatch listener and forgets its record", async () => {
+test("a wake child is denied its own dispatch listener and forgets its record", { timeout: 30_000 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "winch-wake-"));
   const out = path.join(dir, "env.txt");
   const stateDir = path.join(dir, "state");
@@ -57,7 +57,15 @@ test("a wake child is denied its own dispatch listener and forgets its record", 
       },
       async () => {
         const runner = createWakeRunner({ logger: null, stateDir });
-        await runner.wake({ agent: "build", message: "ITM-env" });
+        // wake()'s child is unref'd so a bare caller is not held open by an
+        // agent run; without a live handle here the loop can drain before the
+        // child's exit event dispatches and the await never settles.
+        const hold = setInterval(() => {}, 25);
+        try {
+          await runner.wake({ agent: "build", message: "ITM-env" });
+        } finally {
+          clearInterval(hold);
+        }
         assert.equal(readFileSync(out, "utf8"), "0");
         assert.deepEqual(readdirSync(stateDir), [], "record removed when the child exits");
       },
