@@ -33,10 +33,18 @@ stored token. Each package needs its entry created once on npmjs.com — package
 a freshly created entry can take hours before the exchange accepts it, and the
 first publish within two days or the entry expires uneditable.
 
+A package that has never been on npmjs needs one interactive publish before any
+of that: the exchange answers `package not found`, so the tag workflow cannot
+create it. Run `npm publish --tag beta` from the repo root with 2FA, then
+`npm trust github <pkg> --repo igorjpimenta/winch --file publish.yml
+--allow-publish`. That version carries no provenance; the next tag does.
+A new package's packument 404s for a few minutes after the upload returns 202.
+
 ## dist-tags
 
 - a prerelease publishes under `beta`, a stable under `latest`;
-- core prereleases never move `latest`;
+- core prereleases never move `latest`, except the first-ever version of a
+  package, which npm tags `latest` whatever `--tag` asks for;
 - adapter prereleases take `latest` while the line has no stable — adapters
   are installed versionless (`npm:@igorjpimenta/winch-openclaw@latest`), so a
   stale `latest` would serve an old beta — and the first stable takes `latest`
