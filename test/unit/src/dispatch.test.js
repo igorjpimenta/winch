@@ -306,6 +306,24 @@ test("register and recover endpoints are available on the server", async () => {
   assert.ok(Array.isArray(body.start));
 });
 
+test("recover endpoint offers queued work", async () => {
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 60000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const { row } = seedAssigned();
+  observeEvent(row);
+  assert.equal(store.admission.queued("test").length, 1);
+
+  const res = await fetch(`${base}/dispatch/recover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ harness: "test" }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.start.length, 1);
+  assert.equal(store.admission.queued("test").length, 0);
+});
+
 test("dispatch registration is one row per consumer, with executor metadata", async () => {
   srv = await startDispatchServer({ store, port: 0, intervalMs: 1000 });
   const base = `http://127.0.0.1:${srv.port}`;
