@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5d8a1e36-26a7-4a30-beb7-d44a69ab5111",
-  "prevId": "87814314-95fb-4521-9988-42fce3b9ead4",
+  "id": "87814314-95fb-4521-9988-42fce3b9ead4",
+  "prevId": "28f4b593-644f-4990-a26d-f8011defb590",
   "tables": {
     "admission_attempts": {
       "name": "admission_attempts",
@@ -1781,9 +1781,9 @@
         }
       },
       "foreignKeys": {
-        "webhook_deliveries_admission_id_admission_queue_id_fk": {
-          "name": "webhook_deliveries_admission_id_admission_queue_id_fk",
-          "tableFrom": "webhook_deliveries",
+        "dispatch_deliveries_admission_id_admission_queue_id_fk": {
+          "name": "dispatch_deliveries_admission_id_admission_queue_id_fk",
+          "tableFrom": "dispatch_deliveries",
           "tableTo": "admission_queue",
           "columnsFrom": [
             "admission_id"
@@ -1800,7 +1800,7 @@
       "checkConstraints": {
         "delivery_status": {
           "name": "delivery_status",
-          "value": "\"webhook_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
+          "value": "\"dispatch_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
         }
       }
     },
@@ -1868,10 +1868,10 @@
         }
       },
       "foreignKeys": {
-        "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk": {
-          "name": "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk",
-          "tableFrom": "webhook_delivery_attempts",
-          "tableTo": "webhook_deliveries",
+        "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk": {
+          "name": "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk",
+          "tableFrom": "dispatch_delivery_attempts",
+          "tableTo": "dispatch_deliveries",
           "columnsFrom": [
             "delivery_id"
           ],

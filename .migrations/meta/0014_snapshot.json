@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ca33f167-9093-4edb-8839-d8f11fe89c67",
-  "prevId": "5d8a1e36-26a7-4a30-beb7-d44a69ab5111",
+  "id": "742b8130-c6ca-4cd4-a9f2-276d56d8c9e0",
+  "prevId": "87814314-95fb-4521-9988-42fce3b9ead4",
   "tables": {
     "admission_attempts": {
       "name": "admission_attempts",
@@ -1329,472 +1329,6 @@
         }
       }
     },
-    "usage_events": {
-      "name": "usage_events",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "attempt_id": {
-          "name": "attempt_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "harness": {
-          "name": "harness",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "external_session_id": {
-          "name": "external_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tokens_in": {
-          "name": "tokens_in",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tokens_out": {
-          "name": "tokens_out",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "cache_read": {
-          "name": "cache_read",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "cost_usd": {
-          "name": "cost_usd",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tool_calls": {
-          "name": "tool_calls",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'api'"
-        },
-        "turn_ref": {
-          "name": "turn_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_usage_item": {
-          "name": "idx_usage_item",
-          "columns": [
-            "item_id"
-          ],
-          "isUnique": false
-        },
-        "idx_usage_session": {
-          "name": "idx_usage_session",
-          "columns": [
-            "session_id"
-          ],
-          "isUnique": false
-        },
-        "idx_usage_attempt": {
-          "name": "idx_usage_attempt",
-          "columns": [
-            "attempt_id"
-          ],
-          "isUnique": false
-        },
-        "idx_usage_created": {
-          "name": "idx_usage_created",
-          "columns": [
-            "created_at"
-          ],
-          "isUnique": false
-        },
-        "idx_usage_identity": {
-          "name": "idx_usage_identity",
-          "columns": [
-            "harness",
-            "agent_id",
-            "external_session_id"
-          ],
-          "isUnique": false
-        },
-        "uq_usage_turn": {
-          "name": "uq_usage_turn",
-          "columns": [
-            "harness",
-            "agent_id",
-            "external_session_id",
-            "turn_ref"
-          ],
-          "isUnique": true,
-          "where": "\"usage_events\".\"turn_ref\" IS NOT NULL"
-        }
-      },
-      "foreignKeys": {
-        "usage_events_item_id_items_id_fk": {
-          "name": "usage_events_item_id_items_id_fk",
-          "tableFrom": "usage_events",
-          "tableTo": "items",
-          "columnsFrom": [
-            "item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "usage_events_session_id_work_sessions_id_fk": {
-          "name": "usage_events_session_id_work_sessions_id_fk",
-          "tableFrom": "usage_events",
-          "tableTo": "work_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "usage_events_attempt_id_attempts_id_fk": {
-          "name": "usage_events_attempt_id_attempts_id_fk",
-          "tableFrom": "usage_events",
-          "tableTo": "attempts",
-          "columnsFrom": [
-            "attempt_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "usage_source": {
-          "name": "usage_source",
-          "value": "\"usage_events\".\"source\" IN ('api')"
-        },
-        "usage_nonneg": {
-          "name": "usage_nonneg",
-          "value": "(\"usage_events\".\"tokens_in\" IS NULL OR \"usage_events\".\"tokens_in\" >= 0) AND (\"usage_events\".\"tokens_out\" IS NULL OR \"usage_events\".\"tokens_out\" >= 0) AND (\"usage_events\".\"cache_read\" IS NULL OR \"usage_events\".\"cache_read\" >= 0) AND (\"usage_events\".\"cost_usd\" IS NULL OR \"usage_events\".\"cost_usd\" >= 0) AND (\"usage_events\".\"tool_calls\" IS NULL OR \"usage_events\".\"tool_calls\" >= 0)"
-        }
-      }
-    },
-    "webhook_deliveries": {
-      "name": "webhook_deliveries",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "admission_id": {
-          "name": "admission_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attempt_no": {
-          "name": "attempt_no",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "consumer_id": {
-          "name": "consumer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "next_at": {
-          "name": "next_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_status": {
-          "name": "last_status",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dead_at": {
-          "name": "dead_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "uq_delivery_grain": {
-          "name": "uq_delivery_grain",
-          "columns": [
-            "admission_id",
-            "attempt_no",
-            "consumer_id"
-          ],
-          "isUnique": true
-        },
-        "idx_delivery_due": {
-          "name": "idx_delivery_due",
-          "columns": [
-            "status",
-            "next_at"
-          ],
-          "isUnique": false
-        },
-        "idx_delivery_attempt": {
-          "name": "idx_delivery_attempt",
-          "columns": [
-            "admission_id",
-            "attempt_no"
-          ],
-          "isUnique": false
-        },
-        "idx_delivery_event": {
-          "name": "idx_delivery_event",
-          "columns": [
-            "event_id",
-            "consumer_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "webhook_deliveries_admission_id_admission_queue_id_fk": {
-          "name": "webhook_deliveries_admission_id_admission_queue_id_fk",
-          "tableFrom": "webhook_deliveries",
-          "tableTo": "admission_queue",
-          "columnsFrom": [
-            "admission_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "delivery_status": {
-          "name": "delivery_status",
-          "value": "\"webhook_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
-        }
-      }
-    },
-    "webhook_delivery_attempts": {
-      "name": "webhook_delivery_attempts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "delivery_id": {
-          "name": "delivery_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attempt_no": {
-          "name": "attempt_no",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "response_status": {
-          "name": "response_status",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_delivery_attempts_delivery": {
-          "name": "idx_delivery_attempts_delivery",
-          "columns": [
-            "delivery_id",
-            "attempt_no"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk": {
-          "name": "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk",
-          "tableFrom": "webhook_delivery_attempts",
-          "tableTo": "webhook_deliveries",
-          "columnsFrom": [
-            "delivery_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "webhooks": {
       "name": "webhooks",
       "columns": {
@@ -2104,6 +1638,472 @@
         "work_sessions_kind": {
           "name": "work_sessions_kind",
           "value": "\"work_sessions\".\"kind\" IN ('claim', 'review', 'system', 'fanout')"
+        }
+      }
+    },
+    "webhook_deliveries": {
+      "name": "webhook_deliveries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "admission_id": {
+          "name": "admission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "consumer_id": {
+          "name": "consumer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "next_at": {
+          "name": "next_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_status": {
+          "name": "last_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dead_at": {
+          "name": "dead_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_delivery_grain": {
+          "name": "uq_delivery_grain",
+          "columns": [
+            "admission_id",
+            "attempt_no",
+            "consumer_id"
+          ],
+          "isUnique": true
+        },
+        "idx_delivery_due": {
+          "name": "idx_delivery_due",
+          "columns": [
+            "status",
+            "next_at"
+          ],
+          "isUnique": false
+        },
+        "idx_delivery_attempt": {
+          "name": "idx_delivery_attempt",
+          "columns": [
+            "admission_id",
+            "attempt_no"
+          ],
+          "isUnique": false
+        },
+        "idx_delivery_event": {
+          "name": "idx_delivery_event",
+          "columns": [
+            "event_id",
+            "consumer_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "dispatch_deliveries_admission_id_admission_queue_id_fk": {
+          "name": "dispatch_deliveries_admission_id_admission_queue_id_fk",
+          "tableFrom": "dispatch_deliveries",
+          "tableTo": "admission_queue",
+          "columnsFrom": [
+            "admission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "delivery_status": {
+          "name": "delivery_status",
+          "value": "\"dispatch_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
+        }
+      }
+    },
+    "webhook_delivery_attempts": {
+      "name": "webhook_delivery_attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "delivery_id": {
+          "name": "delivery_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "response_status": {
+          "name": "response_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_delivery_attempts_delivery": {
+          "name": "idx_delivery_attempts_delivery",
+          "columns": [
+            "delivery_id",
+            "attempt_no"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk": {
+          "name": "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk",
+          "tableFrom": "dispatch_delivery_attempts",
+          "tableTo": "dispatch_deliveries",
+          "columnsFrom": [
+            "delivery_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "usage_events": {
+      "name": "usage_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "external_session_id": {
+          "name": "external_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tokens_in": {
+          "name": "tokens_in",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tokens_out": {
+          "name": "tokens_out",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cache_read": {
+          "name": "cache_read",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_usd": {
+          "name": "cost_usd",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tool_calls": {
+          "name": "tool_calls",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'api'"
+        },
+        "turn_ref": {
+          "name": "turn_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_usage_item": {
+          "name": "idx_usage_item",
+          "columns": [
+            "item_id"
+          ],
+          "isUnique": false
+        },
+        "idx_usage_session": {
+          "name": "idx_usage_session",
+          "columns": [
+            "session_id"
+          ],
+          "isUnique": false
+        },
+        "idx_usage_attempt": {
+          "name": "idx_usage_attempt",
+          "columns": [
+            "attempt_id"
+          ],
+          "isUnique": false
+        },
+        "idx_usage_created": {
+          "name": "idx_usage_created",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "idx_usage_identity": {
+          "name": "idx_usage_identity",
+          "columns": [
+            "harness",
+            "agent_id",
+            "external_session_id"
+          ],
+          "isUnique": false
+        },
+        "uq_usage_turn": {
+          "name": "uq_usage_turn",
+          "columns": [
+            "harness",
+            "agent_id",
+            "external_session_id",
+            "turn_ref"
+          ],
+          "isUnique": true,
+          "where": "\"usage_events\".\"turn_ref\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "usage_events_item_id_items_id_fk": {
+          "name": "usage_events_item_id_items_id_fk",
+          "tableFrom": "usage_events",
+          "tableTo": "items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "usage_events_session_id_work_sessions_id_fk": {
+          "name": "usage_events_session_id_work_sessions_id_fk",
+          "tableFrom": "usage_events",
+          "tableTo": "work_sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "usage_events_attempt_id_attempts_id_fk": {
+          "name": "usage_events_attempt_id_attempts_id_fk",
+          "tableFrom": "usage_events",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "usage_source": {
+          "name": "usage_source",
+          "value": "\"usage_events\".\"source\" IN ('api')"
+        },
+        "usage_nonneg": {
+          "name": "usage_nonneg",
+          "value": "(\"usage_events\".\"tokens_in\" IS NULL OR \"usage_events\".\"tokens_in\" >= 0) AND (\"usage_events\".\"tokens_out\" IS NULL OR \"usage_events\".\"tokens_out\" >= 0) AND (\"usage_events\".\"cache_read\" IS NULL OR \"usage_events\".\"cache_read\" >= 0) AND (\"usage_events\".\"cost_usd\" IS NULL OR \"usage_events\".\"cost_usd\" >= 0) AND (\"usage_events\".\"tool_calls\" IS NULL OR \"usage_events\".\"tool_calls\" >= 0)"
         }
       }
     }
