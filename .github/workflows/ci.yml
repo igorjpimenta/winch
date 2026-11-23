@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # drizzle-kit walks the snapshot lineage in .migrations/meta. A snapshot
+      # whose id is duplicated or whose prevId does not link to the previous
+      # snapshot makes `generate` error, and a schema/snapshot mismatch makes it
+      # emit SQL. Either way the working tree changes, so a clean `.migrations`
+      # after generate is the invariant: schema and migrations agree.
+      - name: Schema and migrations agree
+        run: |
+          npx drizzle-kit generate
+          if [ -n "$(git status --porcelain -- .migrations)" ]; then
+            echo "::error::drizzle-kit generate changed .migrations — commit the generated migration/snapshot, or fix the schema or snapshot chain"
+            git --no-pager status --porcelain -- .migrations
+            git --no-pager diff -- .migrations
+            exit 1
+          fi
