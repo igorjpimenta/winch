@@ -8,8 +8,8 @@ publish by hand.
 | --- | --- | --- |
 | `YYYY.MM.DD` (bare) | `@igorjpimenta/winch` | `latest` |
 | `YYYY.MM.DD-beta.N` | `@igorjpimenta/winch` | `beta` |
-| `winch-openclaw-<calver>` | `@igorjpimenta/winch-openclaw` | latest or beta by version shape |
-| `winch-opencode-<calver>` | `@igorjpimenta/winch-opencode` | latest or beta by version shape |
+| `winch-openclaw-<calver>` | `@igorjpimenta/winch-openclaw` | `beta`, or `latest` for a stable |
+| `winch-opencode-<calver>` | `@igorjpimenta/winch-opencode` | `beta`, or `latest` for a stable |
 
 Tag admission (enforced by the workflow, per package):
 
@@ -37,17 +37,22 @@ A package that has never been on npmjs needs one interactive publish before any
 of that: the exchange answers `package not found`, so the tag workflow cannot
 create it. Run `npm publish --tag beta` from the repo root with 2FA, then
 `npm trust github <pkg> --repo igorjpimenta/winch --file publish.yml
---allow-publish`. That version carries no provenance; the next tag does.
+--allow-publish`. npm also tags a package's first publish `latest`, so point
+`beta` at it and drop `latest`:
+
+    npm dist-tag add <pkg>@<version> beta
+    npm dist-tag rm <pkg> latest
+
+That version carries no provenance; the next tag does.
 A new package's packument 404s for a few minutes after the upload returns 202.
 
 ## dist-tags
 
-- a prerelease publishes under `beta`, a stable under `latest`;
-- core prereleases never move `latest`, except the first-ever version of a
-  package, which npm tags `latest` whatever `--tag` asks for;
-- adapter prereleases take `latest` while the line has no stable — adapters
-  are installed versionless (`npm:@igorjpimenta/winch-openclaw@latest`), so a
-  stale `latest` would serve an old beta — and the first stable takes `latest`
-  natively, freezing the rule from then on.
+- a prerelease publishes under `beta`, a stable under `latest`, on every line;
+- betas never move `latest`: a beta-only line has no `latest` until its first
+  stable, so installs during the beta period must name `@beta`;
+- the one npm-side exception is the first-ever publish of a package, which the
+  registry tags `latest` whatever `--tag` asks for. An authenticated
+  `npm dist-tag` is the only way to move or remove that tag.
 
 Stable releases publish since 2026.11.9.
