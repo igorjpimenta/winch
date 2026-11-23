@@ -22,11 +22,10 @@
 # live version is skipped so re-runs are green, an unpublished tombstone fails
 # hard — npm's own rejection for those arrives only AFTER the upload.
 #
-# dist-tags: a prerelease publishes under beta and a stable under latest,
-# EXCEPT adapter prereleases while the line has no stable — adapters are
-# installed versionless (`npm:@igorjpimenta/winch-opencode@latest`), so their
-# newest beta takes latest until the first stable exists; the stable then takes
-# latest natively and the rule freezes. Core prereleases never move latest.
+# dist-tags: a prerelease publishes under beta and a stable under latest, on
+# every line. Betas never move latest. The one exception is npm itself: the
+# first-ever publish of a package gets latest regardless of --tag, because the
+# registry has no other tag yet.
 #
 # Every tag gets an idempotent GitHub release with the npm link in its notes.
 
@@ -190,23 +189,9 @@ jobs:
             echo "$PKG@$VERSION is unused on the registry"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      # Adapters are installed versionless, so while the line has no stable the
-      # newest beta takes latest (a prerelease under a dist-tag is legal); the
-      # first stable then takes latest natively and the rule freezes. Publishing
-      # under the tag directly avoids `npm dist-tag add`, which needs real
-      # credentials that trusted publishing does not issue.
       - name: Publish (trusted publishing; silly so a failed exchange is visible)
         if: steps.gate.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          DIST_TAG="${{ steps.channel.outputs.tag }}"
-          if [ "$DIST_TAG" = "beta" ]; then
-            LATEST="$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>/dev/null || true)"
-            if [ -z "$LATEST" ] || printf '%s' "$LATEST" | grep -q -- '-'; then
-              DIST_TAG="latest"
-            fi
-          fi
-          npm publish --provenance --tag "$DIST_TAG" --loglevel silly
+        run: npm publish --provenance --tag ${{ steps.channel.outputs.tag }} --loglevel silly
         env:
           NODE_AUTH_TOKEN: ""
       - name: Create GitHub release
@@ -286,16 +271,7 @@ jobs:
           fi
       - name: Publish (trusted publishing; silly so a failed exchange is visible)
         if: steps.gate.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          DIST_TAG="${{ steps.channel.outputs.tag }}"
-          if [ "$DIST_TAG" = "beta" ]; then
-            LATEST="$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>/dev/null || true)"
-            if [ -z "$LATEST" ] || printf '%s' "$LATEST" | grep -q -- '-'; then
-              DIST_TAG="latest"
-            fi
-          fi
-          npm publish --provenance --tag "$DIST_TAG" --loglevel silly
+        run: npm publish --provenance --tag ${{ steps.channel.outputs.tag }} --loglevel silly
         env:
           NODE_AUTH_TOKEN: ""
       - name: Create GitHub release

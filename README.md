@@ -161,7 +161,7 @@ checkpoints on turn end, resumes from the latest checkpoint, receives dispatch
 wakes at `POST /api/winch/dispatch`, and reconciles `in_progress` attempts
 after a restart.
 
-    openclaw plugins install npm:@igorjpimenta/winch-openclaw@latest
+    openclaw plugins install npm:@igorjpimenta/winch-openclaw@beta
 
 One daemon for all harnesses (recommended):
 
@@ -215,7 +215,7 @@ canonical form for new setup:
           }
         }
       },
-      "plugins": ["@igorjpimenta/winch-opencode"]
+      "plugins": ["@igorjpimenta/winch-opencode@beta"]
     }
 
 Or via the CLI:
