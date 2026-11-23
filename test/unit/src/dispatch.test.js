@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { createStore } from "../../../src/store/index.js";
-import { toEventMessage } from "../../../src/events-ws.js";
+import { toEventMessage } from "../../../src/events.js";
 import { startDispatchServer } from "../../../src/dispatch-server.js";
 import { recover, observe, routesForEvent, tick } from "../../../src/dispatch.js";
 import { deliverDue, deliverWake } from "../../../src/dispatch-webhook.js";

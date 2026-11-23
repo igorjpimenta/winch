@@ -4,9 +4,9 @@
 
 Winch is a pull-based delivery backlog - epic to story to task with a dependency
 DAG - served as an MCP server. The spec lives in the records: a planner writes
-it once, a worker reads it, claims atomically, and reports back. `serve --ws`
-streams every store event, so a harness wakes agents from the queue instead of
-polling it.
+it once, a worker reads it, claims atomically, and reports back. Webhook wakes
+fan every work-making transition out to consumers, so a harness wakes agents
+from the queue instead of polling it.
 
 Winch is harness-agnostic: the server contains no harness-specific code. The
 adapters under `plugins/` are optional and installed per harness; the MCP
@@ -15,7 +15,7 @@ contract itself is the only integration surface.
 - **Spec in the records** - goal, acceptance criteria, dependencies, capabilities all written once by the planner.
 - **Atomic claim** - CAS under a lease; highest-priority ready task selected when no id is given.
 - **Dependency DAG** - forward-only deps, cycle-checked, cancelled deps count as resolved.
-- **Event stream** - every store insert broadcast over WebSocket; subscribers wake agents, no polling.
+- **Webhook wakes** - every work-making transition fans out to consumer webhooks; subscribers wake agents, no polling.
 - **Human gates** - block/resume with gate types; one resume per gate, actor-checked.
 - **Content-addressed evidence** - artifacts recorded on close, carried into downstream handoffs.
 
@@ -57,7 +57,7 @@ Inside your harness agent:
 Verify from the operator side - no transcript reading:
 
     $ winch next          # task gone from the ready queue
-    $ winch serve --ws    # watch the event stream light up
+    $ winch webhook serve # watch the wake pump light up
 
 All MCP tools and their contracts are defined in `src/tools/` - or just list
 them from the running server.
@@ -69,9 +69,6 @@ them from the running server.
 - The **MCP server** exposes the whole backlog as tools over stdio (one pipe per
   harness) or streamable HTTP (one shared daemon). Identity is stamped at the
   transport edge.
-- The **Event stream** (`winch serve --ws`) is a read-only feed of backlog
-  events; its frame protocol is in [WebSocket event
-  stream](docs/websocket.md).
 - The **Dispatch server** (`winch webhook serve`) accepts executor
   registration and recovery, pumps `admission_queue`, and fans wakes out to
   consumer webhooks. Tasks accept with MCP `backlog_claim`; planner wakes accept
@@ -106,8 +103,7 @@ stamping automatically. Full contract, per-dimension table and adapter setup:
 
 ## Dispatch
 
-`winch webhook serve` hosts the HTTP dispatch endpoints and the wake pump;
-`winch serve --ws` hosts only the read-only event stream. The dispatch server
+`winch webhook serve` hosts the HTTP dispatch endpoints and the wake pump. It
 is the single scheduler:
 
 - It routes work-making transitions: `task.created`, `task.assigned`,
@@ -292,7 +288,6 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | Configure ports, bearer, store, webhooks | [Configuration](docs/configuration.md) |
 | Understand claim/lease/gate rules | [Lifecycle](docs/lifecycle.md) |
 | Webhook subscriptions, dispatch routing, recovery and CLI | [Webhooks](docs/webhooks.md) |
-| Event stream frame protocol and retention | [WebSocket event stream](docs/websocket.md) |
 | Run it on a host persistently | [Docker](docs/docker.md) |
 | Publish a release | [Releases](docs/releases.md) |
 
@@ -313,7 +308,6 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `webhook deliveries [--status S] [--admission ID] [--consumer ID] [--limit N]` | inspect the per-consumer delivery ledger; `--status dead` lists dead letters |
 | `webhook revoke [--topic T] --id I` | remove a webhook subscription |
 | `webhook test [--topic T] [--harness H] [--id I]` | POST a ping to webhook subscriptions |
-| `serve --ws --port N [--host H]` | stream store events over WebSocket |
 | `webhook serve [--port N] [--host H]` | serve dispatch registration, recovery and the wake pump |
 
 ## Deploy (any server)
@@ -341,20 +335,13 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
   remains the one-shot tick for hosts that do not run the dispatch service.
   Claims still self-heal on the next tick when the DB lives elsewhere.
 
-## Events stream
+## Event envelopes
 
-`winch serve --ws [--port N] [--host H]` (default port 38291, localhost-only
-unless `--host` says otherwise) tails the `item_events` ledger and broadcasts every
-new row to all connected clients as JSON text frames:
-
-- `{"type":"welcome","payload":"v3","lastEventId":N}` on connect, then
-  `{"type":"history","events":[...]}` (newest 200), then
-- `{"type":"event","kind":"task.completed","id":N,"at":T,"item":{id,kind,
-  title,status,assigned},"task":{id,title,story,epic,acceptance,artifacts,
-  assignee},"actor":"...","note":"..."}` per insert, in id order.
-- Dispatch wakes are not frames on this stream and run in a separate
-  `winch webhook serve` process; see [Webhooks](docs/webhooks.md) and
-  [WebSocket event stream](docs/websocket.md).
+Every stored transition becomes one envelope (`src/events.js`): the stored
+transition plus the task, story and epic context a subscriber would otherwise
+fetch once per row. Webhook wakes are the main event driver — the dispatch
+server projects these envelopes into wake payloads; see
+[Webhooks](docs/webhooks.md).
 
 Kinds are declared by their producer at write time and stored on the row's
 `kind` column. Structural inference covers `task.*` and `gate.*`; producers
@@ -363,16 +350,16 @@ asserts a tag exists: merge-detect tags first and writes nothing on tag
 failure. The emitter feeds the stored kind straight through; otherwise a row
 maps by transition structure alone. Notes never classify anything: they are
 free text and can change, so pre-kind rows keep exactly the meanings they
-streamed with - an append-only log keeps its history.
-The structural mapping lives in `src/events-ws.js`; stored producer kinds pass
+were recorded with - an append-only log keeps its history.
+The structural mapping lives in `src/events.js`; stored producer kinds pass
 through unchanged. History and live rows share one envelope shape.
 
-Delivery-dynamics notes the wire will not tell you: heartbeats renew the claim
-lease (only silence gets swept); an unmerged close dissolves its gate (late
-approvals answer `gate_dissolved`); starvation lives in the watcher manifest
-(`deferred` list, per-task `idleMs`), not the stream; a disputed completion is
-a new ticket linked by dep edge with a `supersedes: ITM-x` note, never a
-rewrite of history.
+Delivery-dynamics notes the envelopes will not tell you: heartbeats renew the
+claim lease (only silence gets swept); an unmerged close dissolves its gate
+(late approvals answer `gate_dissolved`); starvation lives in the watcher
+manifest (`deferred` list, per-task `idleMs`), not the envelopes; a disputed
+completion is a new ticket linked by dep edge with a `supersedes: ITM-x` note,
+never a rewrite of history.
 
 Rows carry their stored `kind` and the recursive `item` envelope; the legacy
 `task`/`story`/`epic` blocks stay for subscribers that predate the recursive-item schema.
@@ -434,7 +421,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Claim lease | `WINCH_LEASE_SECONDS` | 1800 (30 min) |
 | Sweeper max attempts | `WINCH_MAX_ATTEMPTS` | 3 |
 | Gate-wait thresholds | `WINCH_GATE_WAIT_LEVELS` (`"24h,72h"`, `ms|s|m|h|d` suffixes) | 24h / 72h |
-| WS port / history / poll | `WINCH_WS_PORT` / `WINCH_WS_HISTORY_LIMIT` / `WINCH_WS_INTERVAL_MS` | 38291 / 200 / 1000 ms |
+| Event history limit (dispatch boot catch-up batch) | `WINCH_EVENT_HISTORY_LIMIT` | 200 |
 | Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
 | Dispatch consumer heartbeat TTL | `WINCH_DISPATCH_CONSUMER_TTL_MS` | 90000 ms |

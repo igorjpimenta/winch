@@ -1,5 +1,5 @@
 // Public event read API. Writers use core.appendEvent; this surface is the
-// cursor/history readers used by the WebSocket stream and tools.
+// cursor/history readers used by the event envelope (src/events.js) and tools.
 
 export function createEventApi({ core }) {
   const { db, appendEvent, eventById, eventsFor } = core;

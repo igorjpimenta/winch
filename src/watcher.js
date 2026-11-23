@@ -52,8 +52,8 @@ export function tick(store, { config: override = null } = {}) {
     .slice(0, cfg.blockedLimit)
     .map((t) => ({ id: t.id, title: t.title, assigned: t.assignee_agent, gate_type: t.gate_type, blocked_at: t.blocked_at }));
   // Gated tasks are separated from plain blocks for visibility. Who should
-  // be told about them is a subscriber decision — the events WebSocket
-  // streams every row, and clients track their own seen state.
+  // be told about them is a subscriber decision — event envelopes carry every
+  // row, and webhook subscribers track their own seen state.
   const gates = store.item
     .list({ kind: "task", status: "blocked" })
     .filter((t) => t.gate_type)

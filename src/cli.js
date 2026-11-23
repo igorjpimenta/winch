@@ -12,7 +12,6 @@ import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
-import { startEventServer } from "./events-ws.js";
 import { startDispatchServer } from "./dispatch-server.js";
 import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
@@ -46,7 +45,6 @@ const USAGE = `usage: winch <command>
   serve --mcp stdio|http [--port N] [--host H]
                                       serve the backlog tools over MCP stdio or Streamable HTTP
                                       (stdio harness from WINCH_HARNESS env only; agent+session stamped per call)
-  serve --ws --port N [--host H]         stream store events over WebSocket
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → ready
   next                                   list the current ready queue
@@ -179,7 +177,6 @@ export async function runCli(argv) {
         ({ values } = parseArgs({
           args: rest,
           options: {
-            ws: { type: "boolean" },
             mcp: { type: "string" },
             port: { type: "string" },
             host: { type: "string" },
@@ -187,19 +184,19 @@ export async function runCli(argv) {
           },
         }));
       } catch (err) {
-        // --harness (or any unknown flag) on serve means the caller is still
-        // on the legacy `mcp --harness` surface: stdio harness is env-only.
-        if (/Unknown option|ERR_PARSE_ARGS_UNKNOWN_OPTION/.test(String(err?.message ?? err))) {
+        // --harness on serve means the caller is still on the legacy
+        // `mcp --harness` surface: stdio harness is env-only. Any other
+        // unknown flag is just a typo — point at the usage line.
+        if (/Unknown option '--harness'/.test(String(err?.message ?? err))) {
           fail("winch serve --mcp takes no --harness flag: set WINCH_HARNESS in the environment.");
         }
-        throw err;
+        fail("usage: winch serve --mcp stdio|http [--port N] [--host H] [--config JSON|PATH]");
       }
       if (values.mcp !== undefined && values.mcp !== "stdio" && values.mcp !== "http") {
         fail(`winch: --mcp must be stdio or http, got ${JSON.stringify(values.mcp)}`);
       }
-      const modes = ["ws", "mcp"].filter((k) => values[k]);
-      if (modes.length !== 1) {
-        fail("usage: winch serve (--ws | --mcp stdio|http) [--port N] [--host H] [--config JSON|PATH]");
+      if (values.mcp === undefined) {
+        fail("usage: winch serve --mcp stdio|http [--port N] [--host H] [--config JSON|PATH]");
       }
       const store = openStore(loadConfig(values));
       const logger = {
@@ -238,8 +235,6 @@ export async function runCli(argv) {
         }
         return;
       }
-      await startEventServer({ store, port, host, logger });
-      logger.info(`winch: events on ws://${host}:${port ?? store.config.wsPort} (append-only; subscribers track their own state)`);
       return;
     }
 

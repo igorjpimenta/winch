@@ -1,12 +1,12 @@
 // dispatch-server.js — HTTP dispatch endpoints and the admission queue pump.
-// Executors register here and winch POSTs wakes from here; the read-only event
-// stream lives in events-ws.js and shares no socket with dispatch.
+// Executors register here and winch POSTs webhook wakes from here; webhook
+// delivery is the main event driver.
 
 import http from "node:http";
 import { observe, recover, tick as dispatchTick } from "./dispatch.js";
 import { deliverDue, deliverWake } from "./dispatch-webhook.js";
 import { StaleRegistrationError } from "./store/webhook.js";
-import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./events-ws.js";
+import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./events.js";
 
 export const DEFAULT_DISPATCH_PORT = 38293;
 
@@ -16,7 +16,7 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
   const pollMs = intervalMs ?? cfg.dispatchIntervalMs ?? 1000;
   const sweepMs = cfg.dispatchSweepMs ?? 30000;
   const consumerTtlMs = cfg.dispatchConsumerTtlMs ?? 90000;
-  const histLimit = cfg.wsHistoryLimit ?? HISTORY_LIMIT;
+  const histLimit = cfg.eventHistoryLimit ?? HISTORY_LIMIT;
   const authToken = String(process.env.WINCH_DISPATCH_TOKEN ?? "").trim() || null;
   const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
   if (!loopback && !authToken) {

@@ -7,9 +7,8 @@ execution is single-flight. The payload marks one consumer `active` and the
 others `standby`; only the active consumer starts a session.
 
 `winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
-and the wake pump. It is separate from `winch serve --ws`, which serves only the
-read-only event stream; that contract is in [WebSocket event
-stream](websocket.md).
+and the wake pump. Webhook wakes are the main event driver: every work-making
+transition fans out to consumers through this server.
 
 ## Subscriptions
 
@@ -49,8 +48,7 @@ localhost-only unless `--host` says otherwise:
     winch webhook serve [--port N] [--host H]
 
 It also sweeps expired managed leases on `WINCH_DISPATCH_SWEEP_MS`. Disabled
-rows are retained for audit; manual rows are never swept. The read-only event
-stream is a separate process: `winch serve --ws`.
+rows are retained for audit; manual rows are never swept.
 
 Management endpoints accept `Authorization: Bearer $WINCH_DISPATCH_TOKEN` when
 that variable is set. A non-loopback `--host` refuses to start without it.
