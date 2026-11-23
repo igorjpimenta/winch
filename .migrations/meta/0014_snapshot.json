@@ -1781,9 +1781,9 @@
         }
       },
       "foreignKeys": {
-        "dispatch_deliveries_admission_id_admission_queue_id_fk": {
-          "name": "dispatch_deliveries_admission_id_admission_queue_id_fk",
-          "tableFrom": "dispatch_deliveries",
+        "webhook_deliveries_admission_id_admission_queue_id_fk": {
+          "name": "webhook_deliveries_admission_id_admission_queue_id_fk",
+          "tableFrom": "webhook_deliveries",
           "tableTo": "admission_queue",
           "columnsFrom": [
             "admission_id"
@@ -1800,7 +1800,7 @@
       "checkConstraints": {
         "delivery_status": {
           "name": "delivery_status",
-          "value": "\"dispatch_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
+          "value": "\"webhook_deliveries\".\"status\" IN ('pending', 'delivering', 'delivered', 'dead', 'cancelled')"
         }
       }
     },
@@ -1868,10 +1868,10 @@
         }
       },
       "foreignKeys": {
-        "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk": {
-          "name": "dispatch_delivery_attempts_delivery_id_dispatch_deliveries_id_fk",
-          "tableFrom": "dispatch_delivery_attempts",
-          "tableTo": "dispatch_deliveries",
+        "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk": {
+          "name": "webhook_delivery_attempts_delivery_id_webhook_deliveries_id_fk",
+          "tableFrom": "webhook_delivery_attempts",
+          "tableTo": "webhook_deliveries",
           "columnsFrom": [
             "delivery_id"
           ],
