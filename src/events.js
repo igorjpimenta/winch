@@ -12,7 +12,7 @@
 // reclassify history.
 //
 // Pre-standardization rows still carry `todo` as a task status; map it with
-// `ready` so the append-only history keeps the meaning it streamed with.
+// `ready` so the append-only history keeps the meaning it was recorded with.
 
 import { collectStoryArtifacts } from "./tools/index.js";
 import { depsResolved } from "./deps.js";
