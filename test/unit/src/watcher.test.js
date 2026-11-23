@@ -37,11 +37,10 @@ test("empty tick: everything empty — the cron's silent-exit condition", () => 
   const m = tick(store);
   assert.deepEqual(m.swept, []);
   assert.deepEqual(m.routed, []);
-  assert.deepEqual(m.unrouted, []);
   assert.deepEqual(m.blocked, []);
 });
 
-test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it)", () => {
+test("assigned claimable routes; unassigned never lands in the manifest", () => {
   const a = seed({ assigned: "builder", assigneeHarness: "test" });
   const b = seed({ assigned: null, taskStatus: "backlog" });
   const m = tick(store);
@@ -49,7 +48,6 @@ test("assigned claimable routes; unassigned lands in unrouted (heartbeat owns it
   assert.equal(m.routed[0].taskId, a.task.id);
   assert.equal(m.routed[0].assigned, "builder");
   assert.equal(m.routed[0].executionKind, "manual");
-  assert.deepEqual(m.unrouted, []);
   assert.ok(!m.routed.some((r) => r.taskId === b.task.id), "backlog is not claimable");
 });
 
@@ -67,7 +65,6 @@ test("blocked tasks appear in blocked, never in claimable sets", () => {
   store.task.update(task.id, { status: "blocked", actor: "lens", note: "blocked: waiting" });
   const m = tick(store);
   assert.deepEqual(m.routed, []);
-  assert.deepEqual(m.unrouted, []);
   assert.equal(m.blocked.length, 1);
   assert.equal(m.blocked[0].id, task.id);
 });
@@ -121,7 +118,6 @@ test("tick writes gate-waiting rows for stale gates and reports waiting age", ()
   assert.equal(m.waits.length, 1);
   assert.equal(m.waits[0].taskId, task.id);
   assert.equal(m.waits[0].label, "24h");
-  assert.deepEqual(m.unrouted, []);
   assert.ok(!m.routed.some((r) => r.taskId === u.task.id), "unassigned backlog is not woken");
   const m2 = tick(store);
   assert.deepEqual(m2.waits, [], "second tick writes nothing new");

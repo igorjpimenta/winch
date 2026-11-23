@@ -183,13 +183,7 @@ export async function runCli(argv) {
             config: { type: "string" },
           },
         }));
-      } catch (err) {
-        // --harness on serve means the caller is still on the legacy
-        // `mcp --harness` surface: stdio harness is env-only. Any other
-        // unknown flag is just a typo — point at the usage line.
-        if (/Unknown option '--harness'/.test(String(err?.message ?? err))) {
-          fail("winch serve --mcp takes no --harness flag: set WINCH_HARNESS in the environment.");
-        }
+      } catch {
         fail("usage: winch serve --mcp stdio|http [--port N] [--host H] [--config JSON|PATH]");
       }
       if (values.mcp !== undefined && values.mcp !== "stdio" && values.mcp !== "http") {

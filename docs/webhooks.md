@@ -93,8 +93,7 @@ The server keeps a `state`:
 
 A stale **managed** `lastSeenAt` older than `WINCH_DISPATCH_CONSUMER_TTL_MS`
 (default 90s) is pruned by the sweep. Disabled rows are retained for audit and
-manual rows are never swept. A legacy executor-keyed row for the same executor
-is removed on the first consumer registration. Multiple consumers may share a
+manual rows are never swept. Multiple consumers may share a
 harness; each gets a delivery.
 
 The adapter environment supplies the identity:
@@ -224,9 +223,8 @@ It returns:
 - `resume`: assigned `in_progress` work with `task`, `attemptId`,
   `sessionId`, `sessionKey`, `leaseEpoch`, `ownerInstance`, and
   `leaseExpiresAt`. The winning claim records the consumer on the work
-  attempt; only that consumer gets its resume. A legacy claim with no owner
-  falls back to the active dispatch lease holder; if there is no active holder,
-  the row is **not** fanned out to every consumer (fail closed);
+  attempt; only that consumer gets its resume. A claim that never named a
+  consumer is not fanned out to any of them (fail closed);
 - `start`: already-offered wakes whose `activeConsumerId` is this consumer. A
   standby consumer receives none;
 - `free`: remaining capacity after active and offered work. The server pump

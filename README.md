@@ -141,8 +141,8 @@ notify; a non-loopback bind refuses without it. See
 `POST /dispatch/recover` returns assigned `in_progress` work with its
 `attemptId`, `leaseEpoch`, and `ownerInstance`, so a restarted harness resumes
 that attempt instead of re-claiming it. The winner is recorded on the work
-attempt; if a legacy claim has no owner, the active dispatch lease holder gets
-it. If no active holder exists, the row is not fanned out. Standby consumers do
+attempt; only that consumer gets the resume, and a claim that never named a
+consumer is not fanned out. Standby consumers do
 not resume the same attempt. Its first call is `backlog_update` with the
 returned `attemptId` and `leaseEpoch`; a stale attempt or epoch gets
 `stale_claim`. Expired leases return work to `ready` through the normal sweep.
@@ -357,7 +357,7 @@ through unchanged. History and live rows share one envelope shape.
 Delivery-dynamics notes the envelopes will not tell you: heartbeats renew the
 claim lease (only silence gets swept); an unmerged close dissolves its gate
 (late approvals answer `gate_dissolved`); starvation lives in the watcher
-manifest (`deferred` list, per-task `idleMs`), not the envelopes; a disputed
+manifest (`deferred` list), not the envelopes; a disputed
 completion is a new ticket linked by dep edge with a `supersedes: ITM-x` note,
 never a rewrite of history.
 

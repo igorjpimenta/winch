@@ -128,10 +128,6 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           managed: true,
           fresh,
         });
-        if (executorId && id !== executorId) {
-          const legacy = store.webhook.get({ topic: "dispatch", id: executorId });
-          if (legacy?.executorId === executorId) store.webhook.remove({ topic: "dispatch", id: executorId });
-        }
         json(res, 201, {
           ok: true, topic: row.topic, id: row.id, harness: row.harness,
           executorId: row.executorId, instanceId: row.instanceId,

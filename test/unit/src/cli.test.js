@@ -37,10 +37,10 @@ function runDbAsync(dbPath, ...args) {
   });
 }
 
-test("serve --mcp stdio rejects --harness (env-only)", () => {
+test("serve rejects unknown flags with the usage line", () => {
   const r = run("serve", "--mcp", "stdio", "--harness", "test");
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /takes no --harness flag/);
+  assert.match(r.stderr, /usage: winch serve/);
 });
 
 test("serve --mcp rejects unknown transports", () => {

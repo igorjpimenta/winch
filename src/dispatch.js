@@ -129,25 +129,17 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
     maxAttempts: config.dispatchOfferMaxAttempts,
   });
 
-  const ownerForItem = `COALESCE(
-    a.consumer_id,
-    (SELECT aa.active_consumer_id
-       FROM admission_queue q
-       JOIN admission_attempts aa ON aa.admission_id=q.id
-      WHERE q.item_id=s.item_id AND q.status='active' AND q.ended_at IS NULL
-      ORDER BY aa.attempt_no DESC LIMIT 1)
-  )`;
   const resume = store.db.prepare(`
     SELECT s.item_id, s.assignee_agent, s.assignee_harness,
            a.id AS attempt_id, a.attempt_no, a.claimed_at, a.heartbeat_at, a.expires_at,
            a.lease_epoch, a.owner_instance,
            ws.id AS session_id, ws.external_session_id, ws.session_key,
-           ${ownerForItem} AS consumer_id
+           a.consumer_id AS consumer_id
       FROM item_state s
       LEFT JOIN attempts a ON a.item_id=s.item_id AND a.ended_at IS NULL
       LEFT JOIN work_sessions ws ON ws.id=a.session_id
      WHERE s.status='in_progress' AND s.deleted_at IS NULL AND s.assignee_harness=?
-       AND (? IS NULL OR ${ownerForItem} = ?)
+       AND (? IS NULL OR a.consumer_id = ?)
      ORDER BY a.claimed_at ASC, s.updated_at ASC
   `).all(harness, consumerId, consumerId).map((r) => ({
     task: store.task.get(r.item_id),
