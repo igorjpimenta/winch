@@ -1,7 +1,8 @@
 // report.js — work reporting and gates: update, done, block, resume.
-import { addDep } from "../deps.js";
+import { addDep, depsResolved } from "../deps.js";
 import { identitySessionKey } from "../identity.js";
 import { ok, err, clampNote } from "./shared.js";
+import { attachArtifact, inferArtifactKind } from "../store/artifacts.js";
 
 function checkAttemptLease(store, task, args) {
   if (!args?.attemptId) {
@@ -40,7 +41,7 @@ export function createReportTools({ store, logger }) {
         const noteParts = [];
         if (args?.progressSummary) noteParts.push(`progress: ${clampNote(args.progressSummary, cfg.noteProgressLimit)}`);
         if (args?.comment) noteParts.push(`comment: ${clampNote(args.comment, cfg.noteProgressLimit)}`);
-        if (args?.addArtifact) noteParts.push(`artifact: ${clampNote(args.addArtifact, cfg.noteArtifactLimit)}`);
+        if (args?.addArtifact) noteParts.push(`artifact: ${clampNote(typeof args.addArtifact === "string" ? args.addArtifact : args.addArtifact?.uri, cfg.noteArtifactLimit)}`);
         if (noteParts.length) {
           store.event.append({
             itemId: task.id,
@@ -50,6 +51,22 @@ export function createReportTools({ store, logger }) {
             actor: agentId,
             note: noteParts.join(" | "),
           });
+        }
+        if (args?.addArtifact) {
+          const raw = args.addArtifact;
+          const uri = typeof raw === "string" ? raw : raw?.uri;
+          if (uri) {
+            const kind = args.addArtifactKind
+              ?? (typeof raw === "object" && raw.kind ? raw.kind : null)
+              ?? inferArtifactKind(uri);
+            attachArtifact(store, {
+              itemId: task.id,
+              attemptId: task.attempt_id,
+              kind,
+              uri: String(uri),
+              label: (typeof raw === "object" && raw.label) || null,
+            });
+          }
         }
         const fresh = store.task.get(task.id);
         return ok(JSON.stringify({ ok: true, task: { id: fresh.id, status: fresh.status, last_heartbeat: fresh.last_heartbeat, attempt_count: fresh.attempt_count } }), { status: "ok", taskId: task.id, agentId });
@@ -70,12 +87,50 @@ export function createReportTools({ store, logger }) {
       try {
         const summary = clampNote(args.resultSummary, cfg.noteResultLimit);
         const artifacts = Array.isArray(args.artifacts) ? args.artifacts.slice(0, cfg.maxArtifacts) : [];
-        const resultSummary = artifacts.length ? `${summary}\n\nartifacts: ${artifacts.join(", ")}` : summary;
+        const hitlKinds = cfg.hitlArtifactKinds ?? [];
+        for (const a of artifacts) {
+          const uri = typeof a === "string" ? a : a?.uri;
+          const kind = (typeof a === "object" && a.kind) || inferArtifactKind(uri);
+          if (hitlKinds.includes(kind)) {
+            return err(
+              `HITL artifact (${kind}) must be attached while in_progress via backlog_update addArtifact — it opens the human review child that gates this close: ${uri}`,
+              "hitl_at_done",
+              { taskId: task.id },
+            );
+          }
+        }
+        if (!depsResolved(store, task.id)) {
+          const openDeps = store.dep.listOutgoing(task.id)
+            .map((e) => e.to_id)
+            .filter((id) => {
+              const d = store.item.get(id, { includeDeleted: true });
+              return d && d.status !== "done" && d.status !== "cancelled";
+            });
+          return err(
+            `${task.id} cannot close: unresolved deps ${openDeps.join(", ")}`,
+            "deps_unmet",
+            { taskId: task.id, openDeps },
+          );
+        }
+        const artifactUris = artifacts
+          .map((a) => (typeof a === "string" ? a : a?.uri))
+          .filter(Boolean);
+        const resultSummary = artifactUris.length ? `${summary}\n\nartifacts: ${artifactUris.join(", ")}` : summary;
         const updated = store.task.update(task.id, {
           status: "done", result_summary: resultSummary, actor: agentId, note: "done",
           sessionKey, harness: identity.harness, session: identity.session, agentId,
         });
-        for (const uri of artifacts) store.artifact.add({ itemId: task.id, attemptId: updated.attempt_id, kind: "link", uri });
+        for (const a of artifacts) {
+          const uri = typeof a === "string" ? a : a?.uri;
+          if (!uri) continue;
+          store.artifact.add({
+            itemId: task.id,
+            attemptId: updated.attempt_id,
+            kind: (typeof a === "object" && a.kind) || inferArtifactKind(uri),
+            uri,
+            label: (typeof a === "object" && a.label) || null,
+          });
+        }
         store.task.resumeDependencyWaits();
         // Close upward, one level at a time: a story closes when its last task
         // does, and the epic closes only when its last story does. The epic

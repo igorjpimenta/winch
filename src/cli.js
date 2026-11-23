@@ -10,7 +10,7 @@ import { createStore } from "./store/index.js";
 import { readyTasks } from "./ready-queue.js";
 import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
-import { collectPRs, applyMergeOutcomes } from "./merges.js";
+import { collectPRs, applyMergeOutcomes, closeHitlAndFreeParents, isHitlChild } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
 import { startDispatchServer } from "./webhook/server.js";
 import { declaredFromEnv } from "./identity.js";
@@ -48,6 +48,8 @@ const USAGE = `usage: winch <command>
   watch                                  one watcher tick (JSON manifest on stdout)
   resume <taskId> [--actor <name>]       resolve a human gate: blocked → ready
   next                                   list the current ready queue
+  hitl [--status S]                      list the human-in-the-loop queue (PR/release/design children)
+  resolve <taskId> [--note N]            human closes a HITL child; frees parked parents
   release-epic --epic <id> [--task ID] [--version V] [--base B]
   merge-detect [--dry-run]               apply merged/closed PR outcomes
   webhook serve [--port N] [--host H]     serve dispatch registration, recovery and the wake pump
@@ -122,6 +124,88 @@ export async function runCli(argv) {
           rows.map((r) => ({ taskId: r.task.id, title: r.task.title, assigned: r.task.assignee_agent, story: r.story.id, epic: r.epic.id })),
           null, 2
         ));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "hitl": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { status: { type: "string" }, config: { type: "string" } },
+        allowPositionals: true,
+      });
+      const store = openStore(loadConfig(values));
+      try {
+        const want = values.status ?? null;
+        const rows = store.item.list({ kind: "task" })
+          .filter((t) => isHitlChild(t))
+          .filter((t) => (want ? t.status === want : t.status !== "done" && t.status !== "cancelled"))
+          .map((t) => {
+            const artifacts = store.artifact.listFor(t.id);
+            const parents = store.dep.listIncoming(t.id)
+              .map((e) => store.task.get(e.from_id))
+              .filter(Boolean)
+              .map((p) => ({ id: p.id, title: p.title, status: p.status }));
+            // artifacts.uri is globally unique — a PR attached before spawn
+            // sits on the parent; surface both so the reviewer finds the link.
+            const parentUris = new Set(artifacts.map((a) => a.uri));
+            for (const p of store.dep.listIncoming(t.id)) {
+              for (const a of store.artifact.listFor(p.from_id)) {
+                if (!parentUris.has(a.uri)) {
+                  artifacts.push({ ...a, via: p.from_id });
+                  parentUris.add(a.uri);
+                }
+              }
+            }
+            return {
+              taskId: t.id,
+              title: t.title,
+              status: t.status,
+              acceptance: t.acceptance,
+              artifacts: artifacts.map((a) => ({ kind: a.kind, uri: a.uri, label: a.label, via: a.via })),
+              parents,
+            };
+          });
+        console.log(JSON.stringify(rows, null, 2));
+      } finally {
+        store.close();
+      }
+      return;
+    }
+
+    case "resolve": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        options: { note: { type: "string" }, config: { type: "string" } },
+        allowPositionals: true,
+      });
+      const taskId = positionals[0];
+      if (!taskId) fail("usage: winch resolve <taskId> [--note <text>]");
+      const store = openStore(loadConfig(values));
+      try {
+        const task = store.task.get(taskId);
+        if (!task) fail(`winch resolve: not found: ${taskId}`);
+        if (!isHitlChild(task)) {
+          fail(`winch resolve: ${taskId} is not a HITL child (assignee ${task.assignee_agent ?? "none"}) — only human-assigned review children resolve here`);
+        }
+        if (task.status === "done" || task.status === "cancelled") {
+          console.log(JSON.stringify({ ok: true, task: { id: task.id, status: task.status }, doneTasks: [], alreadyResolved: true }, null, 2));
+          return;
+        }
+        const note = values.note ?? "resolved by operator";
+        const out = closeHitlAndFreeParents(store, task.id, {
+          actor: "operator",
+          resultSummary: note,
+          note: `hitl resolved: ${note}`,
+        });
+        console.log(JSON.stringify({
+          ok: true,
+          task: { id: task.id, status: store.task.get(task.id)?.status },
+          doneTasks: out.doneTasks,
+          freedParents: out.resumed,
+        }, null, 2));
       } finally {
         store.close();
       }

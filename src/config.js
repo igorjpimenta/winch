@@ -39,6 +39,11 @@ function parseInt(raw) {
   return Number(s);
 }
 
+function parseKindList(raw) {
+  const toks = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+  return toks.map((t) => String(t ?? "").trim()).filter(Boolean);
+}
+
 // key -> { env, parse, check }. parse normalizes (string|number|array) to the
 // stored shape; check rejects out-of-range values. Stored shapes are plain
 // JSON: a resolved config survives a round-trip through JSON by construction.
@@ -74,6 +79,7 @@ const SPEC = {
   noteReasonLimit:    { env: "WINCH_NOTE_REASON_LIMIT",   parse: parseInt, check: (v) => v > 0 },
   noteArtifactLimit:  { env: "WINCH_NOTE_ARTIFACT_LIMIT", parse: parseInt, check: (v) => v > 0 },
   maxArtifacts:       { env: "WINCH_MAX_ARTIFACTS",       parse: parseInt, check: (v) => v > 0 },
+  hitlArtifactKinds:  { env: "WINCH_HITL_ARTIFACT_KINDS", parse: parseKindList, check: (v) => Array.isArray(v) },
 };
 
 export const CONFIG_DEFAULTS = {
@@ -108,6 +114,7 @@ export const CONFIG_DEFAULTS = {
   noteReasonLimit: 1000,
   noteArtifactLimit: 500,
   maxArtifacts: 50,
+  hitlArtifactKinds: ["pr", "release", "design"],
 };
 
 export const CONFIG_ENV = Object.fromEntries(

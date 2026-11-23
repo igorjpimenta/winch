@@ -300,7 +300,22 @@ export const TOOL_DEFS = [
           heartbeat: { type: "boolean", description: "Refresh liveness (default true)." },
           progressSummary: { type: "string", description: "One-line progress note for the audit trail." },
           comment: { type: "string", description: "Freeform note appended as an audit event." },
-          addArtifact: { type: "string", description: "Artifact path/URL produced so far; recorded as an audit event and carried into downstream handoffs." },
+          addArtifact: {
+            description: "Artifact path/URL produced so far; recorded as an audit event and carried into downstream handoffs. String URI or {uri, kind?, label?}. Kinds in config hitlArtifactKinds (default pr/release/design) spawn the human review child.",
+            anyOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  uri: { type: "string" },
+                  kind: { type: "string" },
+                  label: { type: "string" },
+                },
+                required: ["uri"],
+              },
+            ],
+          },
+          addArtifactKind: { type: "string", description: "Override artifact kind (e.g. pr). Defaults to inference from the URI." },
         },
       },
     },
