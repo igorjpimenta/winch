@@ -1,0 +1,110 @@
+// envelope.test.js — the event envelope: stored rows in, subscriber envelopes
+// out. No socket involved; the webhook wake path consumes these envelopes.
+import { test, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createStore } from "../../../../src/store/index.js";
+import { kindForEvent, toEventMessage } from "../../../../src/webhook/envelope.js";
+
+let dir, store;
+
+beforeEach(() => {
+  dir = mkdtempSync(path.join(tmpdir(), "backlog-events-"));
+  store = createStore({ dbPath: path.join(dir, "store.sqlite") });
+});
+
+afterEach(() => {
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a requeue lists the task so its owner can be woken again", () => {
+  const epic = store.epic.create({ title: "E-req", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S-req", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "t", status: "ready", executionKind: "manual", assigned: "worker", assigneeHarness: "test" });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", sessionKey: "s", watchdogMs: 1 });
+  store.task.sweepExpired({ now: Date.now() + 10 });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const msg = toEventMessage(store, row);
+  assert.equal(msg.kind, "task.released");
+  assert.deepEqual(msg.unblocked, [{ id: task.id, assigned: "worker", assigneeHarness: "test" }]);
+});
+
+test("a story-scoped row carries the item, its assignee and the epic creator", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress", createdBy: "atlas" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "ready", assigned: "tester", assigneeHarness: "test" });
+  store.db.prepare("INSERT INTO item_events(item_id,from_status,to_status,kind,actor,note,created_at) VALUES(?,?,?,?,?,?,?)")
+    .run(story.id, "ready", "ready", "story.assigned", "openclaw:atlas", "assign tester", Date.now());
+  const row = store.db.prepare("SELECT * FROM item_events ORDER BY id DESC LIMIT 1").get();
+  const msg = toEventMessage(store, row);
+  assert.equal(msg.kind, "story.assigned");
+  assert.equal(msg.item.kind, "story");
+  assert.equal(msg.item.id, story.id);
+  assert.equal(msg.item.assigned, "tester");
+  assert.equal(msg.epicId, epic.id);
+  assert.equal(msg.epicCreatedBy, "atlas");
+  assert.equal(msg.task, null);
+});
+
+test("a close carries the work it just made claimable", async () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
+  const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", assigneeHarness: "test", capabilities: ["verify"] });
+  const human = store.task.create({ storyId: story.id, title: "human", status: "ready", executionKind: "manual", assigned: "human" });
+  const { addDep } = await import("../../../../src/deps.js");
+  assert.ok(addDep(store, next.id, first.id).ok);
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
+  const msg = toEventMessage(store, row);
+  assert.deepEqual(msg.unblocked, [{ id: next.id, assigned: "builder", assigneeHarness: "test" }]);
+  assert.ok(!msg.unblocked.some((r) => r.id === human.id), "human work is not an agent wake");
+});
+
+test("kindForEvent: stored kind wins; kind-less rows map by structure, notes inert", () => {
+  const cases = [
+    [{ from_status: null, to_status: "ready", note: "task created" }, "task.created"],
+    [{ from_status: "ready", to_status: "in_progress", note: "claim" }, "task.claimed"],
+    [{ from_status: "in_progress", to_status: "in_progress", note: "heartbeat" }, "task.progressed"],
+    [{ from_status: "ready", to_status: "done", note: "done" }, "task.completed"],
+    [{ from_status: "in_progress", to_status: "ready", note: "sweeper" }, "task.released"],
+    [{ from_status: "in_progress", to_status: "blocked", note: "blocked: reason" }, "task.blocked"],
+    [{ from_status: "ready", to_status: "blocked", note: "gate open: architecture" }, "task.blocked"],
+    [{ from_status: "blocked", to_status: "ready", note: "gate resume" }, "task.released"],
+    [{ from_status: "blocked", to_status: "ready", note: "gate dissolved: closed unmerged PR #9" }, "task.released"],
+    [{ from_status: "blocked", to_status: "ready", kind: "gate.dissolved", note: "whatever the note says" }, "gate.dissolved"],
+    [{ from_status: "ready", to_status: "blocked", kind: "task.blocked", note: "gate open: architecture" }, "task.blocked"],
+    [{ from_status: "ready", to_status: "cancelled", note: "cut" }, "task.cancelled"],
+  ];
+  for (const [row, want] of cases) {
+    assert.equal(kindForEvent(row), want, JSON.stringify(row));
+  }
+});
+
+test("a ready birth event does not scan the ready queue", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "builder", assigneeHarness: "test" });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  const original = store.item.list;
+  let scans = 0;
+  store.item.list = (...args) => { scans++; return original.apply(store.item, args); };
+  try {
+    const msg = toEventMessage(store, row);
+    assert.equal(scans, 0, "birth does not enumerate ready work");
+    assert.deepEqual(msg.unblocked, []);
+  } finally {
+    store.item.list = original;
+  }
+});
+
+test("dispatch envelopes skip artifact projection", () => {
+  const epic = store.epic.create({ title: "E", status: "in_progress" });
+  const story = store.story.create({ epicId: epic.id, title: "S", status: "in_progress" });
+  const task = store.task.create({ storyId: story.id, title: "T", status: "ready", assigned: "builder", assigneeHarness: "test" });
+  store.artifact.add({ itemId: task.id, kind: "link", uri: "https://example.test/artifact" });
+  const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1").get(task.id);
+  assert.deepEqual(toEventMessage(store, row).task.artifacts, ["https://example.test/artifact"]);
+  assert.deepEqual(toEventMessage(store, row, { includeArtifacts: false }).task.artifacts, []);
+});

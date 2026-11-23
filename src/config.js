@@ -46,10 +46,8 @@ const SPEC = {
   leaseSeconds:       { env: "WINCH_LEASE_SECONDS",       parse: parseInt, check: (v) => v > 0 },
   maxAttempts:        { env: "WINCH_MAX_ATTEMPTS",        parse: parseInt, check: (v) => v > 0 },
   gateWaitLevels:     { env: "WINCH_GATE_WAIT_LEVELS",    parse: parseGateWaitLevels, check: (v) => v !== null },
-  wsPort:             { env: "WINCH_WS_PORT",             parse: parseInt, check: (v) => v >= 1 && v <= 65535 },
   mcpHttpPort:        { env: "WINCH_MCP_HTTP_PORT",       parse: parseInt, check: (v) => v >= 1 && v <= 65535 },
-  wsHistoryLimit:     { env: "WINCH_WS_HISTORY_LIMIT",    parse: parseInt, check: (v) => v > 0 },
-  wsIntervalMs:       { env: "WINCH_WS_INTERVAL_MS",      parse: parseInt, check: (v) => v > 0 },
+  eventHistoryLimit:  { env: "WINCH_EVENT_HISTORY_LIMIT", parse: parseInt, check: (v) => v > 0 },
   dispatchPort:       { env: "WINCH_DISPATCH_PORT",       parse: parseInt, check: (v) => v >= 1 && v <= 65535 },
   dispatchIntervalMs: { env: "WINCH_DISPATCH_INTERVAL_MS", parse: parseInt, check: (v) => v > 0 },
   dispatchSweepMs:    { env: "WINCH_DISPATCH_SWEEP_MS",   parse: parseInt, check: (v) => v > 0 },
@@ -82,10 +80,8 @@ export const CONFIG_DEFAULTS = {
   leaseSeconds: 1800,
   maxAttempts: 3,
   gateWaitLevels: "24h,72h",
-  wsPort: 38291,
   mcpHttpPort: 38292,
-  wsHistoryLimit: 200,
-  wsIntervalMs: 1000,
+  eventHistoryLimit: 200,
   dispatchPort: 38293,
   dispatchIntervalMs: 1000,
   dispatchSweepMs: 30000,
@@ -126,7 +122,7 @@ function parseKey(key, raw, what) {
   const spec = SPEC[key];
   const parsed = spec.parse(raw);
   if (parsed === null || !spec.check(parsed)) {
-    refused(what, key, `Expected ${key === "gateWaitLevels" ? "a duration list like \"24h,72h\"" : key === "wsPort" ? "a port 1-65535" : "a positive integer"} — got ${JSON.stringify(raw) ?? "nothing"}.`);
+    refused(what, key, `Expected ${key === "gateWaitLevels" ? "a duration list like \"24h,72h\"" : "a positive integer"} — got ${JSON.stringify(raw) ?? "nothing"}.`);
   }
   return parsed;
 }

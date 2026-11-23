@@ -266,7 +266,7 @@ export const dispatchEvents = sqliteTable("dispatch_events", {
   index("idx_dispatch_events_created").on(table.createdAt),
 ]);
 
-export const dispatchDeliveries = sqliteTable("dispatch_deliveries", {
+export const webhookDeliveries = sqliteTable("webhook_deliveries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   admissionId: text("admission_id").notNull().references(() => admissionQueue.id, { onDelete: "cascade" }),
   attemptNo: integer("attempt_no").notNull(),
@@ -289,9 +289,9 @@ export const dispatchDeliveries = sqliteTable("dispatch_deliveries", {
   index("idx_delivery_event").on(table.eventId, table.consumerId),
 ]);
 
-export const dispatchDeliveryAttempts = sqliteTable("dispatch_delivery_attempts", {
+export const webhookDeliveryAttempts = sqliteTable("webhook_delivery_attempts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  deliveryId: integer("delivery_id").notNull().references(() => dispatchDeliveries.id, { onDelete: "cascade" }),
+  deliveryId: integer("delivery_id").notNull().references(() => webhookDeliveries.id, { onDelete: "cascade" }),
   attemptNo: integer("attempt_no").notNull(),
   status: text("status").notNull(),
   responseStatus: integer("response_status"),

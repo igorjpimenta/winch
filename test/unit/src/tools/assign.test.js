@@ -33,7 +33,7 @@ afterEach(() => {
 
 test("assigns and writes the audit event", async () => {
   const task = seed();
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
   assert.equal(r.details.status, "ok");
   const fresh = store.task.get(task.id);
   assert.equal(fresh.assigned, "tester");
@@ -49,7 +49,7 @@ test("assigns and writes the audit event", async () => {
 
 test("any caller may assign — identity is attribution, not a gate", async () => {
   const task = seed();
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, WORKER);
+  const r = await handle("backlog_assign", { id: task.id, agent: "scorer" }, WORKER);
   assert.equal(r.details.status, "ok");
   assert.equal(store.task.get(task.id).assigned, "scorer");
   assert.equal(
@@ -60,8 +60,8 @@ test("any caller may assign — identity is attribution, not a gate", async () =
 
 test("null is rejected; capabilities survive when omitted", async () => {
   const task = seed();
-  await handle("backlog_assign", { taskId: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
-  const r = await handle("backlog_assign", { taskId: task.id, agent: null }, PLANNER);
+  await handle("backlog_assign", { id: task.id, agent: "tester", capabilities: ["qa"] }, PLANNER);
+  const r = await handle("backlog_assign", { id: task.id, agent: null }, PLANNER);
   assert.equal(r.details.reason, "rejected");
   const fresh = store.task.get(task.id);
   assert.equal(fresh.assigned, "tester");
@@ -69,7 +69,7 @@ test("null is rejected; capabilities survive when omitted", async () => {
 });
 
 test("unknown task is refused without writing anything", async () => {
-  const r = await handle("backlog_assign", { taskId: "TASK-nope", agent: "tester" }, PLANNER);
+  const r = await handle("backlog_assign", { id: "TASK-nope", agent: "tester" }, PLANNER);
   assert.equal(r.details.reason, "not_found");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM item_events WHERE kind='task.assigned'").get().n, 0);
 });
@@ -78,7 +78,7 @@ test("a live claim cannot be reassigned out from under its worker", async () => 
   const task = seed({ status: "ready", assigned: "tester" });
   await handle("backlog_claim", {}, WORKER);
   assert.equal(store.task.get(task.id).status, "in_progress");
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "scorer" }, PLANNER);
+  const r = await handle("backlog_assign", { id: task.id, agent: "scorer" }, PLANNER);
   assert.equal(r.details.reason, "rejected");
   assert.match(r.content[0].text, /in_progress by tester/);
   assert.equal(store.task.get(task.id).assigned, "tester");
@@ -87,7 +87,7 @@ test("a live claim cannot be reassigned out from under its worker", async () => 
 test("re-assigning a live task to its own worker is a no-op, not an error", async () => {
   const task = seed({ status: "ready", assigned: "tester" });
   await handle("backlog_claim", {}, WORKER);
-  const r = await handle("backlog_assign", { taskId: task.id, agent: "tester" }, PLANNER);
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
   assert.equal(r.details.status, "ok");
   assert.equal(store.task.get(task.id).assigned, "tester");
 });

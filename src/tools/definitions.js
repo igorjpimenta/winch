@@ -41,7 +41,6 @@ export const TOOL_DEFS = [
         additionalProperties: false,
         properties: {
           id: { type: "string", description: "Item id (opaque) for a task or a story." },
-          taskId: { type: "string", description: "Deprecated alias for `id` when assigning a task." },
           agent: { type: ["string", "null"], description: "Target agent id, or null/\"\" to unassign." },
           capabilities: {
             type: "array",

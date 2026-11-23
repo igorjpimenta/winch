@@ -1,15 +1,14 @@
 # Webhooks
 
 Winch stores webhook subscriptions by topic and stable id. Dispatch is the
-built-in topic: it delivers wake frames over HTTP, and a receiver answers `202`
+built-in topic: it delivers wake payloads over HTTP, and a receiver answers `202`
 (or any 2xx) to accept delivery. Delivery is at-least-once and per consumer;
 execution is single-flight. The payload marks one consumer `active` and the
 others `standby`; only the active consumer starts a session.
 
 `winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
-and the wake pump. It is separate from `winch serve --ws`, which serves only the
-read-only event stream; that contract is in [WebSocket event
-stream](websocket.md).
+and the wake pump. Webhook wakes are the main event driver: every work-making
+transition fans out to consumers through this server.
 
 ## Subscriptions
 
@@ -49,8 +48,7 @@ localhost-only unless `--host` says otherwise:
     winch webhook serve [--port N] [--host H]
 
 It also sweeps expired managed leases on `WINCH_DISPATCH_SWEEP_MS`. Disabled
-rows are retained for audit; manual rows are never swept. The read-only event
-stream is a separate process: `winch serve --ws`.
+rows are retained for audit; manual rows are never swept.
 
 Management endpoints accept `Authorization: Bearer $WINCH_DISPATCH_TOKEN` when
 that variable is set. A non-loopback `--host` refuses to start without it.
@@ -95,8 +93,7 @@ The server keeps a `state`:
 
 A stale **managed** `lastSeenAt` older than `WINCH_DISPATCH_CONSUMER_TTL_MS`
 (default 90s) is pruned by the sweep. Disabled rows are retained for audit and
-manual rows are never swept. A legacy executor-keyed row for the same executor
-is removed on the first consumer registration. Multiple consumers may share a
+manual rows are never swept. Multiple consumers may share a
 harness; each gets a delivery.
 
 The adapter environment supplies the identity:
@@ -122,7 +119,7 @@ The server routes work-making transitions into `admission_queue`:
 epic creator), and `epic.completed` (to the epic creator).
 
 - Each dispatch attempt has a stable `dispatch_events` row, one
-  `dispatch_deliveries` row per consumer, and a `dispatch_delivery_attempts`
+  `webhook_deliveries` row per consumer, and a `webhook_delivery_attempts`
   audit row per HTTP try. A queued wake is POSTed to every dispatch
   subscription for its harness. `202` means the receiver accepted the request;
   it does **not** mean the work was claimed.
@@ -226,9 +223,8 @@ It returns:
 - `resume`: assigned `in_progress` work with `task`, `attemptId`,
   `sessionId`, `sessionKey`, `leaseEpoch`, `ownerInstance`, and
   `leaseExpiresAt`. The winning claim records the consumer on the work
-  attempt; only that consumer gets its resume. A legacy claim with no owner
-  falls back to the active dispatch lease holder; if there is no active holder,
-  the row is **not** fanned out to every consumer (fail closed);
+  attempt; only that consumer gets its resume. A claim that never named a
+  consumer is not fanned out to any of them (fail closed);
 - `start`: already-offered wakes whose `activeConsumerId` is this consumer. A
   standby consumer receives none;
 - `free`: remaining capacity after active and offered work. The server pump

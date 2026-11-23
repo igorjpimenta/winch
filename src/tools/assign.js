@@ -10,7 +10,7 @@ export function createAssignTools({ store, logger }) {
   return {
     async backlog_assign(args, identity, cfg) {
       const qualified = `${identity.harness}:${identity.agent}`;
-      const target = args?.id ?? args?.taskId;
+      const target = args?.id;
       const kind = target ? store.itemKindOf(target) : null;
       if (!kind) return err(`backlog_assign: not found: ${target}`, "not_found", { id: target ?? null });
 

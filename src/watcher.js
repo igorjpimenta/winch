@@ -21,14 +21,13 @@ import { readyTasks } from "./ready-queue.js";
 export const MAX_ACTIVE_PER_AGENT = 2;
 
 /**
- * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], deferred:object[], unrouted:object[], blocked:object[], gates:object[]}}
+ * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], deferred:object[], blocked:object[], gates:object[]}}
  *   swept    — lease-expired tasks the sweep requeued or escalated this tick
  *   resolved — dependency-wait tasks returned to ready this tick
  *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
  *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
  *   human    — claimable human work: ready for a person, never woken through an agent harness
  *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
- *   unrouted — always empty while ready requires an assignment; kept for manifest compatibility
  */
 export function tick(store, { config: override = null } = {}) {
   const cfg = override ?? store.config;
@@ -52,8 +51,8 @@ export function tick(store, { config: override = null } = {}) {
     .slice(0, cfg.blockedLimit)
     .map((t) => ({ id: t.id, title: t.title, assigned: t.assignee_agent, gate_type: t.gate_type, blocked_at: t.blocked_at }));
   // Gated tasks are separated from plain blocks for visibility. Who should
-  // be told about them is a subscriber decision — the events WebSocket
-  // streams every row, and clients track their own seen state.
+  // be told about them is a subscriber decision — event envelopes carry every
+  // row, and webhook subscribers track their own seen state.
   const gates = store.item
     .list({ kind: "task", status: "blocked" })
     .filter((t) => t.gate_type)
@@ -71,14 +70,6 @@ export function tick(store, { config: override = null } = {}) {
   const deferred = claimable
     .filter((c) => c.assigned && c.assigned !== HUMAN_AGENT && (active.get(c.assigned) ?? 0) >= cfg.maxActivePerAgent)
     .map((c) => ({ ...c, activeCount: active.get(c.assigned) }));
-  const unrouted = claimable
-    .filter((c) => !c.assigned)
-    // Waiting-age gauge: the wire streams transitions, never waiting, so the
-    // manifest carries how long each unrouted task has sat idle instead.
-    .map((c) => {
-      const row = store.task.get(c.taskId);
-      return { ...c, idleMs: row ? nowTs - (row.updated_at ?? nowTs) : 0 };
-    });
 
   return {
     ts: nowTs,
@@ -88,7 +79,6 @@ export function tick(store, { config: override = null } = {}) {
     routed,
     human,
     deferred,
-    unrouted,
     blocked,
     gates,
   };
