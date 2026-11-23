@@ -33,26 +33,26 @@ test("resolveConfig with nothing declared returns the documented defaults", () =
     { ms: 24 * 3600 * 1000, label: "24h" },
     { ms: 72 * 3600 * 1000, label: "72h" },
   ]);
-  assert.equal(cfg.wsPort, 38291);
+  assert.equal(cfg.mcpHttpPort, 38292);
   assert.equal(cfg.dispatchPort, 38293);
   assert.equal(cfg.webhookTimeoutMs, 3000);
-  assert.equal(cfg.wsHistoryLimit, 200);
+  assert.equal(cfg.eventHistoryLimit, 200);
   assert.equal(cfg.maxActivePerAgent, 2);
   assert.equal(cfg.candidates, 5);
   assert.ok(Object.keys(CONFIG_DEFAULTS).length >= 15, "defaults table covers every knob");
 });
 
 test("precedence is explicit > env > default", () => {
-  const env = { WINCH_MAX_ATTEMPTS: "9", WINCH_WS_PORT: "40000" };
+  const env = { WINCH_MAX_ATTEMPTS: "9", WINCH_MCP_HTTP_PORT: "40000" };
   const cfg = resolveConfig({ explicit: { maxAttempts: 4 }, env });
   assert.equal(cfg.maxAttempts, 4, "explicit wins over env");
-  assert.equal(cfg.wsPort, 40000, "env wins over default");
+  assert.equal(cfg.mcpHttpPort, 40000, "env wins over default");
   assert.equal(cfg.scanLimit, 50, "untouched knob stays default");
 });
 
 test("malformed config refuses, naming the key", () => {
   assert.throws(() => resolveConfig({ explicit: { maxAttempts: 0 }, env: {} }), /bad maxAttempts/);
-  assert.throws(() => resolveConfig({ explicit: { wsPort: 99999 }, env: {} }), /bad wsPort/);
+  assert.throws(() => resolveConfig({ explicit: { mcpHttpPort: 99999 }, env: {} }), /bad mcpHttpPort/);
   assert.throws(() => resolveConfig({ explicit: { gateWaitLevels: "soon" }, env: {} }), /bad gateWaitLevels/);
   assert.throws(() => resolveConfig({ explicit: { someday: 1 }, env: {} }), /bad someday/, "unknown keys are typos until proven otherwise");
   assert.throws(() => resolveConfig({ explicit: "fast", env: {} }), /bad config/);

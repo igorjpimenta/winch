@@ -135,8 +135,8 @@ execution lease is the guard for wakes with no claim.
 The core query is `POST /dispatch/recover`; it returns assigned `in_progress`
 work with `attemptId`, `leaseEpoch`, `ownerInstance`, `sessionId`, `sessionKey`
 and lease expiry. The winning claim records its consumer on the work attempt,
-so only that consumer gets the resume. A legacy claim with no owner falls back
-to the active dispatch lease holder, and fails closed if there is no holder.
+so only that consumer gets the resume; a claim that never named a consumer is
+not fanned out to any of them.
 The plugin dedupes by task id and resumes the same attempt. Its first action is
 `backlog_update` with the returned `attemptId` and `leaseEpoch`; a stale attempt
 or epoch gets `stale_claim`, and only an expired lease returns the item to

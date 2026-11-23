@@ -6,12 +6,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { createStore } from "../../../src/store/index.js";
-import { toEventMessage } from "../../../src/events-ws.js";
-import { startDispatchServer } from "../../../src/dispatch-server.js";
-import { recover, observe, routesForEvent, tick } from "../../../src/dispatch.js";
-import { deliverDue, deliverWake } from "../../../src/dispatch-webhook.js";
-import { StaleRegistrationError } from "../../../src/store/webhook.js";
+import { createStore } from "../../../../src/store/index.js";
+import { toEventMessage } from "../../../../src/webhook/envelope.js";
+import { startDispatchServer } from "../../../../src/webhook/server.js";
+import { recover, observe, routesForEvent, tick } from "../../../../src/webhook/core.js";
+import { deliverDue, deliverWake } from "../../../../src/webhook/delivery.js";
+import { StaleRegistrationError } from "../../../../src/store/webhook.js";
 
 let dir, store, srv, receiver;
 
@@ -335,7 +335,7 @@ test("dispatch registration is one row per consumer, with executor metadata", as
 
   let res = await register({ harness: "test", executorId: "exec-legacy", url: "http://127.0.0.1:1/wake", bearer: "tok" });
   assert.equal(res.status, 201);
-  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 1, "legacy executor registration exists");
+  assert.equal(store.webhook.list({ topic: "dispatch" }).length, 1, "executor-keyed registration exists");
 
   res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-legacy", url: "http://127.0.0.1:2/wake", bearer: "tok" });
   assert.equal(res.status, 201);
@@ -351,10 +351,11 @@ test("dispatch registration is one row per consumer, with executor metadata", as
   res = await register({ harness: "test", consumerId: "test:host", executorId: "exec-legacy", instanceId: "exec-legacy", url: "http://127.0.0.1:4/wake", bearer: "tok" });
   assert.equal(res.status, 201);
   const rows = store.webhook.list({ topic: "dispatch" });
-  assert.equal(rows.length, 1, "one consumer owns one wake route");
-  assert.equal(rows[0].id, "test:host");
-  assert.equal(rows[0].executorId, "exec-legacy");
-  assert.equal(rows[0].url, "http://127.0.0.1:4/wake");
+  assert.equal(rows.length, 2, "executor-keyed and consumer-keyed rows coexist; the lease sweep prunes the stale one");
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(byId.get("test:host").url, "http://127.0.0.1:4/wake");
+  assert.equal(byId.get("test:host").executorId, "exec-legacy");
+  assert.equal(byId.get("exec-legacy").url, "http://127.0.0.1:1/wake");
 });
 
 test("a live assignment reaches the queue and the receiver without a restart", async () => {
@@ -530,7 +531,7 @@ test("four transient failures disable the subscription", () => {
   }
 });
 
-test("the work attempt carries the consumer, and resume falls back to the active lease", () => {
+test("the work attempt carries the consumer, and resume follows it", () => {
   store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
   store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: "http://127.0.0.1:2/wake", bearer: "tok" });
   const { task, row } = seedAssigned();
@@ -543,9 +544,10 @@ test("the work attempt carries the consumer, and resume falls back to the active
   const attempt = store.db.prepare("SELECT consumer_id FROM attempts WHERE item_id=? AND ended_at IS NULL").get(task.id);
   assert.equal(attempt.consumer_id, null, "a manual claim has no wake consumer");
   const mine = recover(store, { harness: "test", consumerId: offer.active_consumer_id });
-  assert.equal(mine.resume.length, 1, "unowned resume goes to the active lease holder");
+  assert.equal(mine.resume.length, 0, "an ownerless claim is not routed to the active lease holder");
   const other = recover(store, { harness: "test", consumerId: "not-the-active" });
   assert.equal(other.resume.length, 0, "the standby does not resume the same attempt");
+  assert.equal(recover(store, { harness: "test", mutate: false }).resume.length, 1, "only the operator view sees it");
 });
 
 test("read-only recover does not mutate the queue", () => {
@@ -586,7 +588,8 @@ test("only the active consumer gets a start row", () => {
 
 test("ownerless resume fails closed when no active lease names a holder", () => {
   const { task, row } = seedAssigned();
-  // No observeEvent: this is the legacy/manual shape the old fallback fanned out.
+  // No observeEvent: the claim never names a consumer, so only the operator
+  // view (no consumerId filter) may see it.
   store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "legacy" });
   const a = recover(store, { harness: "test", consumerId: "a", mutate: false });
   const b = recover(store, { harness: "test", consumerId: "b", mutate: false });
@@ -662,7 +665,7 @@ test("delivery keeps a stable event and a per-attempt audit row", async (t) => {
   const event = store.dispatchEvent.get({ admissionId: offer.id, attemptNo: offer.attempt_no });
   assert.ok(event);
   assert.equal(delivery.event_id, event.id);
-  assert.equal(store.db.prepare("SELECT status FROM dispatch_delivery_attempts WHERE delivery_id=? ORDER BY id DESC LIMIT 1").get(delivery.id).status, "delivered");
+  assert.equal(store.db.prepare("SELECT status FROM webhook_delivery_attempts WHERE delivery_id=? ORDER BY id DESC LIMIT 1").get(delivery.id).status, "delivered");
 });
 
 test("dispatch management endpoints require WINCH_DISPATCH_TOKEN when set", async () => {
