@@ -17,6 +17,7 @@ contract itself is the only integration surface.
 - **Dependency DAG** - forward-only deps, cycle-checked, cancelled deps count as resolved.
 - **Webhook wakes** - every work-making transition fans out to consumer webhooks; subscribers wake agents, no polling.
 - **Human gates** - block/resume with gate types; one resume per gate, actor-checked.
+- **Human-gated artifacts** - attaching a `pr`/`release`/`design` artifact spawns a review child for the reserved `human` pair and parks the parent until it resolves.
 - **Content-addressed evidence** - artifacts recorded on close, carried into downstream handoffs.
 
 It is local-first and harness-neutral: OpenCode, OpenClaw and future harnesses
@@ -240,9 +241,9 @@ loopback endpoint and starts a claimable session with `opencode run`.
 | `backlog_delegate` | split work from a task to another worker (agent or human); each child becomes its own card, the parent parks in `blocked` until all children close, then returns to `ready` for the accountable. `childKey`/`visitSeq` make retries idempotent and start new rounds |
 | `backlog_get` | read an epic, story or task by id - acceptance, results, artifacts, dependencies, readiness |
 | `backlog_claim` | claim one task by id, or the highest-priority ready task when the id is omitted; atomic CAS under a lease |
-| `backlog_update` | heartbeat and append progress, comment or artifact to a claimed task; pass the `leaseEpoch` for wake-owned attempts |
+| `backlog_update` | heartbeat and append progress, comment or artifact to a claimed task; pass the `leaseEpoch` for wake-owned attempts. `addArtifact` accepts a URI or `{uri, kind?, label?}`; kinds in `hitlArtifactKinds` (default `pr`/`release`/`design`) spawn the human review child |
 | `backlog_accept_wake` | take the single-flight execution lease for a story/append/review wake before planning |
-| `backlog_done` | close a claimed task with a result; closing the last task closes its story, and the last story closes the epic and wakes the agent that planned it |
+| `backlog_done` | close a claimed task with a result; refuses while deps are unmet (`deps_unmet`) or when a HITL artifact is only now being attached (`hitl_at_done`); closing the last task closes its story, and the last story closes the epic and wakes the agent that planned it |
 | `backlog_block` / `backlog_resume` | open a human gate (with optional `gateType` and `blockedBy` dep edge) and resolve it (`actor` optional) |
 
 ## Task lifecycle
@@ -260,6 +261,23 @@ Assigning the reserved agent `human` stamps the reserved harness
 work, but neither value is a caller identity, and agent dispatchers never wake
 it. A block parks it until an operator resumes it; the last task closes its
 story, and the last story closes the epic.
+
+Human-gated artifacts use that same pair. Attaching an artifact whose kind is
+in `hitlArtifactKinds` (`WINCH_HITL_ARTIFACT_KINDS`, default
+`pr,release,design`) while a task is claimed:
+
+1. stores the artifact (URI unique across the store);
+2. spawns a ready child assigned to `human`/`human_in_the_loop`
+   (`execution_kind: gate`, keyed `hitl:<kind>:<uri>` for idempotency);
+3. adds `parent → child` on the dependency DAG and parks the parent in a
+   deps wait — claim and `backlog_done` refuse until the child resolves.
+
+The PR body carries `Backlog:` / `Backlog-Task:` markers; the claim handoff's
+`receiverPrompt` states the protocol (attach while `in_progress`, never
+self-complete while a child is open). Resolution is human-only: merge the PR
+and `merge-detect` closes the child and frees the parent, or run
+`winch resolve <childId>` for non-PR kinds. `winch hitl` lists the human
+queue; `winch next` excludes it.
 
 ```mermaid
 flowchart LR
@@ -299,9 +317,11 @@ Claim leases, attempt caps, and gate rules: [lifecycle](docs/lifecycle.md).
 | `serve --mcp http --port N [--host H]` | serve the same tools over Streamable HTTP (shared daemon) |
 | `watch` | one watcher tick (JSON manifest on stdout) |
 | `resume <taskId> [--actor <name>]` | resolve a human gate: blocked to ready |
-| `next` | list the current ready queue |
+| `next` | list the current ready queue (agent work only — human HITL children are excluded) |
+| `hitl [--status S]` | list the human-in-the-loop queue (PR/release/design review children, with artifacts and parents) |
+| `resolve <taskId> [--note N]` | operator closes a HITL child; frees parents parked on it |
 | `release-epic --epic <id> [--task ID] [--version V] [--base B]` | release notes + branch/PR with backlog markers |
-| `merge-detect [--dry-run]` | apply merged/closed PR outcomes |
+| `merge-detect [--dry-run]` | apply merged/closed PR outcomes (closes HITL children and cascades parents) |
 | `webhook bearer` | generate a dispatch bearer |
 | `webhook register --topic T [--harness H] [--executor E] --url U [--id I] [--bearer B]` | register or replace a webhook subscription; a bearer is generated and printed when omitted |
 | `webhook list [--topic T] [--harness H]` | list webhook subscriptions with bearer redacted |

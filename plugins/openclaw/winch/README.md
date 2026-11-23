@@ -75,3 +75,20 @@ Environment:
 | `WINCH_DISPATCH_TOKEN` | management bearer for register/recover/notify; required for a non-loopback winch bind |
 
 Requires OpenClaw ≥ 2026.5.18 (declared as `openclaw.install.minHostVersion`).
+
+## Human artifacts (HITL)
+
+This plugin adds no HITL logic — the server owns it. What an OpenClaw session
+needs to know:
+
+- **Agents** get the PR protocol from the claim handoff's `receiverPrompt`:
+  put `Backlog:` / `Backlog-Task:` in the PR body, attach with
+  `backlog_update({ addArtifact: "<pr-url>", addArtifactKind: "pr" })` while
+  `in_progress`, and never `backlog_done` while a review child is open.
+- **Operators** list the human queue with `winch hitl` (not `winch next`,
+  which excludes `human`). Resolve a non-PR child with
+  `winch resolve <taskId> --note "…"`. For PR children, merge on GitHub —
+  `merge-detect` closes the child and frees the parent within its schedule.
+- **Wakes never target humans**: the reserved `human`/`human_in_the_loop`
+  pair is excluded from agent wake lists; the gateway will not start a
+  session for a review child.
