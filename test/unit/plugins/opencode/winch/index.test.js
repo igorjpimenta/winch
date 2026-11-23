@@ -93,13 +93,29 @@ test("usage is reported only for engaged sessions, once per message", async () =
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(calls.length, 0, "an unengaged session reports nothing");
 
-    await hooks["tool.execute.before"]({ tool: "winch__backlog_claim", sessionID: "ses_9" }, { args: {} });
+    await hooks["tool.execute.before"]({ tool: "winch__backlog_claim", sessionID: "ses_9" }, { args: { taskId: "TASK-9" } });
     await hooks.event({ event: { type: "message.updated", properties: { info } } });
     await hooks.event({ event: { type: "message.updated", properties: { info } } });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(calls.length, 1, "one report per message id");
     assert.equal(calls[0].url, "http://127.0.0.1:38293/usage");
     assert.equal(JSON.parse(calls[0].opts.body).sessionKey, "opencode:build:ses_9");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a winch call without an item id does not arm reporting", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { calls.push({ url, opts }); return { ok: true }; };
+  try {
+    const hooks = createWinchHooks({ harness: "opencode" });
+    await hooks["tool.execute.before"]({ tool: "winch__backlog_accept_wake", sessionID: "ses_p" }, { args: { admissionId: "ADM-1", attemptNo: 1 } });
+    const info = { id: "msg_p", role: "assistant", finish: "stop", sessionID: "ses_p", agent: "planner", cost: 1, tokens: { input: 1 } };
+    await hooks.event({ event: { type: "message.updated", properties: { info } } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(calls.length, 0, "accept_wake alone does not bind an item");
   } finally {
     globalThis.fetch = originalFetch;
   }

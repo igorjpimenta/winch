@@ -1,7 +1,7 @@
 // usage.test.js — pure mapping and HTTP shape for the opencode usage reporter.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isFinalAssistant, usageFromAssistantMessage, usageBody, postUsage, remember } from "../../../../../plugins/opencode/winch/usage.js";
+import { carriesItemId, isFinalAssistant, usageFromAssistantMessage, usageBody, postUsage, remember } from "../../../../../plugins/opencode/winch/usage.js";
 
 test("a final assistant message maps cost and tokens", () => {
   const info = {
@@ -76,4 +76,12 @@ test("postUsage posts to /usage and a rejection is swallowed", async () => {
   });
   assert.equal(failed, false);
   assert.match(logs[0], /usage report failed/);
+});
+
+test("carriesItemId mirrors the server's item-binding keys", () => {
+  assert.equal(carriesItemId({ taskId: "TASK-1" }), true);
+  assert.equal(carriesItemId({ story_id: "STORY-1" }), true);
+  assert.equal(carriesItemId({ admissionId: "ADM-1" }), false);
+  assert.equal(carriesItemId({ id: "   " }), false);
+  assert.equal(carriesItemId(null), false);
 });

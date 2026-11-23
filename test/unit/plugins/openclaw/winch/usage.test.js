@@ -1,7 +1,7 @@
 // usage.test.js — pure mapping and HTTP shape for the openclaw usage reporter.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { usageFromReplyEvent, usageBody, postUsage } from "../../../../../plugins/openclaw/winch/usage.js";
+import { carriesItemId, usageFromReplyEvent, usageBody, postUsage } from "../../../../../plugins/openclaw/winch/usage.js";
 
 test("maps a reply usage snapshot to winch usage", () => {
   const event = {
@@ -71,4 +71,12 @@ test("a rejected usage post is swallowed", async () => {
   });
   assert.equal(ok, false);
   assert.match(logs[0], /usage report failed/);
+});
+
+test("carriesItemId mirrors the server's item-binding keys", () => {
+  assert.equal(carriesItemId({ taskId: "TASK-1" }), true);
+  assert.equal(carriesItemId({ story_id: "STORY-1" }), true);
+  assert.equal(carriesItemId({ admissionId: "ADM-1" }), false);
+  assert.equal(carriesItemId({ id: "   " }), false);
+  assert.equal(carriesItemId(null), false);
 });

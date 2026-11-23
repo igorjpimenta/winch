@@ -1,7 +1,7 @@
 import { createWinchHooks } from "./hooks.js";
 import { stampWinchEvent } from "./identity.js";
 import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
-import { isFinalAssistant, remember, reportAssistantUsage } from "./usage.js";
+import { carriesItemId, isFinalAssistant, remember, reportAssistantUsage } from "./usage.js";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os, { hostname } from "node:os";
@@ -172,7 +172,7 @@ export default {
       const agent = agents.get(event.sessionID) ?? process.env.WINCH_AGENT ?? null;
       // Unconditional: unknown agent blanks the slot, the server refuses
       // rather than trusting whatever the model wrote there.
-      if (stampWinchEvent(event, agent, consumerId, executorId)) remember(engaged, event.sessionID);
+      if (stampWinchEvent(event, agent, consumerId, executorId) && carriesItemId(event.input)) remember(engaged, event.sessionID);
     });
     if (typeof ctx.event?.subscribe === "function") {
       const controller = new AbortController();

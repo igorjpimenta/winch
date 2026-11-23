@@ -1,7 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
 import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
-import { remember, reportReplyUsage } from "./usage.js";
+import { carriesItemId, remember, reportReplyUsage } from "./usage.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
@@ -60,7 +60,7 @@ export default definePluginEntry({
     if (typeof api.on === "function") {
       api.on("before_tool_call", (event, ctx) => {
         const stamp = buildWinchMeta(event, ctx, harness, consumerId, executorId);
-        if (stamp) remember(engaged, stamp.params._meta.winch.session);
+        if (stamp && carriesItemId(stamp.params)) remember(engaged, stamp.params._meta.winch.session);
         return stamp;
       });
       // One usage snapshot per run arrives on reply_payload_sending. The hook

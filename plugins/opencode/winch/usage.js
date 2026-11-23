@@ -45,6 +45,17 @@ export function usageFromAssistantMessage(info) {
   };
 }
 
+const ITEM_ID_KEYS = ["taskId", "task_id", "id", "epicId", "epic_id", "storyId", "story_id"];
+
+// The server binds a session to an item only for a call carrying an item id
+// (backlog_claim, get, update, append, ...). accept_wake carries an
+// admissionId, so it alone does not bind; reporting is armed on the first call
+// that can actually attribute the row.
+export function carriesItemId(args) {
+  if (!args || typeof args !== "object") return false;
+  return ITEM_ID_KEYS.some((key) => typeof args[key] === "string" && args[key].trim() !== "");
+}
+
 // The winch server keys sessions by `<harness>:<agent>:<external session>`.
 export function usageBody({ harness, agent, session, usage, turnRef }) {
   if (!agent || !session || !usage) return null;
