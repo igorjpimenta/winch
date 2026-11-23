@@ -1,12 +1,12 @@
-// events.test.js — the event envelope: stored rows in, subscriber envelopes
+// envelope.test.js — the event envelope: stored rows in, subscriber envelopes
 // out. No socket involved; the webhook wake path consumes these envelopes.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createStore } from "../../../src/store/index.js";
-import { kindForEvent, toEventMessage } from "../../../src/events.js";
+import { createStore } from "../../../../src/store/index.js";
+import { kindForEvent, toEventMessage } from "../../../../src/webhook/envelope.js";
 
 let dir, store;
 
@@ -54,7 +54,7 @@ test("a close carries the work it just made claimable", async () => {
   const first = store.task.create({ storyId: story.id, title: "first", status: "done", executionKind: "manual" });
   const next = store.task.create({ storyId: story.id, title: "next", status: "ready", executionKind: "manual", assigned: "builder", assigneeHarness: "test", capabilities: ["verify"] });
   const human = store.task.create({ storyId: story.id, title: "human", status: "ready", executionKind: "manual", assigned: "human" });
-  const { addDep } = await import("../../../src/deps.js");
+  const { addDep } = await import("../../../../src/deps.js");
   assert.ok(addDep(store, next.id, first.id).ok);
   const row = store.db.prepare("SELECT * FROM item_events WHERE item_id=? AND to_status='done' ORDER BY id DESC LIMIT 1").get(first.id);
   const msg = toEventMessage(store, row);

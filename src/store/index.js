@@ -37,7 +37,7 @@ import { createAdmissionApi } from "./admission.js";
 import { createDeliveryApi } from "./delivery.js";
 import { createDispatchEventApi } from "./dispatch-events.js";
 import { observe } from "../webhook/core.js";
-import { toEventMessage } from "../events.js";
+import { toEventMessage } from "../webhook/envelope.js";
 
 export { MAX_ATTEMPTS };
 export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };

@@ -1,7 +1,7 @@
 # Webhooks
 
 Winch stores webhook subscriptions by topic and stable id. Dispatch is the
-built-in topic: it delivers wake frames over HTTP, and a receiver answers `202`
+built-in topic: it delivers wake payloads over HTTP, and a receiver answers `202`
 (or any 2xx) to accept delivery. Delivery is at-least-once and per consumer;
 execution is single-flight. The payload marks one consumer `active` and the
 others `standby`; only the active consumer starts a session.

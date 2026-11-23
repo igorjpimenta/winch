@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { createStore } from "../../../../src/store/index.js";
-import { kindForEvent } from "../../../../src/events.js";
+import { kindForEvent } from "../../../../src/webhook/envelope.js";
 import Database from "better-sqlite3";
 import { tempDb } from "./_helpers.js";
 

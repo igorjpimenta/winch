@@ -1,6 +1,6 @@
-// events.js — the event envelope: stored transition rows in, subscriber
+// envelope.js — the event envelope: stored transition rows in, subscriber
 // envelopes out. No socket here. Webhook wakes are the main event driver
-// (webhook/delivery.js via webhook/server.js); the store write hook and the
+// (delivery.js via server.js); the store write hook and the
 // dispatch boot catch-up share this one shape.
 //
 // kindForEvent: stable kind for a stored transition. Structural inference
@@ -14,9 +14,9 @@
 // Pre-standardization rows still carry `todo` as a task status; map it with
 // `ready` so the append-only history keeps the meaning it was recorded with.
 
-import { collectStoryArtifacts } from "./tools/index.js";
-import { depsResolved } from "./deps.js";
-import { HUMAN_AGENT } from "./reserved.js";
+import { collectStoryArtifacts } from "../tools/index.js";
+import { depsResolved } from "../deps.js";
+import { HUMAN_AGENT } from "../reserved.js";
 
 export const HISTORY_LIMIT = 200;
 

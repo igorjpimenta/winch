@@ -337,7 +337,7 @@ any VPS, compose host or cluster with one replica (SQLite has one writer).
 
 ## Event envelopes
 
-Every stored transition becomes one envelope (`src/events.js`): the stored
+Every stored transition becomes one envelope (`src/webhook/envelope.js`): the stored
 transition plus the task, story and epic context a subscriber would otherwise
 fetch once per row. Webhook wakes are the main event driver — the dispatch
 server projects these envelopes into wake payloads; see
@@ -351,7 +351,7 @@ failure. The emitter feeds the stored kind straight through; otherwise a row
 maps by transition structure alone. Notes never classify anything: they are
 free text and can change, so pre-kind rows keep exactly the meanings they
 were recorded with - an append-only log keeps its history.
-The structural mapping lives in `src/events.js`; stored producer kinds pass
+The structural mapping lives in `src/webhook/envelope.js`; stored producer kinds pass
 through unchanged. History and live rows share one envelope shape.
 
 Delivery-dynamics notes the envelopes will not tell you: heartbeats renew the
@@ -365,10 +365,7 @@ Rows carry their stored `kind`, the normalized `item` block, and the task-contex
 block (`task` with story/epic/acceptance/artifacts) the claim handoff also uses.
 
 The server never interprets a row - a gate opening is just another event, and
-reminders, digests and dashboards are subscriber code. Reconnect replays
-history, so a missed frame costs a re-read, never a lost event. No auth in
-process: keep the loopback bind, or put a bearer-checked reverse proxy in
-front. Plain HTTP hits get 404.
+reminders, digests and dashboards are subscriber code.
 
 ## Store
 

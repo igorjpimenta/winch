@@ -6,7 +6,7 @@ import http from "node:http";
 import { observe, recover, tick as dispatchTick } from "./core.js";
 import { deliverDue, deliverWake } from "./delivery.js";
 import { StaleRegistrationError } from "../store/webhook.js";
-import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "../events.js";
+import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./envelope.js";
 
 export const DEFAULT_DISPATCH_PORT = 38293;
 
