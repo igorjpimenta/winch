@@ -2,7 +2,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { makeHarness, ATLAS } from "./_harness.js";
-import { observe, tick } from "../../../../src/dispatch.js";
+import { observe, tick } from "../../../../src/webhook/core.js";
 
 let h;
 beforeEach(() => { h = makeHarness("winch-index-"); });

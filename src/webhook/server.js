@@ -1,12 +1,12 @@
-// dispatch-server.js — HTTP dispatch endpoints and the admission queue pump.
+// server.js — HTTP dispatch endpoints and the admission queue pump.
 // Executors register here and winch POSTs webhook wakes from here; webhook
 // delivery is the main event driver.
 
 import http from "node:http";
-import { observe, recover, tick as dispatchTick } from "./dispatch.js";
-import { deliverDue, deliverWake } from "./dispatch-webhook.js";
-import { StaleRegistrationError } from "./store/webhook.js";
-import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./events.js";
+import { observe, recover, tick as dispatchTick } from "./core.js";
+import { deliverDue, deliverWake } from "./delivery.js";
+import { StaleRegistrationError } from "../store/webhook.js";
+import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "../events.js";
 
 export const DEFAULT_DISPATCH_PORT = 38293;
 

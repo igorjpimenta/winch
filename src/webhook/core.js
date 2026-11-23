@@ -2,8 +2,8 @@
 // under per-harness and global caps. The harness accepts an offer; only the
 // winner starts a session. Item status remains the work acknowledgement.
 
-import { HUMAN_AGENT, HUMAN_HARNESS } from "./reserved.js";
-import { pickConsumer } from "./dispatch-webhook.js";
+import { HUMAN_AGENT, HUMAN_HARNESS } from "../reserved.js";
+import { pickConsumer } from "./delivery.js";
 
 const RELEASING_STATUSES = new Set(["done", "cancelled", "blocked", "backlog", "review"]);
 

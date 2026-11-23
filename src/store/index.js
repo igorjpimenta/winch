@@ -36,7 +36,7 @@ import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
 import { createDeliveryApi } from "./delivery.js";
 import { createDispatchEventApi } from "./dispatch-events.js";
-import { observe } from "../dispatch.js";
+import { observe } from "../webhook/core.js";
 import { toEventMessage } from "../events.js";
 
 export { MAX_ATTEMPTS };

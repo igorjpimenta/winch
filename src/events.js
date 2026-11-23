@@ -1,6 +1,6 @@
 // events.js — the event envelope: stored transition rows in, subscriber
 // envelopes out. No socket here. Webhook wakes are the main event driver
-// (dispatch-webhook.js via dispatch-server.js); the store write hook and the
+// (webhook/delivery.js via webhook/server.js); the store write hook and the
 // dispatch boot catch-up share this one shape.
 //
 // kindForEvent: stable kind for a stored transition. Structural inference

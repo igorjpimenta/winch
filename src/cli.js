@@ -12,7 +12,7 @@ import { tick } from "./watcher.js";
 import { shipRelease } from "./release.js";
 import { collectPRs, applyMergeOutcomes } from "./merges.js";
 import { startMcpServer } from "./mcp.js";
-import { startDispatchServer } from "./dispatch-server.js";
+import { startDispatchServer } from "./webhook/server.js";
 import { declaredFromEnv } from "./identity.js";
 import { resolveDbPath } from "./paths.js";
 

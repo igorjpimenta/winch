@@ -6,12 +6,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { createStore } from "../../../src/store/index.js";
-import { toEventMessage } from "../../../src/events.js";
-import { startDispatchServer } from "../../../src/dispatch-server.js";
-import { recover, observe, routesForEvent, tick } from "../../../src/dispatch.js";
-import { deliverDue, deliverWake } from "../../../src/dispatch-webhook.js";
-import { StaleRegistrationError } from "../../../src/store/webhook.js";
+import { createStore } from "../../../../src/store/index.js";
+import { toEventMessage } from "../../../../src/events.js";
+import { startDispatchServer } from "../../../../src/webhook/server.js";
+import { recover, observe, routesForEvent, tick } from "../../../../src/webhook/core.js";
+import { deliverDue, deliverWake } from "../../../../src/webhook/delivery.js";
+import { StaleRegistrationError } from "../../../../src/store/webhook.js";
 
 let dir, store, srv, receiver;
 
