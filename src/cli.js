@@ -14,6 +14,7 @@ import { collectPRs, applyMergeOutcomes, closeHitlAndFreeParents, isHitlChild } 
 import { startMcpServer } from "./mcp.js";
 import { startDispatchServer } from "./webhook/server.js";
 import { declaredFromEnv } from "./identity.js";
+import { HUMAN_AGENT } from "./reserved.js";
 import { resolveDbPath } from "./paths.js";
 
 export { resolveDbPath };
@@ -119,7 +120,9 @@ export async function runCli(argv) {
     case "next": {
       const store = openStore();
       try {
-        const rows = readyTasks(store, { limit: 20 });
+        // Human work lives in `winch hitl` — keep it out of the agent queue.
+        const rows = readyTasks(store, { limit: 20 })
+          .filter((r) => r.task.assignee_agent !== HUMAN_AGENT);
         console.log(JSON.stringify(
           rows.map((r) => ({ taskId: r.task.id, title: r.task.title, assigned: r.task.assignee_agent, story: r.story.id, epic: r.epic.id })),
           null, 2
