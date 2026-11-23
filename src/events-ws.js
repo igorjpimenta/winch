@@ -2,10 +2,11 @@
 // Tails the item_events ledger and broadcasts every new row; dispatch wakes
 // leave over executor webhooks served by dispatch-server.js, not this socket.
 //
-// Wire protocol (JSON text frames, server → client only):
-//   {"type":"welcome","payload":"v3","lastEventId":N}
-//   {"type":"history","events":[...]}   backlog of envelopes, oldest-first
-//   {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
+// Wire protocol (JSON text frames):
+//   server → client:
+//     {"type":"welcome","payload":"v3","lastEventId":N}
+//     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
+//     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
 //
 // Clients track their own seen state: reconnecting replays history, so a
 // missed frame costs a re-read, never a lost event. The admission queue owns
@@ -225,39 +226,6 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
       clients.delete(socket);
     }
 
-    // Client frames are only ever interesting as close/ping; everything else
-    // is consumed and ignored. Mask bit respected when skipping payloads.
-    let buf = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buf = Buffer.concat([buf, chunk]);
-      for (;;) {
-        if (buf.length < 2) return;
-        const opcode = buf[0] & 0x0f;
-        let len = buf[1] & 0x7f;
-        let off = 2;
-        if (len === 126) {
-          if (buf.length < 4) return;
-          len = buf.readUInt16BE(2);
-          off = 4;
-        } else if (len === 127) {
-          if (buf.length < 10) return;
-          if (buf.readUInt32BE(2) !== 0) {
-            socket.destroy();
-            return;
-          }
-          len = buf.readUInt32BE(6);
-          off = 10;
-        }
-        if (buf[1] & 0x80) off += 4;
-        if (buf.length < off + len) return;
-        buf = buf.slice(off + len);
-        if (opcode === 0x8) {
-          socket.destroy();
-          return;
-        }
-        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
-      }
-    });
     const drop = () => {
       clients.delete(socket);
       if (closing) return;
