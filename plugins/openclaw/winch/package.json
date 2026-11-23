@@ -18,7 +18,8 @@
     "meta.js",
     "dispatch.js",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "usage.js"
   ],
   "openclaw": {
     "extensions": [

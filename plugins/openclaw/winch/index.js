@@ -1,6 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
-import { startDispatch } from "./dispatch.js";
+import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
+import { remember, reportReplyUsage } from "./usage.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
@@ -53,10 +54,30 @@ export default definePluginEntry({
     const harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw";
     const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
     const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID ?? null;
+    // Only sessions that have made a winch call are bound to an item, so only
+    // those carry usage the server can attribute.
+    const engaged = new Set();
     if (typeof api.on === "function") {
-      api.on("before_tool_call", (event, ctx) => buildWinchMeta(event, ctx, harness, consumerId, executorId));
+      api.on("before_tool_call", (event, ctx) => {
+        const stamp = buildWinchMeta(event, ctx, harness, consumerId, executorId);
+        if (stamp) remember(engaged, stamp.params._meta.winch.session);
+        return stamp;
+      });
+      // One usage snapshot per run arrives on reply_payload_sending. The hook
+      // returns nothing so the payload is delivered unchanged.
+      api.on("reply_payload_sending", (event) => {
+        const session = event?.sessionKey ?? event?.usageState?.sessionId ?? event?.runId;
+        if (!engaged.has(session)) return;
+        reportReplyUsage({
+          event,
+          harness,
+          baseUrl: process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
+          token: process.env.WINCH_DISPATCH_TOKEN,
+          logger: api.logger,
+        });
+      });
     } else {
-      api.logger.warn("winch: api.on unavailable; identity hook not registered");
+      api.logger.warn("winch: api.on unavailable; identity and usage hooks not registered");
     }
 
     let dispatch = null;
