@@ -209,20 +209,25 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
         const usage = normalizeUsage(body.usage);
         if (!usage) throw new Error("usage requires a non-empty usage object");
         const sess = store.db.prepare(
-          "SELECT item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?"
+          "SELECT id, item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?"
         ).get(sessionKey);
         if (!sess) { json(res, 404, { error: `no session: ${sessionKey}` }); return; }
-        const it = store.item.get(sess.item_id);
+        const live = store.db.prepare(
+          "SELECT id FROM attempts WHERE item_id=? AND ended_at IS NULL ORDER BY attempt_no DESC LIMIT 1"
+        ).get(sess.item_id);
+        const turnRef = typeof body.turnRef === "string" && body.turnRef.trim() !== "" ? body.turnRef.trim() : null;
         const id = store.usage.record({
           harness: sess.harness,
           agent: sess.agent_id,
           session: sess.external_session_id,
           itemId: sess.item_id,
-          itemKind: it?.kind ?? null,
+          sessionId: sess.id,
+          attemptId: live?.id ?? null,
           usage,
           source: "api",
+          turnRef,
         });
-        json(res, 201, { ok: true, id, itemId: sess.item_id });
+        json(res, 201, { ok: true, id, itemId: sess.item_id, duplicate: id === null });
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });
       }

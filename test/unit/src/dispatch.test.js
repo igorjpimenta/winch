@@ -735,3 +735,20 @@ test("POST /usage requires WINCH_DISPATCH_TOKEN when set", async () => {
     else process.env.WINCH_DISPATCH_TOKEN = previous;
   }
 });
+
+test("usage.record is idempotent per turnRef and keeps one row per turn", () => {
+  const { story } = hierarchy();
+  const task = store.task.create({ storyId: story.id, title: "T", status: "backlog" });
+  const sess = store.session.ensure({ harness: "test", agentId: "w", externalSessionId: "s", itemId: task.id, kind: "claim" });
+  const base = {
+    harness: "test", agent: "w", session: "s", itemId: task.id, sessionId: sess.id,
+    usage: { model: "gpt-4", tokensIn: 5, costUsd: 0.001 }, turnRef: "turn-1",
+  };
+  const first = store.usage.record(base);
+  assert.ok(first, "first turn recorded");
+  const second = store.usage.record(base);
+  assert.equal(second, null, "duplicate turnRef is ignored");
+  assert.equal(store.usage.summary({ itemId: task.id }).calls, 1);
+  const row = store.db.prepare("SELECT session_id, attempt_id FROM usage_events WHERE item_id=?").get(task.id);
+  assert.equal(row.session_id, sess.id, "session linked");
+});

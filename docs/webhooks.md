@@ -59,19 +59,22 @@ that variable is set. A non-loopback `--host` refuses to start without it.
 
 The harness posts per-turn LLM usage to the dispatch server. The body names the
 caller's `sessionKey` and the usage object; winch resolves the session's item
-and records the row on the ledger, which then streams to subscribers.
+and writes one `usage_events` row.
 
     POST /usage
     Authorization: Bearer $WINCH_DISPATCH_TOKEN
     {"sessionKey":"<harness>:<agent>:<externalSession>",
+     "turnRef":"<provider turn id, optional>",
      "usage":{"model":"…","tokensIn":0,"tokensOut":0,"cacheRead":0,"costUsd":0.0,"toolCalls":0}}
 
 `usage` accepts snake_case aliases (`tokens_in`, `tokens_out`, `cache_read`,
 `cost_usd`, `cost`, `tool_calls`). An unknown `sessionKey` returns `404`; an
-empty usage object returns `400`. A session is bound to its item at claim and on
-any item-touching call, and `work_sessions.item_id` is `NOT NULL`, so every
-recorded row lands on a concrete item. This endpoint replaces the former
-WebSocket usage frame.
+empty usage object returns `400`. The row links `item_id` (NOT NULL),
+`session_id`, and the item's live `attempt_id` when one exists. A non-null
+`turnRef` is unique per `(harness, agent_id, external_session_id)`, so retries
+are idempotent and a duplicate returns `{"duplicate":true}`. A session is bound
+to its item at claim and on any item-touching call, so every recorded row lands
+on a concrete item. This endpoint replaces the former WebSocket usage frame.
 
 ## Live enqueue
 

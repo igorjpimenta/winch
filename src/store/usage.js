@@ -1,84 +1,84 @@
 // usage.js — LLM cost/usage tracking on top of the v8 ledger.
 //
-// Usage is recorded as an `item_events` row (kind 'usage.recorded') carrying
-// the usage payload in payload_json. This reuses the append-only ledger and
-// the WebSocket pipe, so cost data streams to subscribers automatically.
+// One append-only `usage_events` row per reported turn. The row carries the
+// identity triple denormalized (so it survives session deletion), an item_id
+// attribution and optional session/attempt links. Aggregations read this table
+// directly; there is no rollup.
 
 export function createUsageApi({ core }) {
-  const { db, appendEvent, now, jsonIn } = core;
+  const { db, now } = core;
 
-  function record({ harness, agent, session, itemId = null, itemKind = null, usage, source = "meta", at = null }) {
-    if (!usage) return null;
+  function record({
+    harness, agent, session, itemId,
+    sessionId = null, attemptId = null,
+    usage, source = "api", turnRef = null, at = null,
+  }) {
+    if (!usage || !itemId) return null;
     const u = usage;
-    const when = at ?? now();
-    const payload = {
-      harness, agent, session,
-      model: u.model ?? null,
-      tokensIn: u.tokensIn ?? null,
-      tokensOut: u.tokensOut ?? null,
-      cacheRead: u.cacheRead ?? null,
-      costUsd: u.costUsd ?? null,
-      toolCalls: u.toolCalls ?? null,
-      source: source ?? null,
-    };
-    const targetItem = itemId || null;
-    // item_events.item_id is NOT NULL: usage with no bound item cannot be
-    // recorded. Callers must bind a session to an item first.
-    if (!targetItem) return null;
-    const id = appendEvent({
-      itemId: targetItem,
-      toStatus: "usage",
-      kind: "usage.recorded",
-      actor: `${harness}:${agent}`,
-      note: u.model ? `${u.model}` : "usage",
-      payload,
-      at: when,
-    });
-    return id;
+    const r = db.prepare(`
+      INSERT OR IGNORE INTO usage_events(
+        item_id, session_id, attempt_id, harness, agent_id, external_session_id,
+        model, tokens_in, tokens_out, cache_read, cost_usd, tool_calls,
+        source, turn_ref, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      itemId, sessionId, attemptId, harness, agent, session,
+      u.model ?? null, u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null,
+      u.costUsd ?? null, u.toolCalls ?? null, source ?? "api", turnRef, at ?? now(),
+    );
+    return r.changes ? Number(r.lastInsertRowid) : null;
   }
 
-  function usageRows({ itemId, itemKind, harness, agent, session, since } = {}) {
-    const where = ["e.kind='usage.recorded'"];
+  function whereClause({ itemId, harness, agent, session, model, since } = {}) {
+    const where = [];
     const args = [];
-    if (itemId) { where.push("item_id=?"); args.push(itemId); }
-    if (harness) { where.push("json_extract(payload_json,'$.harness')=?"); args.push(harness); }
-    if (agent) { where.push("json_extract(payload_json,'$.agent')=?"); args.push(agent); }
-    if (session) { where.push("json_extract(payload_json,'$.session')=?"); args.push(session); }
-    if (since) { where.push("created_at>=?"); args.push(since); }
-    const sql = `SELECT e.*, i.kind AS item_kind FROM item_events e JOIN items i ON i.id=e.item_id  WHERE ${where.join(" AND ")} ORDER BY e.id DESC`;
-    return db.prepare(sql).all(...args);
+    if (itemId)  { where.push("item_id=?"); args.push(itemId); }
+    if (harness) { where.push("harness=?"); args.push(harness); }
+    if (agent)   { where.push("agent_id=?"); args.push(agent); }
+    if (session) { where.push("external_session_id=?"); args.push(session); }
+    if (model)   { where.push("model=?"); args.push(model); }
+    if (since)   { where.push("created_at>=?"); args.push(since); }
+    return { where, args };
   }
 
   function list(opts = {}) {
-    const rows = usageRows(opts);
-    return rows.map((r) => {
-      let p = null;
-      try { p = JSON.parse(r.payload_json); } catch {}
-      return {
-        id: r.id,
-        itemId: r.item_id,
-        itemKind: r.item_kind ?? null,
-        kind: r.kind,
-        at: r.created_at,
-        ...(p || {}),
-      };
-    });
+    const { where, args } = whereClause(opts);
+    const sql = `SELECT u.*, i.kind AS item_kind
+                   FROM usage_events u JOIN items i ON i.id=u.item_id
+                  ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+                  ORDER BY u.created_at DESC`;
+    return db.prepare(sql).all(...args).map((r) => ({
+      id: r.id,
+      itemId: r.item_id,
+      itemKind: r.item_kind,
+      sessionId: r.session_id,
+      attemptId: r.attempt_id,
+      harness: r.harness,
+      agentId: r.agent_id,
+      externalSessionId: r.external_session_id,
+      model: r.model,
+      tokensIn: r.tokens_in,
+      tokensOut: r.tokens_out,
+      cacheRead: r.cache_read,
+      costUsd: r.cost_usd,
+      toolCalls: r.tool_calls,
+      source: r.source,
+      turnRef: r.turn_ref,
+      at: r.created_at,
+    }));
   }
 
   function summary(opts = {}) {
-    const rows = usageRows(opts);
-    let calls = 0, tokensIn = 0, tokensOut = 0, cacheRead = 0, costUsd = 0, toolCalls = 0;
-    for (const r of rows) {
-      let p = null;
-      try { p = JSON.parse(r.payload_json); } catch {}
-      calls++;
-      tokensIn += p?.tokensIn ?? 0;
-      tokensOut += p?.tokensOut ?? 0;
-      cacheRead += p?.cacheRead ?? 0;
-      costUsd += p?.costUsd ?? 0;
-      toolCalls += p?.toolCalls ?? 0;
-    }
-    return { calls, tokens_in: tokensIn, tokens_out: tokensOut, cache_read: cacheRead, cost_usd: costUsd, tool_calls: toolCalls };
+    const { where, args } = whereClause(opts);
+    const sql = `SELECT COUNT(*) AS calls,
+                        COALESCE(SUM(tokens_in),0) AS tokens_in,
+                        COALESCE(SUM(tokens_out),0) AS tokens_out,
+                        COALESCE(SUM(cache_read),0) AS cache_read,
+                        COALESCE(SUM(cost_usd),0) AS cost_usd,
+                        COALESCE(SUM(tool_calls),0) AS tool_calls
+                   FROM usage_events
+                  ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`;
+    return db.prepare(sql).get(...args);
   }
 
   return { record, list, summary };
