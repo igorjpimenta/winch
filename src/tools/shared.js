@@ -57,6 +57,15 @@ export function renderReceiverPrompt({ task, story, epic, artifacts }) {
     `## Acceptance\n${story?.acceptance ?? "(none recorded)"}`,
     `## Upstream artifacts\n${artifacts.length ? artifacts.map((a) => `- ${a}`).join("\n") : "(none yet)"}`,
     `## Parent\n${epic?.title ?? "(none)"} — ${story?.title ?? "(none)"}`,
+    `## PR protocol (mandatory when opening a pull request)\n` +
+    `1. PR body MUST contain:\n` +
+    `   Backlog: <epic-id>\n` +
+    `   Backlog-Task: <this task id>\n` +
+    `2. Attach the PR while in_progress — never at done:\n` +
+    `   backlog_update({ taskId, addArtifact: "<pr-url>", addArtifactKind: "pr" })\n` +
+    `   This spawns the human review child and parks this task on it.\n` +
+    `3. Never call backlog_done while a HITL child is open — the human merge\n` +
+    `   resolves the child; merge-detect then closes this task.`,
   ];
   return parts.filter(Boolean).join("\n\n");
 }

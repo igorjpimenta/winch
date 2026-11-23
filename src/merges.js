@@ -4,6 +4,12 @@
 // Markers come from release PR bodies: `Backlog: <item-id>`, optional
 // `Backlog-Task: <task-id>`, optional `Release: vX.Y.Z`. gh reports state as
 // MERGED / CLOSED / OPEN — normalized here, callers pass raw values.
+//
+// HITL: a marker may name the parent or its human-review child. On MERGED,
+// open HITL children close first, the PR attaches as a `pr` artifact, then
+// waiting parents cascade to done once deps resolve.
+
+import { depsResolved } from "./deps.js";
 
 export function parseMarkers(body = "") {
   const out = { epicId: null, taskId: null, version: null };
@@ -17,8 +23,91 @@ export function parseMarkers(body = "") {
   return out;
 }
 
+export function isHitlChild(task) {
+  return !!task && task.assignee_agent === "human" && task.assignee_harness === "human_in_the_loop";
+}
+
+export function openHitlChildren(store, parentId) {
+  return store.dep.listOutgoing(parentId)
+    .map((e) => store.task.get(e.to_id))
+    .filter((c) => isHitlChild(c) && c.status !== "done" && c.status !== "cancelled");
+}
+
+export function hitlParents(store, childId) {
+  return store.dep.listIncoming(childId)
+    .map((e) => store.task.get(e.from_id))
+    .filter(Boolean);
+}
+
+function attachPrArtifact(store, itemId, pr, dryRun) {
+  const uri = pr.url;
+  if (!uri || dryRun) return;
+  store.artifact.add({
+    itemId,
+    kind: "pr",
+    uri,
+    label: `PR #${pr.number}`,
+  });
+}
+
 /**
- * @param {Array<{number:number, state:string, title:string, body:string}>} prs
+ * Close a HITL child (or any task) and cascade parents that were parked on
+ * it: resume deps waits, then done any parent whose deps are now resolved
+ * and that is not mid-claim. Used by merge-detect and `winch resolve`.
+ */
+export function closeHitlAndFreeParents(store, taskId, { actor = "system", resultSummary, note } = {}) {
+  const out = { doneTasks: [], resumed: [] };
+  const task = store.task.get(taskId);
+  if (!task) return out;
+  const children = openHitlChildren(store, task.id);
+  const parents = isHitlChild(task) ? hitlParents(store, task.id) : [];
+
+  for (const c of children) {
+    if (c.status !== "done" && c.status !== "cancelled") {
+      store.task.update(c.id, {
+        status: "done",
+        result_summary: resultSummary ?? `resolved by ${actor}`,
+        actor,
+        note: note ?? `hitl resolved: ${actor}`,
+      });
+      out.doneTasks.push(c.id);
+    }
+  }
+  if (task.status !== "done" && task.status !== "cancelled") {
+    store.task.update(task.id, {
+      status: "done",
+      result_summary: resultSummary ?? `resolved by ${actor}`,
+      actor,
+      note: note ?? `hitl resolved: ${actor}`,
+    });
+    out.doneTasks.push(task.id);
+  }
+  store.task.resumeDependencyWaits();
+
+  const waiting = new Map();
+  for (const p of parents) waiting.set(p.id, p);
+  for (const c of children) {
+    for (const p of hitlParents(store, c.id)) waiting.set(p.id, p);
+  }
+  for (const p of waiting.values()) {
+    const cur = store.task.get(p.id);
+    if (!cur || cur.status === "done" || cur.status === "cancelled" || cur.status === "in_progress") continue;
+    if (!depsResolved(store, cur.id)) continue;
+    store.task.update(cur.id, {
+      status: "done",
+      result_summary: resultSummary ?? `closed via HITL child ${task.id} (${actor})`,
+      actor,
+      note: note ?? `closed via HITL child: ${task.id}`,
+    });
+    out.doneTasks.push(cur.id);
+    store.task.resumeDependencyWaits();
+    out.resumed.push(cur.id);
+  }
+  return out;
+}
+
+/**
+ * @param {Array<{number:number, state:string, title:string, body:string, url?:string}>} prs
  * @param {{exec?: Function, cwd?: string, dryRun?: boolean}} opts — exec runs
  *   the git tag when a Release marker lands; tests inject a recorder.
  * @returns summary of every transition applied (idempotent on re-run)
@@ -39,21 +128,65 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
 
     if (state === "MERGED") {
       if (task) {
-        if (task.status !== "done") {
+        const children = openHitlChildren(store, task.id);
+        const parents = isHitlChild(task) ? hitlParents(store, task.id) : [];
+        const needsWork = task.status !== "done" || children.length > 0;
+        if (needsWork) {
           // A merge lands regardless of who holds the claim. When it takes
           // a task out from under a working agent, the note names the
           // displacement — the agent's next tool call would otherwise fail
           // with no account of why its task completed itself.
           const displaced = task.status === "in_progress" && task.assignee_agent ? ` (displaced ${task.assignee_agent})` : "";
           if (!dryRun) {
-            store.task.update(task.id, {
-              status: "done",
-              result_summary: `merged via PR #${pr.number}: ${pr.title}`,
-              actor: "merge-detector",
-              note: `merged: PR #${pr.number}${displaced}`,
-            });
+            // artifacts.uri is globally unique — one PR row, on the HITL
+            // child when one exists (the review unit), else the marked task.
+            attachPrArtifact(store, (children[0] ?? task).id, pr, dryRun);
+            for (const c of children) {
+              if (c.status !== "done") {
+                store.task.update(c.id, {
+                  status: "done",
+                  result_summary: `merged via PR #${pr.number}: ${pr.title}`,
+                  actor: "merge-detector",
+                  note: `merged: PR #${pr.number}`,
+                });
+                out.doneTasks.push(c.id);
+              }
+            }
+            if (task.status !== "done") {
+              store.task.update(task.id, {
+                status: "done",
+                result_summary: `merged via PR #${pr.number}: ${pr.title}`,
+                actor: "merge-detector",
+                note: `merged: PR #${pr.number}${displaced}`,
+              });
+              out.doneTasks.push(task.id);
+            }
+            store.task.resumeDependencyWaits();
+            // Parents that were parked on a HITL child close once the dep
+            // resolves — the human merge was the only remaining gate.
+            const waiting = new Map();
+            for (const p of parents) waiting.set(p.id, p);
+            for (const c of children) {
+              for (const p of hitlParents(store, c.id)) waiting.set(p.id, p);
+            }
+            for (const p of waiting.values()) {
+              const cur = store.task.get(p.id);
+              if (!cur || cur.status === "done" || cur.status === "cancelled" || cur.status === "in_progress") continue;
+              if (!depsResolved(store, cur.id)) continue;
+              store.task.update(cur.id, {
+                status: "done",
+                result_summary: `closed via HITL child (PR #${pr.number})`,
+                actor: "merge-detector",
+                note: `closed via HITL child: PR #${pr.number}`,
+              });
+              out.doneTasks.push(cur.id);
+              store.task.resumeDependencyWaits();
+            }
+          } else {
+            if (task.status !== "done") out.doneTasks.push(task.id);
+            for (const c of children) out.doneTasks.push(c.id);
+            for (const p of parents) out.doneTasks.push(p.id);
           }
-          out.doneTasks.push(task.id);
         }
       }
       if (markers.epicId && markers.version) {
@@ -94,7 +227,8 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
     } else if (state === "CLOSED") {
       // Unmerged close = the work did not land. Anything mid-flight on that PR
       // returns to the queue for a fresh claim; 'done' stays done — a later
-      // revert is a new ticket, not a rewrite of history.
+      // revert is a new ticket, not a rewrite of history. A HITL child stays
+      // ready (the human still owns it); a parent parked on deps stays parked.
       if (task) {
         const reopenable = task.status === "in_progress" || task.status === "review"
           || (task.status === "blocked" && task.gate_type);
@@ -104,7 +238,8 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
           const dissolved = task.status === "blocked" && task.gate_type;
           if (!dryRun) {
             store.task.update(task.id, {
-              status: task.assignee_agent ? "ready" : "backlog", gate_type: null, blocked_at: null,
+              status: task.assignee_agent ? "ready" : "backlog",
+              gate_type: null, blocked_at: null,
               actor: "merge-detector",
               note: dissolved ? `gate dissolved: closed unmerged PR #${pr.number}` : `closed unmerged: PR #${pr.number}`,
             });
@@ -125,7 +260,7 @@ export function applyMergeOutcomes(store, prs, { exec = null, cwd = process.cwd(
 export function collectPRs({ exec, cwd = process.cwd(), limit = 100 } = {}) {
   const raw = exec(
     "gh",
-    ["pr", "list", "--state", "merged", "--state", "closed", "--limit", String(limit), "--json", "number,title,body,state"],
+    ["pr", "list", "--state", "merged", "--state", "closed", "--limit", String(limit), "--json", "number,title,body,state,url"],
     { cwd, encoding: "utf8" }
   );
   return JSON.parse(raw);
