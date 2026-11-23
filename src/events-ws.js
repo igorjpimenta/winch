@@ -1,17 +1,11 @@
-// events-ws.js — the event pipe.
-// Outbound: tails the item_events ledger and broadcasts every new row;
-// dispatch wakes leave over executor webhooks served by dispatch-server.js,
-// not this socket.
-// Inbound: the harness pushes usage frames, which are recorded as
-// item_events rows and then broadcast like any other row.
+// events-ws.js — the read-only event pipe.
+// Tails the item_events ledger and broadcasts every new row; dispatch wakes
+// leave over executor webhooks served by dispatch-server.js, not this socket.
 //
-// Wire protocol (JSON text frames):
-//   server → client:
-//     {"type":"welcome","payload":"v3","lastEventId":N}
-//     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
-//     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
-//   client → server:
-//     {"type":"usage","sessionKey":...,"usage":{...}}  usage for the session's item
+// Wire protocol (JSON text frames, server → client only):
+//   {"type":"welcome","payload":"v3","lastEventId":N}
+//   {"type":"history","events":[...]}   backlog of envelopes, oldest-first
+//   {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
 //
 // Clients track their own seen state: reconnecting replays history, so a
 // missed frame costs a re-read, never a lost event. The admission queue owns
@@ -231,9 +225,8 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
       clients.delete(socket);
     }
 
-    // Client text frames carry usage: { type:"usage", sessionKey, usage }.
-    // Close and ping are handled; other frames are ignored. Client frames
-    // are masked (RFC 6455 §5.3), so the payload is unmasked before parsing.
+    // Client frames are only ever interesting as close/ping; everything else
+    // is consumed and ignored. Mask bit respected when skipping payloads.
     let buf = Buffer.alloc(0);
     socket.on("data", (chunk) => {
       buf = Buffer.concat([buf, chunk]);
@@ -255,51 +248,14 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
           len = buf.readUInt32BE(6);
           off = 10;
         }
-        const masked = !!(buf[1] & 0x80);
-        let maskKey = null;
-        if (masked) {
-          if (buf.length < off + 4) return;
-          maskKey = buf.slice(off, off + 4);
-          off += 4;
-        }
+        if (buf[1] & 0x80) off += 4;
         if (buf.length < off + len) return;
-        let payload = buf.slice(off, off + len);
-        if (masked && maskKey) {
-          const out = Buffer.alloc(len);
-          for (let i = 0; i < len; i++) out[i] = payload[i] ^ maskKey[i % 4];
-          payload = out;
-        }
         buf = buf.slice(off + len);
         if (opcode === 0x8) {
           socket.destroy();
           return;
         }
-        if (opcode === 0x9) { socket.write(Buffer.from([0x8a, 0x00])); return; }
-        if (opcode === 0x1) {
-          // Inbound usage frames: { type: "usage", sessionKey, usage }
-          try {
-            const msg = JSON.parse(payload.toString("utf8"));
-            if (msg && msg.type === "usage" && msg.sessionKey && msg.usage) {
-              const sess = store.db.prepare("SELECT item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?").get(msg.sessionKey);
-              if (sess) {
-                let itemKind = null;
-                const it = store.item.get(sess.item_id);
-                if (it) itemKind = it.kind;
-                store.usage.record({
-                  harness: sess.harness,
-                  agent: sess.agent_id,
-                  session: sess.external_session_id,
-                  itemId: sess.item_id,
-                  itemKind,
-                  usage: msg.usage,
-                  source: "ws",
-                });
-              }
-            }
-          } catch (e) {
-            logger?.warn?.(`winch: bad ws frame: ${e?.message}`);
-          }
-        }
+        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
       }
     });
     const drop = () => {

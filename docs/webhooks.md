@@ -55,6 +55,24 @@ stream is a separate process: `winch serve --ws`.
 Management endpoints accept `Authorization: Bearer $WINCH_DISPATCH_TOKEN` when
 that variable is set. A non-loopback `--host` refuses to start without it.
 
+## Usage ingestion
+
+The harness posts per-turn LLM usage to the dispatch server. The body names the
+caller's `sessionKey` and the usage object; winch resolves the session's item
+and records the row on the ledger, which then streams to subscribers.
+
+    POST /usage
+    Authorization: Bearer $WINCH_DISPATCH_TOKEN
+    {"sessionKey":"<harness>:<agent>:<externalSession>",
+     "usage":{"model":"…","tokensIn":0,"tokensOut":0,"cacheRead":0,"costUsd":0.0,"toolCalls":0}}
+
+`usage` accepts snake_case aliases (`tokens_in`, `tokens_out`, `cache_read`,
+`cost_usd`, `cost`, `tool_calls`). An unknown `sessionKey` returns `404`; an
+empty usage object returns `400`. A session is bound to its item at claim and on
+any item-touching call, and `work_sessions.item_id` is `NOT NULL`, so every
+recorded row lands on a concrete item. This endpoint replaces the former
+WebSocket usage frame.
+
 ## Live enqueue
 
 A status transition writes its wake rows into `admission_queue` inside the same
