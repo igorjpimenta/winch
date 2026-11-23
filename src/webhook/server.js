@@ -10,6 +10,29 @@ import { eventsSince, lastEventId, toEventMessage, HISTORY_LIMIT } from "./envel
 
 export const DEFAULT_DISPATCH_PORT = 38293;
 
+const USAGE_NUM = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+// Canonical usage shape from the harness. Accepts snake_case aliases so a
+// plugin need not match our field names exactly. Returns null when nothing
+// numeric/identifiable is present, so the endpoint rejects empty payloads.
+function normalizeUsage(raw) {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const model = typeof raw.model === "string" && raw.model.trim() !== "" ? raw.model.trim() : null;
+  const out = {
+    model,
+    tokensIn: USAGE_NUM(raw.tokensIn ?? raw.tokens_in ?? raw.inputTokens ?? raw.input_tokens),
+    tokensOut: USAGE_NUM(raw.tokensOut ?? raw.tokens_out ?? raw.outputTokens ?? raw.output_tokens),
+    cacheRead: USAGE_NUM(raw.cacheRead ?? raw.cache_read ?? raw.cachedTokens ?? raw.cached_tokens),
+    costUsd: USAGE_NUM(raw.costUsd ?? raw.cost_usd ?? raw.cost),
+    toolCalls: USAGE_NUM(raw.toolCalls ?? raw.tool_calls),
+  };
+  if (out.model === null && out.tokensIn === null && out.tokensOut === null &&
+      out.cacheRead === null && out.costUsd === null && out.toolCalls === null) {
+    return null;
+  }
+  return out;
+}
+
 export function startDispatchServer({ store, port = null, host = "127.0.0.1", intervalMs = null, logger } = {}) {
   const cfg = store.config ?? {};
   const listenPort = port ?? cfg.dispatchPort ?? DEFAULT_DISPATCH_PORT;
@@ -167,6 +190,40 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
           mutate: true,
         });
         json(res, 200, result);
+      } catch (err) {
+        json(res, 400, { error: String(err?.message ?? err) });
+      }
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/usage") {
+      if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      try {
+        const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey.trim() : "";
+        if (!sessionKey) throw new Error("usage requires sessionKey");
+        const usage = normalizeUsage(body.usage);
+        if (!usage) throw new Error("usage requires a non-empty usage object");
+        const sess = store.db.prepare(
+          "SELECT id, item_id, harness, agent_id, external_session_id FROM work_sessions WHERE session_key=?"
+        ).get(sessionKey);
+        if (!sess) { json(res, 404, { error: `no session: ${sessionKey}` }); return; }
+        const live = store.db.prepare(
+          "SELECT id FROM attempts WHERE item_id=? AND ended_at IS NULL ORDER BY attempt_no DESC LIMIT 1"
+        ).get(sess.item_id);
+        const turnRef = typeof body.turnRef === "string" && body.turnRef.trim() !== "" ? body.turnRef.trim() : null;
+        const id = store.usage.record({
+          harness: sess.harness,
+          agent: sess.agent_id,
+          session: sess.external_session_id,
+          itemId: sess.item_id,
+          sessionId: sess.id,
+          attemptId: live?.id ?? null,
+          usage,
+          source: "api",
+          turnRef,
+        });
+        json(res, 201, { ok: true, id, itemId: sess.item_id, duplicate: id === null });
       } catch (err) {
         json(res, 400, { error: String(err?.message ?? err) });
       }

@@ -84,6 +84,27 @@ A stale epoch is a refusal, not a takeover: the old session stops and re-reads
 `POST /dispatch/recover`. A standby consumer never gets the attempt or start
 row.
 
+## Usage triggers
+
+Usage rides on the same sessions but is tracked separately from item status. It
+is armed by the first item-touching winch call (T0), fired when the host
+finalizes a turn (T1), and written by `POST /usage` (T2). A planner wake's
+`backlog_accept_wake` carries no item id, so the first `backlog_get` or
+`backlog_append` is what binds the session and arms reporting.
+
+```mermaid
+flowchart LR
+  A[first item-touching call<br/>claim · get · update · append] --> T0([T0 · session bound])
+  T0 --> B[turn final]
+  B --> T1([T1 · host usage snapshot])
+  T1 --> P[POST /usage]
+  P --> T2([T2 · usage_events row])
+```
+
+A standby, duplicate, or expired delivery starts no session, so it produces no
+usage row. See [Webhooks → Usage ingestion](webhooks.md#usage-ingestion) for
+the endpoint and the per-journey trigger table.
+
 ## Gate lifecycle
 
 ```mermaid

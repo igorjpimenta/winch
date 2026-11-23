@@ -1,6 +1,7 @@
 import { createWinchHooks } from "./hooks.js";
 import { stampWinchEvent } from "./identity.js";
 import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
+import { carriesItemId, isFinalAssistant, remember, reportAssistantUsage } from "./usage.js";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os, { hostname } from "node:os";
@@ -155,6 +156,8 @@ export default {
     const consumerId = consumerIdFor(harness, cfg);
     const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID ?? null;
     const agents = new Map();
+    const reported = new Set();
+    const engaged = new Set();
     let dispatch = null;
     const ensureDispatch = () => {
       if (dispatch) return;
@@ -169,14 +172,29 @@ export default {
       const agent = agents.get(event.sessionID) ?? process.env.WINCH_AGENT ?? null;
       // Unconditional: unknown agent blanks the slot, the server refuses
       // rather than trusting whatever the model wrote there.
-      stampWinchEvent(event, agent, consumerId, executorId);
+      if (stampWinchEvent(event, agent, consumerId, executorId) && carriesItemId(event.input)) remember(engaged, event.sessionID);
     });
+    if (typeof ctx.event?.subscribe === "function") {
+      const controller = new AbortController();
+      void (async () => {
+        try {
+          for await (const event of ctx.event.subscribe({ types: ["message.updated"], signal: controller.signal })) {
+            if (event?.type !== "message.updated") continue;
+            const info = event.properties?.info;
+            if (!engaged.has(info?.sessionID) || !isFinalAssistant(info) || !remember(reported, info.id)) continue;
+            const agent = agents.get(info?.sessionID) ?? info?.agent ?? process.env.WINCH_AGENT ?? null;
+            reportAssistantUsage({ info, harness, agent, logger: console });
+          }
+        } catch { /* subscription closed */ }
+      })();
+      return () => controller.abort();
+    }
   },
   async server() {
     const harness = process.env.WINCH_HARNESS ?? "opencode";
     const consumerId = consumerIdFor(harness);
     const executorId = process.env.WINCH_EXECUTOR_ID ?? null;
-    const hooks = createWinchHooks({ consumerId, instanceId: executorId });
+    const hooks = createWinchHooks({ consumerId, instanceId: executorId, harness, logger: console });
     let dispatch = null;
     const ensureDispatch = () => {
       if (dispatch) return;

@@ -686,3 +686,72 @@ test("dispatch management endpoints require WINCH_DISPATCH_TOKEN when set", asyn
     else process.env.WINCH_DISPATCH_TOKEN = previous;
   }
 });
+
+test("POST /usage records usage against the session's item", async () => {
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 60000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const { story } = hierarchy();
+  const task = store.task.create({ storyId: story.id, title: "T", status: "backlog" });
+  const sess = store.session.ensure({ harness: "test", agentId: "worker", externalSessionId: "s1", itemId: task.id, kind: "claim" });
+
+  let res = await fetch(`${base}/usage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionKey: "nope", usage: { tokensIn: 1 } }),
+  });
+  assert.equal(res.status, 404, "unknown session is refused");
+
+  res = await fetch(`${base}/usage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionKey: sess.session_key }),
+  });
+  assert.equal(res.status, 400, "empty usage is refused");
+
+  res = await fetch(`${base}/usage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionKey: sess.session_key, usage: { model: "gpt-4", tokens_in: 10, tokens_out: 5, cost_usd: 0.01 } }),
+  });
+  assert.equal(res.status, 201);
+
+  const summary = store.usage.summary({ itemId: task.id });
+  assert.equal(summary.calls, 1);
+  assert.equal(summary.tokens_in, 10);
+  assert.equal(summary.tokens_out, 5);
+  assert.equal(summary.cost_usd, 0.01);
+});
+
+test("POST /usage requires WINCH_DISPATCH_TOKEN when set", async () => {
+  const previous = process.env.WINCH_DISPATCH_TOKEN;
+  process.env.WINCH_DISPATCH_TOKEN = "secret";
+  try {
+    srv = await startDispatchServer({ store, port: 0, intervalMs: 60000 });
+    const base = `http://127.0.0.1:${srv.port}`;
+    const { story } = hierarchy();
+    const task = store.task.create({ storyId: story.id, title: "T", status: "backlog" });
+    const sess = store.session.ensure({ harness: "test", agentId: "worker", externalSessionId: "s1", itemId: task.id, kind: "claim" });
+    const payload = JSON.stringify({ sessionKey: sess.session_key, usage: { tokensIn: 1 } });
+    let res = await fetch(`${base}/usage`, { method: "POST", headers: { "content-type": "application/json" }, body: payload });
+    assert.equal(res.status, 401);
+    res = await fetch(`${base}/usage`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer secret" }, body: payload });
+    assert.equal(res.status, 201);
+  } finally {
+    if (previous === undefined) delete process.env.WINCH_DISPATCH_TOKEN;
+    else process.env.WINCH_DISPATCH_TOKEN = previous;
+  }
+});
+
+test("usage.record is idempotent per turnRef and keeps one row per turn", () => {
+  const { story } = hierarchy();
+  const task = store.task.create({ storyId: story.id, title: "T", status: "backlog" });
+  const sess = store.session.ensure({ harness: "test", agentId: "w", externalSessionId: "s", itemId: task.id, kind: "claim" });
+  const base = {
+    harness: "test", agent: "w", session: "s", itemId: task.id, sessionId: sess.id,
+    usage: { model: "gpt-4", tokensIn: 5, costUsd: 0.001 }, turnRef: "turn-1",
+  };
+  const first = store.usage.record(base);
+  assert.ok(first, "first turn recorded");
+  const second = store.usage.record(base);
+  assert.equal(second, null, "duplicate turnRef is ignored");
+  assert.equal(store.usage.summary({ itemId: task.id }).calls, 1);
+  const row = store.db.prepare("SELECT session_id, attempt_id FROM usage_events WHERE item_id=?").get(task.id);
+  assert.equal(row.session_id, sess.id, "session linked");
+});

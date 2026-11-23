@@ -1,6 +1,6 @@
 # @igorjpimenta/winch-openclaw
 
-OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three jobs:
+OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Four jobs:
 
 1. **Identity** — `before_tool_call` stamps `_meta.winch {harness, agent, session}`
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
@@ -16,6 +16,12 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Three job
    `fresh: true`; later heartbeats preserve failure state. `WINCH_EXECUTOR_ID`
    identifies the live connection; the event's `kind` selects the listener
    action. Set `WINCH_DISPATCH_TOKEN` for authenticated management calls.
+4. **Usage reporting** — `reply_payload_sending` reads the gateway's per-turn
+   `usageState` (token counts, resolved model, estimated turn cost) and posts it
+   to winch's `POST /usage` under the session's `harness:agent:session` key.
+   One snapshot is consumed per run, so a turn reports once; the post is
+   fire-and-forget and never delays or fails reply delivery. It uses
+   `WINCH_DISPATCH_URL` and `WINCH_DISPATCH_TOKEN`.
 
 ## Install
 

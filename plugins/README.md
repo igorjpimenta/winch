@@ -23,6 +23,17 @@ identity is the operator-set env on the MCP server entry — process-scoped
 configuration the model cannot alter per call, so the same property holds by
 construction.
 
+## Usage reporting
+
+Both companions also report LLM usage per turn to winch's `POST /usage` under
+the same `harness:agent:session` key, so cost lands on the item the session is
+bound to. openclaw reads the gateway's `reply_payload_sending.usageState` (one
+consumed snapshot per run: tokens, resolved model, estimated cost). opencode
+reads final `message.updated` assistant messages (accumulated `cost` plus the
+last step's token snapshot). Both post fire-and-forget with `WINCH_DISPATCH_URL`
+and `WINCH_DISPATCH_TOKEN`; a failed post never affects the host turn, and the
+server dedups on the turn id.
+
 ## openclaw
 
 Setup verified against the existing extension wiring: every loaded extension

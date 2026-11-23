@@ -38,6 +38,7 @@ import { createDeliveryApi } from "./delivery.js";
 import { createDispatchEventApi } from "./dispatch-events.js";
 import { observe } from "../webhook/core.js";
 import { toEventMessage } from "../webhook/envelope.js";
+import { createUsageApi } from "./usage.js";
 
 export { MAX_ATTEMPTS };
 export { EPIC_STATUSES, STORY_STATUSES, TASK_STATUSES, EXECUTION_KINDS, ITEM_KINDS };
@@ -70,6 +71,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   apis.admission = createAdmissionApi({ core });
   apis.delivery = createDeliveryApi({ core });
   apis.dispatchEvent = createDispatchEventApi({ core });
+  apis.usage = createUsageApi({ core });
 
   const notifyBase = process.env.WINCH_DISPATCH_URL ?? `http://127.0.0.1:${cfg.dispatchPort}`;
   const targetUrl = notifyUrl ?? `${notifyBase.replace(/\/+$/, "")}/dispatch/notify`;
@@ -115,6 +117,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
     admission: apis.admission,
     delivery: apis.delivery,
     dispatchEvent: apis.dispatchEvent,
+    usage: apis.usage,
     epic: apis.epic,
     story: apis.story,
     task: apis.task,

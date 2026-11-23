@@ -53,6 +53,70 @@ rows are retained for audit; manual rows are never swept.
 Management endpoints accept `Authorization: Bearer $WINCH_DISPATCH_TOKEN` when
 that variable is set. A non-loopback `--host` refuses to start without it.
 
+## Usage ingestion
+
+The harness posts per-turn LLM usage to the dispatch server. The body names the
+caller's `sessionKey` and the usage object; winch resolves the session's item
+and writes one `usage_events` row.
+
+    POST /usage
+    Authorization: Bearer $WINCH_DISPATCH_TOKEN
+    {"sessionKey":"<harness>:<agent>:<externalSession>",
+     "turnRef":"<provider turn id, optional>",
+     "usage":{"model":"…","tokensIn":0,"tokensOut":0,"cacheRead":0,"costUsd":0.0,"toolCalls":0}}
+
+`usage` accepts snake_case aliases (`tokens_in`, `tokens_out`, `cache_read`,
+`cost_usd`, `cost`, `tool_calls`). An unknown `sessionKey` returns `404`; an
+empty usage object returns `400`. The row links `item_id` (NOT NULL),
+`session_id`, and the item's live `attempt_id` when one exists. A non-null
+`turnRef` is unique per `(harness, agent_id, external_session_id)`, so retries
+are idempotent and a duplicate returns `{"duplicate":true}`. A session is bound
+to its item at claim and on any item-touching call; `backlog_accept_wake`
+carries only an admission id, so on its own it does not bind. This endpoint
+replaces the former WebSocket usage frame.
+
+### Trigger points
+
+Every way a session can start converges on the same three points. T1 is
+host-specific: OpenClaw fires on `reply_payload_sending` (one consumed
+`usageState` per run), OpenCode on a final `message.updated`.
+
+```mermaid
+flowchart TD
+  subgraph starts[how a session starts]
+    S1[dispatched task wake]
+    S2[planner wake<br/>story · append · review]
+    S3[restart / POST /dispatch/recover]
+    S4[human-started session]
+    S5[standby · duplicate · expired]
+  end
+  S1 --> C1[backlog_claim]
+  S2 --> C2[backlog_accept_wake] --> C3[backlog_get / append]
+  S3 --> C4[backlog_update heartbeat]
+  S4 --> C5[first item-touching call]
+  T0([T0 · session bound to item])
+  C1 --> T0
+  C3 --> T0
+  C4 --> T0
+  C5 --> T0
+  T0 --> F[turn final]
+  F --> T1([T1 · host usage snapshot])
+  T1 --> P[POST /usage]
+  P --> T2([T2 · usage_events row])
+  S5 -.-> N[no session] -.-> X[no row]
+```
+
+| journey | T0 arms on | note |
+|---|---|---|
+| dispatched task | `backlog_claim` | the claim is both the work CAS and the bind |
+| planner wake | `backlog_get` / `backlog_append` | `backlog_accept_wake` guards the wake but carries no item id, so it does not bind |
+| restart / resume | `backlog_update` | heartbeat the same attempt with `attemptId` + `leaseEpoch`; never re-claim |
+| human session | first item-touching call | no dispatch involved |
+| standby / duplicate / expired | — | no session starts, so no row |
+
+T2 is shared: `POST /usage` for every row above. T1 is every finalized turn,
+not every model call — the tool-loop aggregate is the row.
+
 ## Live enqueue
 
 A status transition writes its wake rows into `admission_queue` inside the same

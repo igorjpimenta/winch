@@ -13,6 +13,7 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   index,
   uniqueIndex,
   check,
@@ -33,6 +34,7 @@ export const ADMISSION_STATUSES = ["queued", "offered", "accepted", "active", "d
 export const EDGE_KINDS = ["depends_on"];
 export const DELIVERY_STATUSES = ["pending", "delivering", "delivered", "dead", "cancelled"];
 export const WEBHOOK_STATES = ["active", "suspect", "disabled"];
+export const USAGE_SOURCES = ["api"];
 
 const inList = (values) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
@@ -177,6 +179,34 @@ export const itemEvents = sqliteTable("item_events", {
 }, (table) => [
   index("idx_item_events_item").on(table.itemId),
   index("idx_item_events_created").on(table.createdAt),
+]);
+
+export const usageEvents = sqliteTable("usage_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  itemId: text("item_id").notNull().references(() => items.id, { onDelete: "restrict" }),
+  sessionId: text("session_id").references(() => workSessions.id, { onDelete: "set null" }),
+  attemptId: text("attempt_id").references(() => attempts.id, { onDelete: "set null" }),
+  harness: text("harness").notNull(),
+  agentId: text("agent_id").notNull(),
+  externalSessionId: text("external_session_id").notNull(),
+  model: text("model"),
+  tokensIn: integer("tokens_in"),
+  tokensOut: integer("tokens_out"),
+  cacheRead: integer("cache_read"),
+  costUsd: real("cost_usd"),
+  toolCalls: integer("tool_calls"),
+  source: text("source").notNull().default("api"),
+  turnRef: text("turn_ref"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  check("usage_source", sql`${table.source} IN (${inList(USAGE_SOURCES)})`),
+  check("usage_nonneg", sql`(${table.tokensIn} IS NULL OR ${table.tokensIn} >= 0) AND (${table.tokensOut} IS NULL OR ${table.tokensOut} >= 0) AND (${table.cacheRead} IS NULL OR ${table.cacheRead} >= 0) AND (${table.costUsd} IS NULL OR ${table.costUsd} >= 0) AND (${table.toolCalls} IS NULL OR ${table.toolCalls} >= 0)`),
+  index("idx_usage_item").on(table.itemId),
+  index("idx_usage_session").on(table.sessionId),
+  index("idx_usage_attempt").on(table.attemptId),
+  index("idx_usage_created").on(table.createdAt),
+  index("idx_usage_identity").on(table.harness, table.agentId, table.externalSessionId),
+  uniqueIndex("uq_usage_turn").on(table.harness, table.agentId, table.externalSessionId, table.turnRef).where(sql`${table.turnRef} IS NOT NULL`),
 ]);
 
 export const itemEdges = sqliteTable("item_edges", {
