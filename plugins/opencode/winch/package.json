@@ -1,7 +1,7 @@
 {
   "name": "@igorjpimenta/winch-opencode",
-  "version": "2026.11.19-beta.1",
-  "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls, receives HTTP dispatch wakes, reports LLM usage, and reconciles assigned in-progress work. No SDK dependency — a plain id/setup/server export.",
+  "version": "2026.11.23-beta.1",
+  "description": "OpenCode companion for winch: stamps agent and session identity on winch tool calls, receives HTTP dispatch wakes, reports LLM usage, and reconciles assigned in-progress work. No SDK dependency \u2014 a plain id/setup/server export.",
   "license": "MIT",
   "type": "module",
   "repository": {
