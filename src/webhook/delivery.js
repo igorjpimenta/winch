@@ -197,9 +197,9 @@ export async function deliverDue(store, { config = store.config, logger = null, 
       FROM admission_queue q
       JOIN admission_attempts aa ON aa.admission_id=q.id AND aa.ended_at IS NULL
      WHERE q.status IN ('offered','accepted') AND q.ended_at IS NULL
-       AND EXISTS (SELECT 1 FROM dispatch_deliveries d
+       AND EXISTS (SELECT 1 FROM webhook_deliveries d
                     WHERE d.admission_id=q.id AND d.attempt_no=aa.attempt_no)
-       AND NOT EXISTS (SELECT 1 FROM dispatch_deliveries d
+       AND NOT EXISTS (SELECT 1 FROM webhook_deliveries d
                         WHERE d.admission_id=q.id AND d.attempt_no=aa.attempt_no
                           AND d.status != 'dead')
   `).all();

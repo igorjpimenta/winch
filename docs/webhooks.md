@@ -119,7 +119,7 @@ The server routes work-making transitions into `admission_queue`:
 epic creator), and `epic.completed` (to the epic creator).
 
 - Each dispatch attempt has a stable `dispatch_events` row, one
-  `dispatch_deliveries` row per consumer, and a `dispatch_delivery_attempts`
+  `webhook_deliveries` row per consumer, and a `webhook_delivery_attempts`
   audit row per HTTP try. A queued wake is POSTed to every dispatch
   subscription for its harness. `202` means the receiver accepted the request;
   it does **not** mean the work was claimed.

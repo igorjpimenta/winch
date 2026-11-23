@@ -25,13 +25,13 @@ test("fresh store creates the schema and records the Drizzle migrations", (t) =>
   const store = createStore({ dbPath: tempDb(t) });
   t.after(() => store.close());
 
-  for (const name of ["items", "item_state", "item_tags", "item_edges", "attempts", "work_sessions", "artifacts", "item_events", "admission_queue", "admission_attempts", "dispatch_deliveries", "dispatch_delivery_attempts", "dispatch_events", "webhooks"]) {
+  for (const name of ["items", "item_state", "item_tags", "item_edges", "attempts", "work_sessions", "artifacts", "item_events", "admission_queue", "admission_attempts", "webhook_deliveries", "webhook_delivery_attempts", "dispatch_events", "webhooks"]) {
     assert.ok(tables(store.db).includes(name), `${name} exists`);
   }
   for (const old of ["epics", "stories", "tasks", "events", "deps", "webhook_targets", "harness_webhooks", "session_budgets"]) {
     assert.ok(!tables(store.db).includes(old), `${old} is gone`);
   }
-  assert.equal(ledger(store.db).length, 13);
+  assert.equal(ledger(store.db).length, 14);
 });
 
 test("reopen is idempotent and keeps the data", (t) => {
@@ -42,6 +42,6 @@ test("reopen is idempotent and keeps the data", (t) => {
 
   const reopened = createStore({ dbPath });
   t.after(() => reopened.close());
-  assert.equal(ledger(reopened.db).length, 13);
+  assert.equal(ledger(reopened.db).length, 14);
   assert.equal(reopened.epic.get(epic.id).title, "E");
 });

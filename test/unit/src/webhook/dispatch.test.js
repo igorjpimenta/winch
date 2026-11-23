@@ -665,7 +665,7 @@ test("delivery keeps a stable event and a per-attempt audit row", async (t) => {
   const event = store.dispatchEvent.get({ admissionId: offer.id, attemptNo: offer.attempt_no });
   assert.ok(event);
   assert.equal(delivery.event_id, event.id);
-  assert.equal(store.db.prepare("SELECT status FROM dispatch_delivery_attempts WHERE delivery_id=? ORDER BY id DESC LIMIT 1").get(delivery.id).status, "delivered");
+  assert.equal(store.db.prepare("SELECT status FROM webhook_delivery_attempts WHERE delivery_id=? ORDER BY id DESC LIMIT 1").get(delivery.id).status, "delivered");
 });
 
 test("dispatch management endpoints require WINCH_DISPATCH_TOKEN when set", async () => {
