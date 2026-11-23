@@ -35,9 +35,9 @@ export function createToolHandlers(store, logger) {
   async function handle(name, args, identity, meta = null) {
     assertCleanTriple(identity, `caller identity for ${name}`);
     const cfg = resolveRequestConfig(baseConfig, meta);
-    // Implicit session bind (option C): an item-touching call rebinds the
-    // session to that item, so usage pushed later over WebSocket attributes
-    // to the last-touched item.
+    // Implicit session bind: an item-touching call rebinds the session to
+    // that item, so usage pushed later over WebSocket attributes to the
+    // last-touched item.
     try {
       const fromArgs = (typeof args?.taskId === "string" || typeof args?.task_id === "string" ||
         typeof args?.id === "string" || typeof args?.epicId === "string" ||

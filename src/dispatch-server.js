@@ -1,5 +1,5 @@
 // dispatch-server.js — HTTP dispatch endpoints and the admission queue pump.
-// Executors register here and winch POSTs wakes from here; the read-only event
+// Executors register here and winch POSTs wakes from here; the event
 // stream lives in events-ws.js and shares no socket with dispatch.
 
 import http from "node:http";

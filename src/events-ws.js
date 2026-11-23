@@ -1,12 +1,17 @@
-// events-ws.js — the read-only event pipe.
-// Tails the item_events ledger and broadcasts every new row; dispatch wakes
-// leave over executor webhooks served by dispatch-server.js, not this socket.
+// events-ws.js — the event pipe.
+// Outbound: tails the item_events ledger and broadcasts every new row;
+// dispatch wakes leave over executor webhooks served by dispatch-server.js,
+// not this socket.
+// Inbound: the harness pushes usage frames, which are recorded as
+// item_events rows and then broadcast like any other row.
 //
 // Wire protocol (JSON text frames):
 //   server → client:
 //     {"type":"welcome","payload":"v3","lastEventId":N}
 //     {"type":"history","events":[...]}   backlog of envelopes, oldest-first
 //     {"type":"event","kind":...,"item":{...},...}  one flat envelope per new row, in id order
+//   client → server:
+//     {"type":"usage","sessionKey":...,"usage":{...}}  usage for the session's item
 //
 // Clients track their own seen state: reconnecting replays history, so a
 // missed frame costs a re-read, never a lost event. The admission queue owns
@@ -226,8 +231,9 @@ export function startEventServer({ store, port = null, host = "127.0.0.1", inter
       clients.delete(socket);
     }
 
-    // Client frames are only ever interesting as close/ping; everything else
-    // is consumed and ignored. Mask bit respected when skipping payloads.
+    // Client text frames carry usage: { type:"usage", sessionKey, usage }.
+    // Close and ping are handled; other frames are ignored. Client frames
+    // are masked (RFC 6455 §5.3), so the payload is unmasked before parsing.
     let buf = Buffer.alloc(0);
     socket.on("data", (chunk) => {
       buf = Buffer.concat([buf, chunk]);

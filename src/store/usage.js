@@ -1,4 +1,4 @@
-// usage.js — optional LLM cost/usage tracking on top of the v8 ledger.
+// usage.js — LLM cost/usage tracking on top of the v8 ledger.
 //
 // Usage is recorded as an `item_events` row (kind 'usage.recorded') carrying
 // the usage payload in payload_json. This reuses the append-only ledger and
@@ -22,11 +22,8 @@ export function createUsageApi({ core }) {
       source: source ?? null,
     };
     const targetItem = itemId || null;
-    // If no item bound, attribute to a system item? No — store unattributed
-    // usage against the session only: we still record it in item_events with
-    // a null item_id is not allowed (item_id NOT NULL). So skip recording
-    // when there is no item; usage_events-less. Instead, callers should bind
-    // a session first. Return null.
+    // item_events.item_id is NOT NULL: usage with no bound item cannot be
+    // recorded. Callers must bind a session to an item first.
     if (!targetItem) return null;
     const id = appendEvent({
       itemId: targetItem,
