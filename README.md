@@ -361,8 +361,8 @@ manifest (`deferred` list), not the envelopes; a disputed
 completion is a new ticket linked by dep edge with a `supersedes: ITM-x` note,
 never a rewrite of history.
 
-Rows carry their stored `kind` and the recursive `item` envelope; the legacy
-`task`/`story`/`epic` blocks stay for subscribers that predate the recursive-item schema.
+Rows carry their stored `kind`, the normalized `item` block, and the task-context
+block (`task` with story/epic/acceptance/artifacts) the claim handoff also uses.
 
 The server never interprets a row - a gate opening is just another event, and
 reminders, digests and dashboards are subscriber code. Reconnect replays
