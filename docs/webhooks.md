@@ -130,6 +130,23 @@ expiry, retry backoff and lost notifications.
 
 ## Dispatch registration
 
+Nothing wakes without a subscription. The pump only offers queued admissions
+to harnesses present in `webhooks`, so an assignment whose harness matches no
+enabled subscription succeeds and then sits `queued` forever — no attempts, no
+deliveries, no error at the write. The tools surface this instead of hiding
+it: `backlog_assign` returns `warning: {code: "no_route", harness, message}`
+when no enabled `dispatch` subscription matches the harness (state
+`disabled` counts as no route), and `backlog_plan` returns the same warning
+when no `dispatch` subscription exists at all. The write itself still
+succeeds; the warning is the signal to register before expecting progress.
+The reserved `human_in_the_loop` harness never routes, so human assignments
+never warn.
+
+Manual registration (stable row, never heartbeat-pruned, never swept):
+
+    winch webhook bearer
+    winch webhook register --topic dispatch --harness <harness> --url <receiver-url> --bearer <token>
+
 Each adapter exposes one wake route for its consumer and registers it on the
 `dispatch` topic. The event's `kind` decides what the listener does; the
 executor is the live instance, so a consumer never needs a second webhook:
@@ -174,6 +191,14 @@ The adapter environment supplies the identity:
 Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
 missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
 `winchExecutorId`; the environment is the fallback.
+
+The registration target must match the running dispatch server:
+`WINCH_DISPATCH_URL` defaults to `http://127.0.0.1:38293`, so a server
+started with `winch webhook serve --port 38493` needs
+`WINCH_DISPATCH_URL=http://127.0.0.1:38493` in the adapter environment.
+When the ports disagree, registration fails (`dispatch register failed` in
+the plugin log), `webhooks` stays empty, and every later assignment warns
+`no_route` while both processes run.
 
 ## Dispatch routing
 
