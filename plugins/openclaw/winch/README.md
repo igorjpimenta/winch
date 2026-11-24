@@ -16,12 +16,20 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Four jobs
    `fresh: true`; later heartbeats preserve failure state. `WINCH_EXECUTOR_ID`
    identifies the live connection; the event's `kind` selects the listener
    action. Set `WINCH_DISPATCH_TOKEN` for authenticated management calls.
-4. **Usage reporting** — `reply_payload_sending` reads the gateway's per-turn
-   `usageState` (token counts, resolved model, estimated turn cost) and posts it
-   to winch's `POST /usage` under the session's `harness:agent:session` key.
-   One snapshot is consumed per run, so a turn reports once; the post is
-   fire-and-forget and never delays or fails reply delivery. It uses
-   `WINCH_DISPATCH_URL` and `WINCH_DISPATCH_TOKEN`.
+4. **Usage reporting** — `llm_output` sums each attempt's token counts into a
+   per-run accumulator; `agent_end` (once per run) and `reply_payload_sending`
+   (fallback) flush it to winch's `POST /usage` under the session's
+   `harness:agent:session` key with `turnRef = runId`, so the server's unique
+   index dedupes a double flush. Only sessions bound to an item (a winch call
+   carrying an item id) flush. The host does not attach `usageState` to reply
+   hooks on agent-command runs — it consumes the recorded snapshot only for
+   inbound replies — so the accumulator is the primary source and `usageState`
+   the inbound fallback. Posts are fire-and-forget and never delay or fail the
+   turn; they use `WINCH_DISPATCH_URL` and `WINCH_DISPATCH_TOKEN`.
+   `llm_output`/`agent_end` require `plugins.entries.winch.hooks.
+   allowConversationAccess=true` in openclaw.json: the host blocks those hook
+   names for non-bundled plugins without it, and a blocked registration is
+   logged as a warning but the gateway keeps running without usage reporting.
 
 ## Install
 
@@ -34,8 +42,9 @@ boot (without it the host never calls `register()` and the route never
 binds). The `--accept-capabilities` flag is required: the plugin registers
 an HTTP route and a service.
 
-The plugin depends on `@igorjpimenta/winch`, so npm resolves and pins the
-server version alongside it.
+The plugin talks to the winch server over HTTP (`WINCH_DISPATCH_URL`,
+default `http://127.0.0.1:38293`) and does not bundle the server. The core
+server is installed separately (`npm i -g @igorjpimenta/winch`).
 
 Set `dispatchPublicBaseUrl` if the gateway port isn't detectable. Generate the
 bearer with `winch webhook bearer`, then set `WINCH_WEBHOOK_BEARER` and a unique
@@ -48,8 +57,8 @@ missing.
 
 Ships on its own line, independent of the core server:
 `winch-openclaw-<semver>` tags publish `@igorjpimenta/winch-openclaw`
-(stable → `latest`, prerelease → `beta`). Bump this package's `version` and
-its `@igorjpimenta/winch` dependency floor together.
+(stable → `latest`, prerelease → `beta`). Bump this package's `version`
+on each release; there is no npm dependency on the core server.
 
 ## Config
 

@@ -62,6 +62,64 @@ export function usageBody({ harness, agent, session, usage, turnRef }) {
   return { sessionKey: `${harness}:${agent}:${session}`, turnRef: turnRef ?? null, usage };
 }
 
+// llm_output is the only hook carrying token counts on agent-command runs
+// (the wake path): reply_payload_sending arrives with usageState undefined
+// there because the host consumes the recorded snapshot only for inbound
+// replies. Attempts accumulate per runId; agent_end and reply flush pass
+// turnRef=runId so the server's unique index dedupes a double report.
+export function llmOutputUsage(event, ctx) {
+  const raw = event?.usage;
+  if (!raw || typeof raw !== "object") return null;
+  const usage = {
+    model: typeof event.resolvedRef === "string" && event.resolvedRef
+      ? event.resolvedRef
+      : (event.provider && event.model ? `${event.provider}/${event.model}` : null),
+    tokensIn: num(raw.input),
+    tokensOut: num(raw.output),
+    cacheRead: num(raw.cacheRead),
+  };
+  if (usage.tokensIn === null && usage.tokensOut === null && usage.cacheRead === null) return null;
+  const runId = typeof event.runId === "string" && event.runId ? event.runId : null;
+  const session = typeof ctx?.sessionKey === "string" && ctx.sessionKey ? ctx.sessionKey : null;
+  const agent = typeof ctx?.agentId === "string" && ctx.agentId ? ctx.agentId : null;
+  if (!runId || !session || !agent) return null;
+  return { runId, agent, session, usage };
+}
+
+function sumNullable(a, b) {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+// FIFO-bounded: llm_output fires for every run in the gateway, engaged or
+// not; engagement is checked at flush, not at accumulation, because a session
+// binds to its item mid-run (first tool call) after earlier attempts.
+export function accumulateUsage(runs, snap, max = 500) {
+  const prev = runs.get(snap.runId);
+  if (prev) {
+    prev.usage.tokensIn = sumNullable(prev.usage.tokensIn, snap.usage.tokensIn);
+    prev.usage.tokensOut = sumNullable(prev.usage.tokensOut, snap.usage.tokensOut);
+    prev.usage.cacheRead = sumNullable(prev.usage.cacheRead, snap.usage.cacheRead);
+    if (snap.usage.model) prev.usage.model = snap.usage.model;
+    return;
+  }
+  if (runs.size >= max) runs.delete(runs.keys().next().value);
+  runs.set(snap.runId, { agent: snap.agent, session: snap.session, usage: { ...snap.usage } });
+}
+
+export function runUsageBody({ event, runs, harness }) {
+  const runId = typeof event?.runId === "string" && event.runId ? event.runId : null;
+  const snap = runId && runs ? runs.get(runId) : null;
+  if (!snap) return null;
+  return usageBody({ harness, agent: snap.agent, session: snap.session, turnRef: runId, usage: snap.usage });
+}
+
+function usageStateBody({ event, harness }) {
+  const reported = usageFromReplyEvent(event);
+  if (!reported) return null;
+  return usageBody({ harness, ...reported });
+}
+
 export async function postUsage({
   baseUrl,
   token,
@@ -91,11 +149,12 @@ export async function postUsage({
   }
 }
 
-// Fire-and-forget entry used by the hook; returns the body when it posted.
-export function reportReplyUsage({ event, harness, baseUrl, token, logger = console, fetchImpl = fetch }) {
-  const reported = usageFromReplyEvent(event);
-  if (!reported) return null;
-  const body = usageBody({ harness, ...reported });
+// Fire-and-forget entry used by the hooks; returns the body when it posted.
+// The per-run accumulator wins over usageState: on agent-command runs the
+// host never attaches usageState, and the accumulator holds the summed
+// attempts either way.
+export function reportReplyUsage({ event, runs, harness, baseUrl, token, logger = console, fetchImpl = fetch }) {
+  const body = runUsageBody({ event, runs, harness }) ?? usageStateBody({ event, harness });
   if (!body) return null;
   void postUsage({ baseUrl, token, body, logger, fetchImpl });
   return body;
