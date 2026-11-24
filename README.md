@@ -123,7 +123,10 @@ is the single scheduler:
   subscription; transient failures retry until the failure threshold or attempt
   cap. A heartbeat does not erase that state.
 - Caps are per harness (`WINCH_DISPATCH_HARNESS_MAX`) and global
-  (`WINCH_DISPATCH_GLOBAL_MAX`). The server listens on
+  (`WINCH_DISPATCH_GLOBAL_MAX`). A consumer's running wake children are capped
+  by `WINCH_DISPATCH_WAKE_MAX`: a delivery counts as running until the receiver
+  settles it, so an offer re-offered while its child is alive cannot stack a
+  second process. The server listens on
   `WINCH_DISPATCH_PORT` (default 38293, localhost-only unless `--host` says
   otherwise). Status changes enqueue their wake in the same SQLite transaction
   and ring `/dispatch/notify` on `WINCH_DISPATCH_URL`; the interval pump is
@@ -462,6 +465,7 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Event history limit (dispatch boot catch-up batch) | `WINCH_EVENT_HISTORY_LIMIT` | 200 |
 | Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
+| Running wake children per consumer | `WINCH_DISPATCH_WAKE_MAX` | 8 |
 | Dispatch consumer heartbeat TTL | `WINCH_DISPATCH_CONSUMER_TTL_MS` | 90000 ms |
 | Offer TTL / backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
 | Delivery backoff / max / attempts / failure threshold / claim lease | `WINCH_DISPATCH_DELIVERY_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_ATTEMPTS` / `WINCH_DISPATCH_DELIVERY_FAILURE_THRESHOLD` / `WINCH_DISPATCH_DELIVERY_LEASE_MS` | 30000 / 300000 ms / 5 / 4 / 300000 ms |

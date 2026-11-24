@@ -308,6 +308,7 @@ export const webhookDeliveries = sqliteTable("webhook_deliveries", {
   lastStatus: integer("last_status"),
   lastError: text("last_error"),
   deliveredAt: integer("delivered_at"),
+  settledAt: integer("settled_at"),
   deadAt: integer("dead_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

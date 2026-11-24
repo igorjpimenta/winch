@@ -1,0 +1,1 @@
+ALTER TABLE `webhook_deliveries` ADD `settled_at` integer;

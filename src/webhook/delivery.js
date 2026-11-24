@@ -92,6 +92,17 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
     store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: delivery.attempts + 1, status: "dead", error: "consumer disabled", at });
     return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "consumer disabled" };
   }
+  const settleAfter = at - (config.dispatchDeliveryLeaseMs ?? 300000);
+  if (store.delivery.isRunning(delivery.admission_id, { consumerId: delivery.consumer_id, after: settleAfter })) {
+    // A re-offer bumped attemptNo while this consumer's child for the same
+    // admission is still alive; the wake would stack a second process.
+    store.delivery.cancelForAttempt(delivery.admission_id, delivery.attempt_no, { at });
+    return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "admission running" };
+  }
+  if (store.delivery.runningCount(delivery.consumer_id, { after: settleAfter }) >= (config.dispatchWakeMax ?? 8)) {
+    store.delivery.defer(delivery.id, { nextAt: at + 1000, at });
+    return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "wake window full" };
+  }
   const execution = row.active_consumer_id === delivery.consumer_id ? "active" : "standby";
   const payload = wakePayload(row, {
     offerMs: config.dispatchOfferMs,
