@@ -92,6 +92,69 @@ export function createDeliveryApi({ core }) {
       return rowById(id);
     },
 
+    // Marks a delivery as a running child without counting an HTTP attempt —
+    // recover hands these rows to the receiver over its response, not the wire.
+    markRunning({ admissionId, attemptNo, consumerId, at = now() }) {
+      const row = api.ensure({ admissionId, attemptNo, consumerId, at });
+      db.prepare(`
+        UPDATE webhook_deliveries
+           SET status='delivered', delivered_at=?, settled_at=NULL, updated_at=?
+         WHERE id=? AND status NOT IN ('dead','cancelled')
+      `).run(at, at, row.id);
+      return rowById(row.id);
+    },
+
+    // The receiver reports a child exit; only a delivered row can settle, so a
+    // late or duplicated settle cannot disturb a fresh attempt. Returns the
+    // number of rows settled (0 means nothing was running for that key).
+    settle({ admissionId, attemptNo = null, consumerId = null, at = now() }) {
+      const where = ["status='delivered'", "admission_id=?"];
+      const args = [admissionId];
+      if (attemptNo != null) { where.push("attempt_no=?"); args.push(attemptNo); }
+      if (consumerId != null) { where.push("consumer_id=?"); args.push(consumerId); }
+      return db.prepare(`
+        UPDATE webhook_deliveries SET settled_at=?, updated_at=?
+         WHERE ${where.join(" AND ")}
+      `).run(at, at, ...args).changes;
+    },
+
+    // Running = delivered, not yet settled, within the settle lease. The lease
+    // is what frees the window when a receiver dies without settling; a live
+    // child re-marks its row on every redundant wake, refreshing it.
+    runningCount(consumerId, { after = 0 } = {}) {
+      return db.prepare(`
+        SELECT COUNT(DISTINCT admission_id) AS n FROM webhook_deliveries
+         WHERE consumer_id=? AND status='delivered' AND settled_at IS NULL AND delivered_at >= ?
+      `).get(consumerId, after).n;
+    },
+
+    runningAdmissionIds({ consumerId = null, after = 0 } = {}) {
+      const where = ["status='delivered'", "settled_at IS NULL", "delivered_at >= ?"];
+      const args = [after];
+      if (consumerId != null) { where.push("consumer_id=?"); args.push(consumerId); }
+      return new Set(db.prepare(`
+        SELECT DISTINCT admission_id FROM webhook_deliveries WHERE ${where.join(" AND ")}
+      `).all(...args).map((r) => r.admission_id));
+    },
+
+    isRunning(admissionId, { consumerId = null, after = 0 } = {}) {
+      const where = ["admission_id=?", "status='delivered'", "settled_at IS NULL", "delivered_at >= ?"];
+      const args = [admissionId, after];
+      if (consumerId != null) { where.push("consumer_id=?"); args.push(consumerId); }
+      return db.prepare(`SELECT 1 FROM webhook_deliveries WHERE ${where.join(" AND ")} LIMIT 1`)
+        .get(...args) != null;
+    },
+
+    // Puts a claimed row back without counting an attempt: a delivery held by
+    // the wake window was never actually posted.
+    defer(id, { nextAt, at = now() } = {}) {
+      db.prepare(`
+        UPDATE webhook_deliveries SET status='pending', next_at=?, updated_at=?
+         WHERE id=? AND status='delivering'
+      `).run(nextAt, at, id);
+      return rowById(id);
+    },
+
     markRetry(id, { status = null, error = null, nextAt, at = now() } = {}) {
       db.prepare(`
         UPDATE webhook_deliveries
@@ -123,7 +186,7 @@ export function createDeliveryApi({ core }) {
     resetForConsumer(admissionId, attemptNo, consumerId, { at = now() } = {}) {
       db.prepare(`
         UPDATE webhook_deliveries
-           SET status='pending', next_at=?, delivered_at=NULL, dead_at=NULL, updated_at=?
+           SET status='pending', next_at=?, delivered_at=NULL, settled_at=NULL, dead_at=NULL, updated_at=?
          WHERE admission_id=? AND attempt_no=? AND consumer_id=?
       `).run(at, at, admissionId, attemptNo, consumerId);
       return db.prepare(`

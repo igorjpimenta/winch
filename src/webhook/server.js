@@ -172,7 +172,16 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
     }
     if (req.method === "POST" && url.pathname === "/dispatch/notify") {
       if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
-      req.resume();
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      if (body?.type === "settle" && typeof body.admissionId === "string" && body.admissionId) {
+        store.delivery.settle({
+          admissionId: body.admissionId,
+          attemptNo: Number.isInteger(body.attemptNo) ? body.attemptNo : null,
+          consumerId: typeof body.consumerId === "string" && body.consumerId ? body.consumerId : null,
+          at: Date.now(),
+        });
+      }
       json(res, 202, { ok: true });
       void pump();
       return;

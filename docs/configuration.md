@@ -14,6 +14,7 @@ overrides starts with dispatch enabled.
 | Event history limit (dispatch boot catch-up batch) | `WINCH_EVENT_HISTORY_LIMIT` | 200 |
 | Dispatch port / poll / lease sweep | `WINCH_DISPATCH_PORT` / `WINCH_DISPATCH_INTERVAL_MS` / `WINCH_DISPATCH_SWEEP_MS` | 38293 / 1000 / 30000 ms |
 | Dispatch caps per harness / global | `WINCH_DISPATCH_HARNESS_MAX` / `WINCH_DISPATCH_GLOBAL_MAX` | 8 / 16 |
+| Running wake children per consumer | `WINCH_DISPATCH_WAKE_MAX` | 8 |
 | Dispatch consumer heartbeat TTL | `WINCH_DISPATCH_CONSUMER_TTL_MS` | 90000 ms |
 | Offer TTL / base backoff / max backoff / attempts | `WINCH_DISPATCH_OFFER_MS` / `WINCH_DISPATCH_OFFER_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_BACKOFF_MS` / `WINCH_DISPATCH_OFFER_MAX_ATTEMPTS` | 120000 / 30000 / 300000 ms / 5 |
 | Delivery base backoff / max / attempts / failure threshold / claim lease | `WINCH_DISPATCH_DELIVERY_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_BACKOFF_MS` / `WINCH_DISPATCH_DELIVERY_MAX_ATTEMPTS` / `WINCH_DISPATCH_DELIVERY_FAILURE_THRESHOLD` / `WINCH_DISPATCH_DELIVERY_LEASE_MS` | 30000 / 300000 ms / 5 / 4 / 300000 ms |

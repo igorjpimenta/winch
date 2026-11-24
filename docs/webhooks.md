@@ -192,6 +192,18 @@ Adapters fail closed when `WINCH_EXECUTOR_ID` or `WINCH_WEBHOOK_BEARER` is
 missing. Plugin config can supply `winchHarness`, `winchConsumerId`, and
 `winchExecutorId`; the environment is the fallback.
 
+The window that bounds running children lives in the webhook server, not the
+adapter. A delivery counts as running from acceptance until the receiver
+reports the child's exit with `POST /dispatch/notify`
+(`{"type":"settle","admissionId":"ADM-…","consumerId":"…"}`). The server hands
+out at most `WINCH_DISPATCH_WAKE_MAX` running children per consumer (default
+`8`) and never a second wake for an admission that is already running, so an
+offer re-offered while its child is alive cannot stack another process. A
+receiver that never settles stops consuming the window once its delivery lease
+(`WINCH_DISPATCH_DELIVERY_LEASE_MS`) lapses, so a crashed receiver cannot wedge
+dispatch. The adapter still refuses a duplicate wake for a key it is already
+running: that guard covers the pump/recover race, not the cap.
+
 The registration target must match the running dispatch server:
 `WINCH_DISPATCH_URL` defaults to `http://127.0.0.1:38293`, so a server
 started with `winch webhook serve --port 38493` needs

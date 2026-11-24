@@ -171,9 +171,21 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
     otherReserved = Math.max(0, [...slots.reserved.values()].reduce((n, v) => n + v, 0) - offered.length);
   }
 
-  const start = keptOffers
-    .filter((live) => !consumerId || !live.active_consumer_id || live.active_consumer_id === consumerId)
-    .map((live) => ({
+  const settleAfter = at - (config.dispatchDeliveryLeaseMs ?? 300000);
+  const wakeMax = config.dispatchWakeMax ?? 8;
+  const running = store.delivery.runningAdmissionIds({ consumerId, after: settleAfter });
+  const runningForConsumer = consumerId ? store.delivery.runningCount(consumerId, { after: settleAfter }) : 0;
+  let windowFree = Math.max(0, wakeMax - runningForConsumer);
+
+  const start = [];
+  for (const live of keptOffers) {
+    if (consumerId && live.active_consumer_id && live.active_consumer_id !== consumerId) continue;
+    if (running.has(live.id)) continue;
+    if (consumerId) {
+      if (windowFree <= 0) continue;
+      windowFree--;
+    }
+    start.push({
       admissionId: live.id,
       itemId: live.item_id,
       attemptNo: live.attempt_no ?? null,
@@ -185,7 +197,13 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
       activeConsumerId: live.active_consumer_id ?? null,
       leaseEpoch: live.lease_epoch ?? 0,
       status: live.status,
-    }));
+    });
+    // Handing a row over in this response starts its child: mark it running
+    // so the pump does not post a second wake for it.
+    if (mutate && consumerId) {
+      store.delivery.markRunning({ admissionId: live.id, attemptNo: live.attempt_no ?? null, consumerId, at });
+    }
+  }
 
   const usedHarness = activeHarness + keptOffers.length;
   const usedGlobal = activeGlobal + otherReserved + keptOffers.length;
@@ -194,7 +212,7 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
     config.dispatchGlobalMax - usedGlobal,
   ));
   if (mutate) for (const row of store.admission.queued(harness, at)) {
-    if (free <= 0) break;
+    if (free <= 0 || (consumerId && windowFree <= 0)) break;
     const next = store.admission.markOffered(row.id, at, {
       pickActive: (attemptNo) => pickConsumer(store, { ...row, attempt_no: attemptNo }),
       leaseMs: config.dispatchConsumerTtlMs,
@@ -213,6 +231,10 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
       leaseEpoch: next.lease_epoch ?? 0,
       status: "offered",
     });
+    if (consumerId) {
+      windowFree--;
+      store.delivery.markRunning({ admissionId: next.id, attemptNo: next.attempt_no ?? null, consumerId, at });
+    }
     free--;
   }
 

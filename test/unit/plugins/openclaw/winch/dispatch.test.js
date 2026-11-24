@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { recoverOnce, registerReceiver, resumePrompt } from "../../../../../plugins/openclaw/winch/dispatch.js";
+import { createWakeGuard, postSettle, recoverOnce, registerReceiver, resumePrompt } from "../../../../../plugins/openclaw/winch/dispatch.js";
 
 test("recoverOnce wakes resume and start rows once", async () => {
   const calls = [];
@@ -90,4 +90,53 @@ test("resume prompt repairs a missing attempt without fencing on unknown", () =>
   assert.match(text, /Repair TASK-9/);
   assert.match(text, /no attemptId/);
   assert.doesNotMatch(text, /attempt \(unknown\)/);
+});
+
+test("the wake guard dedups a key in flight and settles when the child exits", async () => {
+  const spawned = [];
+  const settled = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const guard = createWakeGuard(
+    (frame) => gate.then(() => { spawned.push(frame.admissionId); }),
+    { settle: (id) => settled.push(id) },
+  );
+  const first = guard({ admissionId: "ADM-1", itemId: "T", agent: "a" });
+  const dup = await guard({ admissionId: "ADM-1", itemId: "T", agent: "a" });
+  assert.deepEqual(dup, { deduped: true }, "the same admission resolves deduplicated while its child lives");
+  assert.equal(spawned.length, 0);
+  release();
+  await first;
+  assert.deepEqual(spawned, ["ADM-1"]);
+  assert.deepEqual(settled, ["ADM-1"], "the exit settles the admission");
+});
+
+test("postSettle posts the settle frame to /dispatch/notify", async () => {
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => { raw += d; });
+    req.on("end", () => {
+      calls.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(raw) });
+      res.statusCode = 202;
+      res.end("{}");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await postSettle({
+      baseUrl: `http://127.0.0.1:${server.address().port}`,
+      admissionId: "ADM-2",
+      consumerId: "openclaw:host",
+      bearer: "tok",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/dispatch/notify");
+    assert.equal(calls[0].auth, "Bearer tok");
+    assert.equal(calls[0].body.type, "settle");
+    assert.equal(calls[0].body.admissionId, "ADM-2");
+    assert.equal(calls[0].body.consumerId, "openclaw:host");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

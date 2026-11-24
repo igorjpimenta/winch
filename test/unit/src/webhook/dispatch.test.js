@@ -755,3 +755,88 @@ test("usage.record is idempotent per turnRef and keeps one row per turn", () => 
   const row = store.db.prepare("SELECT session_id, attempt_id FROM usage_events WHERE item_id=?").get(task.id);
   assert.equal(row.session_id, sess.id, "session linked");
 });
+
+test("the wake window holds a second delivery until the first settles", async () => {
+  receiver = await wakeReceiver();
+  store.webhook.upsert({ topic: "dispatch", id: "exec-a", harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
+  const a = seedAssigned({ agent: "worker" });
+  const b = seedAssigned({ agent: "worker" });
+  observeEvent(a.row);
+  observeEvent(b.row);
+  const offers = tick(store, { reachable: ["test"] });
+  assert.equal(offers.length, 2);
+  const config = { ...store.config, dispatchWakeMax: 1 };
+
+  const first = await deliverWake(store, offers[0], { config });
+  assert.equal(first.ok, true);
+  const second = await deliverWake(store, offers[1], { config });
+  assert.equal(second.ok, false);
+  assert.equal(second.failed[0].error, "wake window full");
+  assert.equal(receiver.rows.length, 1, "the window admits one running child");
+
+  store.delivery.settle({ admissionId: offers[0].id, consumerId: "exec-a" });
+  const third = await deliverWake(store, offers[1], { config, at: Date.now() + 1100 });
+  assert.equal(third.ok, true);
+  assert.equal(receiver.rows.length, 2, "settling the child releases the window");
+});
+
+test("a re-offer for an admission whose child is running is not posted again", async () => {
+  receiver = await wakeReceiver();
+  store.webhook.upsert({ topic: "dispatch", id: "exec-a", harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
+  const { row } = seedAssigned();
+  observeEvent(row);
+  const [offer] = tick(store, { reachable: ["test"] });
+  assert.equal((await deliverWake(store, offer)).ok, true);
+
+  const later = Date.now() + 1000;
+  tick(store, { at: later, reachable: ["test"] });
+  const [again] = tick(store, { at: later + 60, reachable: ["test"] });
+  assert.ok(again?.attempt_no > offer.attempt_no, "the fresh tick re-offers the row");
+  const res = await deliverWake(store, again, { at: later + 60 });
+  assert.equal(res.ok, false);
+  assert.equal(res.failed[0].error, "admission running");
+  assert.equal(receiver.rows.length, 1, "a running admission cannot stack a second child");
+});
+
+test("recover hands over at most the wake window and marks the rows running", async () => {
+  store.webhook.upsert({ topic: "dispatch", id: "exec-a", harness: "test", executorId: "exec-a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  for (let i = 0; i < 3; i += 1) observeEvent(seedAssigned({ agent: "worker" }).row);
+  const config = { ...store.config, dispatchWakeMax: 1 };
+
+  const first = recover(store, { harness: "test", consumerId: "exec-a", config, mutate: true });
+  assert.equal(first.start.length, 1);
+  const handed = first.start[0];
+  assert.equal(store.delivery.isRunning(handed.admissionId, { consumerId: "exec-a" }), true);
+
+  const second = recover(store, { harness: "test", consumerId: "exec-a", config, mutate: true });
+  assert.equal(second.start.length, 0, "the window is full while the child runs");
+
+  store.delivery.settle({ admissionId: handed.admissionId, consumerId: "exec-a" });
+  const third = recover(store, { harness: "test", consumerId: "exec-a", config, mutate: true });
+  assert.equal(third.start.length, 1, "settling frees one slot");
+});
+
+test("a settle notification on the server frees the running window", async () => {
+  receiver = await wakeReceiver();
+  store.webhook.upsert({ topic: "dispatch", id: "exec-a", harness: "test", executorId: "exec-a", url: receiver.url, bearer: "tok" });
+  srv = await startDispatchServer({ store, port: 0, intervalMs: 60000 });
+  const base = `http://127.0.0.1:${srv.port}`;
+  const a = seedAssigned({ agent: "worker" });
+  const b = seedAssigned({ agent: "worker" });
+  observeEvent(a.row);
+  observeEvent(b.row);
+  const offers = tick(store, { reachable: ["test"] });
+  const config = { ...store.config, dispatchWakeMax: 1 };
+  assert.equal((await deliverWake(store, offers[0], { config })).ok, true);
+  assert.equal(store.delivery.isRunning(offers[0].id), true);
+
+  const res = await fetch(`${base}/dispatch/notify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "settle", admissionId: offers[0].id, consumerId: "exec-a" }),
+  });
+  assert.equal(res.status, 202);
+  assert.equal(store.delivery.isRunning(offers[0].id), false);
+  const next = await deliverWake(store, offers[1], { config, at: Date.now() + 1100 });
+  assert.equal(next.ok, true, "the settled window admits the waiting wake");
+});

@@ -10,30 +10,39 @@ import path from "node:path";
 const root = path.join(import.meta.dirname, "..", "..", "..");
 const execFileAsync = promisify(execFile);
 
+// The login session exports WINCH_* to the adapters (launchd user domain);
+// these tests assert CLI defaults, so children must not inherit them.
+function baseEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith("WINCH_")) delete env[key];
+  return env;
+}
+
 function run(...args) {
   return spawnSync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
     encoding: "utf8",
+    env: baseEnv(),
   });
 }
 
 function runDb(dbPath, ...args) {
   return spawnSync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
     encoding: "utf8",
-    env: { ...process.env, WINCH_DB: dbPath },
+    env: { ...baseEnv(), WINCH_DB: dbPath },
   });
 }
 
 function runDbWithEnv(dbPath, env, ...args) {
   return spawnSync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
     encoding: "utf8",
-    env: { ...process.env, WINCH_DB: dbPath, ...env },
+    env: { ...baseEnv(), WINCH_DB: dbPath, ...env },
   });
 }
 
 function runDbAsync(dbPath, ...args) {
   return execFileAsync(process.execPath, [path.join(root, "bin/winch.js"), ...args], {
     encoding: "utf8",
-    env: { ...process.env, WINCH_DB: dbPath },
+    env: { ...baseEnv(), WINCH_DB: dbPath },
   });
 }
 

@@ -4,9 +4,10 @@
 // child still owned by a live instance is doing real work.
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createWakeRunner } from "../../../../../plugins/opencode/winch/index.js";
@@ -121,6 +122,96 @@ test("drops records whose child already exited", async () => {
     assert.equal(runner.reapOrphans(), 0);
     assert.deepEqual(readdirSync(stateDir), []);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a key already running rejects a second wake without spawning", { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-wake-"));
+  const stateDir = path.join(dir, "state");
+  const trace = path.join(dir, "trace.txt");
+  const release = path.join(dir, "release.txt");
+  const bin = fakeBin(dir, [
+    'import { appendFileSync, existsSync } from "node:fs";',
+    "const args = process.argv.slice(2);",
+    'const message = args[3] ?? "x";',
+    "appendFileSync(process.env.TRACE, `${message}\\n`);",
+    "const tick = () => {",
+    "  if (existsSync(process.env.RELEASE)) process.exit(0);",
+    "  setTimeout(tick, 20);",
+    "};",
+    "tick();",
+  ].join("\n"));
+  try {
+    await withEnv(
+      { OPENCODE_BIN: bin, TRACE: trace, RELEASE: release, WINCH_DISPATCH_ENABLED: "0" },
+      async () => {
+        const runner = createWakeRunner({ logger: null, stateDir });
+        const hold = setInterval(() => {}, 25);
+        try {
+          const first = runner.wake({ agent: "build", message: "ITM-one", key: "ADM-1", admissionId: "ADM-1" });
+          const dup = await runner.wake({ agent: "build", message: "ITM-one", key: "ADM-1", admissionId: "ADM-1" });
+          assert.deepEqual(dup, { deduped: true }, "the same key resolves deduplicated while its child lives");
+          const traceText = () => (existsSync(trace) ? readFileSync(trace, "utf8") : "");
+          const deadline = Date.now() + 10_000;
+          while (!traceText().includes("ITM-one")) {
+            if (Date.now() > deadline) throw new Error("timeout waiting for the child");
+            await sleep(20);
+          }
+          assert.equal(traceText(), "ITM-one\n", "exactly one child for the key");
+          writeFileSync(release, "1");
+          await first;
+        } finally {
+          clearInterval(hold);
+        }
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a child exit settles the admission on the core", { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "winch-wake-"));
+  const stateDir = path.join(dir, "state");
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => { raw += d; });
+    req.on("end", () => {
+      calls.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(raw) });
+      res.statusCode = 202;
+      res.end("{}");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const bin = fakeBin(dir, "process.exit(0);\n");
+  try {
+    await withEnv({ OPENCODE_BIN: bin, WINCH_DISPATCH_ENABLED: "0" }, async () => {
+      const runner = createWakeRunner({
+        logger: null,
+        stateDir,
+        dispatchUrl: `http://127.0.0.1:${server.address().port}`,
+        bearer: "tok",
+        consumerId: "opencode:tui",
+      });
+      const hold = setInterval(() => {}, 25);
+      try {
+        await runner.wake({ agent: "build", message: "ITM-settle", key: "ADM-9", admissionId: "ADM-9" });
+        const deadline = Date.now() + 5000;
+        while (calls.length === 0 && Date.now() < deadline) await sleep(20);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].url, "/dispatch/notify");
+        assert.equal(calls[0].auth, "Bearer tok");
+        assert.equal(calls[0].body.type, "settle");
+        assert.equal(calls[0].body.admissionId, "ADM-9");
+        assert.equal(calls[0].body.consumerId, "opencode:tui");
+      } finally {
+        clearInterval(hold);
+      }
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
     rmSync(dir, { recursive: true, force: true });
   }
 });
