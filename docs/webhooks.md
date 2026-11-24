@@ -142,7 +142,7 @@ succeeds; the warning is the signal to register before expecting progress.
 The reserved `human_in_the_loop` harness never routes, so human assignments
 never warn.
 
-Manual registration (stable row, never heartbeat-pruned, never swept):
+Manual registration:
 
     winch webhook bearer
     winch webhook register --topic dispatch --harness <harness> --url <receiver-url> --bearer <token>
