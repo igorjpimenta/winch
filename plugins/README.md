@@ -27,8 +27,11 @@ construction.
 
 Both companions also report LLM usage per turn to winch's `POST /usage` under
 the same `harness:agent:session` key, so cost lands on the item the session is
-bound to. openclaw reads the gateway's `reply_payload_sending.usageState` (one
-consumed snapshot per run: tokens, resolved model, estimated cost). opencode
+bound to. openclaw sums `llm_output` attempt snapshots per run and flushes at
+`agent_end` (the host leaves `usageState` off reply hooks on agent-command
+runs — the wake path — so `reply_payload_sending` is only the inbound
+fallback); this needs `plugins.entries.winch.hooks.allowConversationAccess=true`.
+opencode
 reads final `message.updated` assistant messages (accumulated `cost` plus the
 last step's token snapshot). Both post fire-and-forget with `WINCH_DISPATCH_URL`
 and `WINCH_DISPATCH_TOKEN`; a failed post never affects the host turn, and the

@@ -4,6 +4,8 @@
 // 202 immediately. A wake only starts a turn: the agent's MCP claim is the
 // work guard, so duplicate delivery is harmless.
 
+import { hostname } from "node:os";
+
 export const ROUTE_PATH = "/api/winch/dispatch";
 export const DEFAULT_DISPATCH_URL = "http://127.0.0.1:38293";
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -85,6 +87,7 @@ export function registerReceiver({ api, bearer, wake, started, logger = console 
       Promise.resolve(wake({
         agent: body.agent,
         message: wakeMessage(body),
+        sessionKey: body.itemId,
         kind: body.kind,
         admissionId: body.admissionId,
         attemptNo: body.attemptNo,
@@ -109,7 +112,9 @@ function wakeMessage({ itemId, kind, admissionId, attemptNo, leaseEpoch }) {
   if (kind === "story" || kind === "append" || kind === "review") {
     return `Call backlog_accept_wake with admissionId "${admissionId}", attemptNo ${attemptNo}, and leaseEpoch ${leaseEpoch ?? 0} before working on ${itemId}.`;
   }
-  return itemId;
+  // A bare item id is not a prompt: the agent must be told to claim, or it
+  // answers conversationally and the admission never leaves offered.
+  return `Claim task ${itemId} with backlog_claim (taskId "${itemId}"), then work it to completion.`;
 }
 
 export async function registerExecutor({ baseUrl, harness, consumerId, executorId, url, bearer, fresh = false, timeoutMs = 5000 }) {
@@ -160,6 +165,7 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
     Promise.resolve(wake({
       agent: row.agent,
       message: wakeMessage(row),
+      sessionKey: row.itemId,
       kind: row.kind,
       admissionId: row.admissionId,
       attemptNo: row.attemptNo,
@@ -216,23 +222,21 @@ export function postSettle({ baseUrl, admissionId, consumerId = null, bearer = n
   }).catch((err) => logger?.warn?.(`winch: settle ${admissionId} failed: ${err?.message ?? err}`));
 }
 
-export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, logger = console }) {
+// The receiver is registered from plugin register() — before the gateway HTTP
+// server binds; a route attached from this service start never reaches the
+// live listener (observed 404 on /api/winch/dispatch). startDispatch owns only
+// the register/reconcile loop.
+export function startDispatch({ cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, started = new Map(), logger = console }) {
   if (cfg.dispatchEnabled === false) return null;
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
   const consumerId = cfg.winchConsumerId ?? process.env.WINCH_CONSUMER_ID ?? `${harness}:${hostname()}`;
   const bearer = process.env.WINCH_WEBHOOK_BEARER;
   if (!executorId || !bearer) {
-    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
+    logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; reconcile loop disabled");
     return null;
   }
   const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
   const publicBaseUrl = cfg.dispatchPublicBaseUrl ?? process.env.WINCH_DISPATCH_PUBLIC_BASE_URL ?? "http://127.0.0.1:18789";
-  const started = new Map();
-  const gatedWake = createWakeGuard(wake, {
-    settle: (admissionId) => void postSettle({ baseUrl, admissionId, consumerId, bearer, logger }),
-  });
-
-  registerReceiver({ api, bearer, wake: gatedWake, started, logger });
 
   let fresh = true;
   const run = async () => {
@@ -252,7 +256,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       return;
     }
     try {
-      await recoverOnce({ baseUrl, harness, consumerId, executorId, wake: gatedWake, started, logger });
+      await recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }

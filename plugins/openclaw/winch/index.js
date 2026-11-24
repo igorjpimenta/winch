@@ -1,7 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildWinchMeta } from "./meta.js";
-import { startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
-import { carriesItemId, remember, reportReplyUsage } from "./usage.js";
+import { createWakeGuard, postSettle, registerReceiver, startDispatch, DEFAULT_DISPATCH_URL } from "./dispatch.js";
+import { accumulateUsage, carriesItemId, llmOutputUsage, remember, reportReplyUsage } from "./usage.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
@@ -11,6 +11,67 @@ import path from "node:path";
 // a full replacement of event.params with _meta.winch set unconditionally on
 // every winch tool call. A call without a resolvable session/agent returns
 // undefined and is refused by the server; the model cannot supply identity.
+// scheduleSessionTurn only commits for bundled plugins; an npm adapter wakes
+// by starting a one-shot agent session through the CLI. The gateway's own
+// argv[1] is the internal dist entry, which has no `agent` subcommand, so
+// resolve the package's CLI shim beside it.
+function buildWake({ cfg, logger }) {
+  const candidates = [
+    cfg.dispatchOpenclawBin,
+    path.resolve(path.dirname(process.argv[1] ?? ""), "..", "openclaw.mjs"),
+    "/opt/homebrew/bin/openclaw",
+  ].filter(Boolean);
+  const entry = candidates.find((c) => { try { return existsSync(c); } catch { return false; } }) ?? candidates[0];
+  return ({ agent, message, sessionKey }) => {
+    const tryOnce = () =>
+      new Promise((resolve, reject) => {
+        const args = [
+          entry,
+          "agent",
+          "--agent", agent,
+          "--session-key", `agent:${agent}:winch:${sessionKey ?? message}`,
+          "--message", message,
+        ];
+        // The gateway marks its own env; a child that inherits the
+        // service markers exits before doing any work.
+        const env = { ...process.env };
+        for (const key of [
+          "OPENCLAW_LAUNCHD_LABEL",
+          "OPENCLAW_SERVICE_KIND",
+          "OPENCLAW_SERVICE_MARKER",
+          "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
+          "OPENCLAW_SYSTEMD_UNIT",
+          "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
+          "OPENCLAW_WINDOWS_TASK_NAME",
+        ]) delete env[key];
+        const child = spawn(process.execPath, args, {
+          detached: true,
+          stdio: ["ignore", "ignore", "pipe"],
+          env,
+        });
+        let stderr = "";
+        child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
+        child.on("error", reject);
+        child.on("exit", (code) =>
+          code === 0 ? resolve() : reject(new Error(`exit ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-2).join(" | ")}` : ""}`))
+        );
+        child.unref();
+      });
+    return (async () => {
+      let last;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await tryOnce();
+        } catch (e) {
+          last = e;
+          await new Promise((r) => setTimeout(r, 5000));
+        }
+      }
+      throw last;
+    })();
+  };
+}
+
 export default definePluginEntry({
   id: "winch",
   name: "Winch",
@@ -57,27 +118,63 @@ export default definePluginEntry({
     // Only sessions that have made a winch call are bound to an item, so only
     // those carry usage the server can attribute.
     const engaged = new Set();
+    // Per-run token sums from llm_output; flushed at agent_end (once per run)
+    // and on reply_payload_sending as a fallback, gated on engagement.
+    const runs = new Map();
     if (typeof api.on === "function") {
       api.on("before_tool_call", (event, ctx) => {
         const stamp = buildWinchMeta(event, ctx, harness, consumerId, executorId);
         if (stamp && carriesItemId(stamp.params)) remember(engaged, stamp.params._meta.winch.session);
         return stamp;
       });
-      // One usage snapshot per run arrives on reply_payload_sending. The hook
-      // returns nothing so the payload is delivered unchanged.
-      api.on("reply_payload_sending", (event) => {
-        const session = event?.sessionKey ?? event?.usageState?.sessionId ?? event?.runId;
-        if (!engaged.has(session)) return;
+      api.on("llm_output", (event, ctx) => {
+        const snap = llmOutputUsage(event, ctx);
+        if (snap) accumulateUsage(runs, snap);
+      });
+      const flush = (session, event) => {
+        if (!session || !engaged.has(session)) return;
         reportReplyUsage({
           event,
+          runs,
           harness,
           baseUrl: process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
           token: process.env.WINCH_DISPATCH_TOKEN,
           logger: api.logger,
         });
+      };
+      api.on("agent_end", (event, ctx) => {
+        flush(ctx?.sessionKey ?? event?.sessionKey ?? null, { runId: event?.runId ?? ctx?.runId ?? null });
+      });
+      // Fires on agent-command replies too, but without usageState there; kept
+      // as the inbound-path fallback where the host does attach a snapshot.
+      // The hook returns nothing so the payload is delivered unchanged.
+      api.on("reply_payload_sending", (event) => {
+        flush(event?.sessionKey ?? event?.usageState?.sessionId ?? event?.runId ?? null, event);
       });
     } else {
       api.logger.warn("winch: api.on unavailable; identity and usage hooks not registered");
+    }
+
+    // Wake + route must exist at register() time: the HTTP listener binds
+    // after plugin registration, and service start runs too late to attach
+    // a new route. The service below only owns the reconcile loop. The guard
+    // dedupes receiver-vs-recover wakes and settles each admission on exit;
+    // both paths share it (plus `started`) so the pump/recover race sees one
+    // live child per admission.
+    const started = new Map();
+    const wake = buildWake({ cfg, logger: api.logger });
+    let gatedWake = wake;
+    if (cfg.dispatchEnabled !== false && typeof api.registerHttpRoute === "function") {
+      const bearer = process.env.WINCH_WEBHOOK_BEARER;
+      if (bearer) {
+        const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
+        gatedWake = createWakeGuard(wake, {
+          settle: (admissionId) => void postSettle({ baseUrl, admissionId, consumerId, bearer, logger: api.logger }),
+        });
+        registerReceiver({ api, bearer, wake: gatedWake, started, logger: api.logger });
+      } else {
+        api.logger.warn("winch: dispatch needs WINCH_WEBHOOK_BEARER; receiver not registered");
+      }
     }
 
     let dispatch = null;
@@ -89,65 +186,7 @@ export default definePluginEntry({
             api.logger.info("winch: dispatch disabled by config");
             return;
           }
-          // scheduleSessionTurn only commits for bundled plugins; an npm
-          // adapter wakes by starting a one-shot agent session through the CLI.
-          // The gateway's own argv[1] is the internal dist entry, which has no
-          // `agent` subcommand, so resolve the package's CLI shim beside it.
-          const candidates = [
-            cfg.dispatchOpenclawBin,
-            path.resolve(path.dirname(process.argv[1] ?? ""), "..", "openclaw.mjs"),
-            "/opt/homebrew/bin/openclaw",
-          ].filter(Boolean);
-          const entry = candidates.find((c) => { try { return existsSync(c); } catch { return false; } }) ?? candidates[0];
-          const wake = ({ agent, message, sessionKey }) => {
-            const tryOnce = () =>
-              new Promise((resolve, reject) => {
-                const args = [
-                  entry,
-                  "agent",
-                  "--agent", agent,
-                  "--session-key", `agent:${agent}:winch:${sessionKey ?? message}`,
-                  "--message", message,
-                ];
-                // The gateway marks its own env; a child that inherits the
-                // service markers exits before doing any work.
-                const env = { ...process.env };
-                for (const key of [
-                  "OPENCLAW_LAUNCHD_LABEL",
-                  "OPENCLAW_SERVICE_KIND",
-                  "OPENCLAW_SERVICE_MARKER",
-                  "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
-                  "OPENCLAW_SYSTEMD_UNIT",
-                  "OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER",
-                  "OPENCLAW_WINDOWS_TASK_NAME",
-                ]) delete env[key];
-                const child = spawn(process.execPath, args, {
-                  detached: true,
-                  stdio: ["ignore", "ignore", "pipe"],
-                  env,
-                });
-                let stderr = "";
-                child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
-                child.on("error", reject);
-                child.on("exit", (code) =>
-                  code === 0 ? resolve() : reject(new Error(`exit ${code}${stderr ? `: ${stderr.trim().split("\n").slice(-2).join(" | ")}` : ""}`))
-                );
-                child.unref();
-              });
-            return (async () => {
-              let last;
-              for (let attempt = 0; attempt < 3; attempt++) {
-                try {
-                  return await tryOnce();
-                } catch (e) {
-                  last = e;
-                  await new Promise((r) => setTimeout(r, 5000));
-                }
-              }
-              throw last;
-            })();
-          };
-          dispatch = startDispatch({ api, cfg, harness, wake, logger: api.logger });
+          dispatch = startDispatch({ cfg, harness, wake: gatedWake, started, logger: api.logger });
         },
         stop: async () => {
           dispatch?.close();
