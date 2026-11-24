@@ -5,6 +5,12 @@ import assert from "node:assert/strict";
 import { createWinchHooks } from "../../../../../plugins/opencode/winch/hooks.js";
 import { isWinchTool, stampWinchIdentity, stampWinchEvent } from "../../../../../plugins/opencode/winch/identity.js";
 
+// The login session exports WINCH_* to the adapters (launchd user domain);
+// these tests assert the plugin's defaults, so strip them for this process.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("WINCH_")) delete process.env[key];
+}
+
 test("matches winch tools only", () => {
   assert.equal(isWinchTool("winch__backlog_claim"), true);
   assert.equal(isWinchTool("mcp__winch__backlog_get"), true);
