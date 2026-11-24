@@ -176,3 +176,24 @@ test("append rejects a story that belongs to a different epic", async () => {
   });
   assert.equal(res.details.reason, "rejected");
 });
+
+test("plan warns no_route when no dispatch subscription is registered", async () => {
+  const res = await h.call("backlog_plan", { epic: { title: "E" }, stories: [{ title: "S", tasks: [{ title: "t" }] }] });
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.warning.code, "no_route");
+  assert.equal(res.details.warning.harness, null);
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.warning.code, "no_route");
+  assert.equal(h.store.epic.get(body.epic.id).status, "backlog");
+});
+
+test("plan stays silent once any dispatch subscription exists", async () => {
+  h.store.webhook.upsert({
+    topic: "dispatch", id: "e1", harness: "opencode", executorId: "e1",
+    url: "http://127.0.0.1:1/wake", bearer: "b",
+  });
+  const res = await h.call("backlog_plan", { epic: { title: "E" }, stories: [{ title: "S", tasks: [{ title: "t" }] }] });
+  assert.equal(res.details.status, "ok");
+  assert.equal(res.details.warning, undefined);
+  assert.equal(JSON.parse(res.content[0].text).warning, undefined);
+});

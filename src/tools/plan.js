@@ -1,6 +1,6 @@
 // plan.js — create and reshape the plan: plan, append, drop, restore.
 import { addDep } from "../deps.js";
-import { ok, err } from "./shared.js";
+import { ok, err, noSubscriptionWarning } from "./shared.js";
 
 export function createPlanTools({ store, logger }) {
   return {
@@ -82,9 +82,11 @@ export function createPlanTools({ store, logger }) {
           }
         }
         logger?.info?.(`backlog: ${identity.harness}:${identity.agent} planned ${epic.id} (${flat.length} tasks)`);
+        const warning = noSubscriptionWarning(store);
+        if (warning) logger?.warn?.(`backlog: ${warning.message}`);
         return ok(
-          JSON.stringify({ epic: { id: epic.id, title: epic.title }, stories, dependencies }),
-          { status: "ok", agentId: identity.agent, epicId: epic.id, tasks: flat.length }
+          JSON.stringify({ epic: { id: epic.id, title: epic.title }, stories, dependencies, ...(warning ? { warning } : {}) }),
+          { status: "ok", agentId: identity.agent, epicId: epic.id, tasks: flat.length, ...(warning ? { warning } : {}) }
         );
       } catch (e) {
         // The epic is the root; deleting it cascades everything written under it.

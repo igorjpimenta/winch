@@ -1,6 +1,9 @@
 // shared.js — the pieces every tool handler needs: result shapes, note
 // clamping, and the store-derived handoff text.
 
+import { HUMAN_HARNESS } from "../reserved.js";
+import { consumersFor } from "../webhook/delivery.js";
+
 export function ok(text, details) {
   return { content: [{ type: "text", text }], details };
 }
@@ -24,6 +27,43 @@ export function toMcpResult(res) {
 export function clampNote(s, max = 2000) {
   if (typeof s !== "string") return null;
   return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+// no_route: dispatch only offers admissions to harnesses that have an enabled
+// subscription (the pump's `reachable` set), and delivery fans out through the
+// same `consumersFor` predicate — so an assignment whose harness matches no
+// subscription can never be woken, however healthy the dispatch server looks.
+// The reserved human harness never routes by design, so it never warns.
+export function noRouteWarning(store, harness) {
+  if (!harness || harness === HUMAN_HARNESS) return null;
+  if (consumersFor(store, harness).length > 0) return null;
+  return {
+    code: "no_route",
+    harness,
+    message:
+      `no enabled dispatch subscription matches harness "${harness}"; ` +
+      `this assignment is ready but unroutable. Register a receiver first: ` +
+      `winch webhook register --topic dispatch --harness ${harness} --url <receiver-url> --bearer <token> ` +
+      `or run the harness plugin with WINCH_EXECUTOR_ID + WINCH_WEBHOOK_BEARER ` +
+      `(WINCH_DISPATCH_URL must match the port winch webhook serve is listening on, default 38293).`,
+  };
+}
+
+// Plan-time variant: nothing is assigned yet, but every wake the plan will
+// produce (assignment, epic-creator fan-out) needs at least one subscription
+// to exist. With zero subscriptions the whole pipeline is inert.
+export function noSubscriptionWarning(store) {
+  if (store.webhook.harnesses({ topic: "dispatch" }).length > 0) return null;
+  return {
+    code: "no_route",
+    harness: null,
+    message:
+      `no dispatch subscriptions are registered; assigned rows will queue but nothing can deliver a wake. ` +
+      `Register a receiver first: ` +
+      `winch webhook register --topic dispatch --harness <harness> --url <receiver-url> --bearer <token> ` +
+      `or run the harness plugin with WINCH_EXECUTOR_ID + WINCH_WEBHOOK_BEARER ` +
+      `(WINCH_DISPATCH_URL must match the port winch webhook serve is listening on, default 38293).`,
+  };
 }
 
 // Artifacts upstream tasks recorded on this story: addArtifact events,

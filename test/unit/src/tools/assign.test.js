@@ -117,3 +117,78 @@ test("clearing a story assignee is rejected and closed stories refuse assignment
   const missing = await handle("backlog_assign", { id: "STORY-nope", agent: "tester" }, PLANNER);
   assert.equal(missing.details.reason, "not_found");
 });
+
+function registerDispatch(harness, { state = null } = {}) {
+  const row = store.webhook.upsert({
+    topic: "dispatch", id: `e-${harness}`, harness, executorId: `e-${harness}`,
+    url: `http://127.0.0.1:1/wake-${harness}`, bearer: "b",
+  });
+  if (state === "disabled") store.webhook.disable({ topic: "dispatch", id: row.id });
+  return row;
+}
+
+test("assign warns no_route when no dispatch subscription matches the harness", async () => {
+  const task = seed();
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning.code, "no_route");
+  assert.equal(r.details.warning.harness, "openclaw");
+  const body = JSON.parse(r.content[0].text);
+  assert.equal(body.ok, true);
+  assert.equal(body.warning.code, "no_route");
+  assert.equal(store.task.get(task.id).status, "ready");
+});
+
+test("assign stays silent when the harness has an enabled subscription", async () => {
+  registerDispatch("openclaw");
+  const task = seed();
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning, undefined);
+  assert.equal(JSON.parse(r.content[0].text).warning, undefined);
+});
+
+test("a subscription for another harness still warns no_route", async () => {
+  registerDispatch("opencode");
+  const task = seed();
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning.code, "no_route");
+  assert.equal(r.details.warning.harness, "openclaw");
+});
+
+test("a disabled subscription does not count as a route", async () => {
+  registerDispatch("openclaw", { state: "disabled" });
+  const task = seed();
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning.code, "no_route");
+});
+
+test("human assignments never warn — human work does not route", async () => {
+  const task = seed();
+  const r = await handle("backlog_assign", { id: task.id, agent: "human" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning, undefined);
+  assert.equal(store.task.get(task.id).assignee_harness, "human_in_the_loop");
+});
+
+test("an assignment that does not enqueue (in_progress no-op) does not warn", async () => {
+  const task = seed({ status: "ready", assigned: "tester" });
+  await handle("backlog_claim", {}, WORKER);
+  const r = await handle("backlog_assign", { id: task.id, agent: "tester" }, PLANNER);
+  assert.equal(r.details.status, "ok");
+  assert.equal(r.details.warning, undefined);
+});
+
+test("story assignment warns no_route only when it moves the story to ready", async () => {
+  const epic = store.epic.create({ title: "E-route", status: "in_progress" });
+  const backlog = store.story.create({ epicId: epic.id, title: "S-route", status: "backlog" });
+  const inProgress = store.story.create({ epicId: epic.id, title: "S-live", status: "in_progress" });
+  const warned = await handle("backlog_assign", { id: backlog.id, agent: "tester" }, PLANNER);
+  assert.equal(warned.details.status, "ok");
+  assert.equal(warned.details.warning.code, "no_route");
+  const silent = await handle("backlog_assign", { id: inProgress.id, agent: "tester" }, PLANNER);
+  assert.equal(silent.details.status, "ok");
+  assert.equal(silent.details.warning, undefined);
+});

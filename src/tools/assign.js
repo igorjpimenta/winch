@@ -4,7 +4,7 @@
 // stamped from the caller's declared transport identity, so an assignment can
 // never name an agent without saying which harness it belongs to. The reserved
 // agent `human` gets the reserved harness `human_in_the_loop` instead.
-import { ok, err } from "./shared.js";
+import { ok, err, noRouteWarning } from "./shared.js";
 
 export function createAssignTools({ store, logger }) {
   return {
@@ -38,9 +38,13 @@ export function createAssignTools({ store, logger }) {
             note: `assign ${assigned ?? "nobody"}`,
           });
           logger?.info?.(`backlog: ${qualified} assigned ${story.id} -> ${assigned ?? "nobody"}`);
+          // Wake signal only when the write actually enqueued: routesForEvent
+          // admits story.assigned solely from ready.
+          const warning = updated.status === "ready" ? noRouteWarning(store, updated.assignee_harness) : null;
+          if (warning) logger?.warn?.(`backlog: ${warning.message}`);
           return ok(
-            JSON.stringify({ ok: true, story: { id: updated.id, status: updated.status, assigned: updated.assignee_agent, capabilities: updated.capabilities } }),
-            { status: "ok", level: "story", id: updated.id, assigned: updated.assignee_agent, agent: identity.agent }
+            JSON.stringify({ ok: true, story: { id: updated.id, status: updated.status, assigned: updated.assignee_agent, capabilities: updated.capabilities }, ...(warning ? { warning } : {}) }),
+            { status: "ok", level: "story", id: updated.id, assigned: updated.assignee_agent, agent: identity.agent, ...(warning ? { warning } : {}) }
           );
         } catch (e) {
           return err(`backlog_assign failed: ${e?.message}`, "rejected", { id: story.id });
@@ -63,9 +67,13 @@ export function createAssignTools({ store, logger }) {
           capabilities: args?.capabilities,
         });
         logger?.info?.(`backlog: ${qualified} assigned ${task.id} -> ${updated.assignee_agent ?? "nobody"}`);
+        // Wake signal only when the write actually enqueued: routesForEvent
+        // admits task.assigned solely from ready.
+        const warning = updated.status === "ready" ? noRouteWarning(store, updated.assignee_harness) : null;
+        if (warning) logger?.warn?.(`backlog: ${warning.message}`);
         return ok(
-          JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, assigned: updated.assignee_agent, capabilities: updated.capabilities } }),
-          { status: "ok", taskId: updated.id, assigned: updated.assignee_agent, agent: identity.agent }
+          JSON.stringify({ ok: true, task: { id: updated.id, status: updated.status, assigned: updated.assignee_agent, capabilities: updated.capabilities }, ...(warning ? { warning } : {}) }),
+          { status: "ok", taskId: updated.id, assigned: updated.assignee_agent, agent: identity.agent, ...(warning ? { warning } : {}) }
         );
       } catch (e) {
         return err(`backlog_assign failed: ${e?.message}`, "rejected", { taskId: task.id });

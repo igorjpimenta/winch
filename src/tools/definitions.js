@@ -35,7 +35,8 @@ export const TOOL_DEFS = [
         "`backlog_append`, unassigned, so the planner can route them — use story assignment when the breakdown is not known at plan time. " +
         "Refuses to reassign a task already in progress by someone else. Passing `agent: null` or \"\" clears it. " +
         "The reserved agent `human` assigns human work with the reserved harness `human_in_the_loop`. " +
-        "Optional `capabilities` replaces the item's capability tags.",
+        "Optional `capabilities` replaces the item's capability tags. " +
+        "A successful result may carry `warning.code: \"no_route\"` when no enabled dispatch subscription matches the harness — the row is ready but will not wake until a receiver is registered.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -91,7 +92,8 @@ export const TOOL_DEFS = [
         "protocols a demand — the spec goes INTO the records (task description, story acceptance, capability tags), because a " +
         "worker receives only a task id and reads the record itself. Tasks land `backlog`; assigning one moves it to `ready`. Use " +
         "`backlog_assign`. `dependsOn` references other tasks in the same plan by key (default `s<story>t<task>`, zero-based) " +
-        "and may only point backward, so the plan is acyclic by construction. All-or-nothing: an invalid key rolls back the plan.",
+        "and may only point backward, so the plan is acyclic by construction. All-or-nothing: an invalid key rolls back the plan. " +
+        "A successful result may carry `warning.code: \"no_route\"` when no dispatch subscription is registered at all — nothing can wake until a receiver is.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
