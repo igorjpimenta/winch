@@ -37,7 +37,6 @@ test("resolveConfig with nothing declared returns the documented defaults", () =
   assert.equal(cfg.dispatchPort, 38293);
   assert.equal(cfg.webhookTimeoutMs, 3000);
   assert.equal(cfg.eventHistoryLimit, 200);
-  assert.equal(cfg.maxActivePerAgent, 2);
   assert.equal(cfg.dispatchWakeMax, 8);
   assert.equal(cfg.candidates, 5);
   assert.ok(Object.keys(CONFIG_DEFAULTS).length >= 15, "defaults table covers every knob");

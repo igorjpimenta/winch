@@ -69,40 +69,23 @@ test("blocked tasks appear in blocked, never in claimable sets", () => {
   assert.equal(m.blocked[0].id, task.id);
 });
 
-// ───────────────────────────────────────────────────── load-aware routing
-test("busy assignee's claimable work defers; free assignee still routes", () => {
-  seed({ assigned: "scout", assigneeHarness: "test" }); // free agent's claimable task
-  // builder: two in_progress tasks (at the cap) + one claimable
+test("every assigned claimable task routes, however loaded the assignee is", () => {
+  seed({ assigned: "scout", assigneeHarness: "test" });
   const busy = seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
   seed({ assigned: "builder", assigneeHarness: "test", taskStatus: "in_progress" });
   seed({ assigned: "builder", assigneeHarness: "test" });
-  // second busy task needs its own story/epic — seed() makes one each ✓
   const m = tick(store);
 
   const routedAgents = m.routed.map((r) => r.assigned);
-  assert.ok(routedAgents.includes("scout"), "free agent routes");
-  assert.ok(!routedAgents.includes("builder"), "busy agent defers");
-
-  assert.equal(m.deferred.length, 1);
-  assert.equal(m.deferred[0].assigned, "builder");
-  assert.equal(m.deferred[0].activeCount, 2);
+  assert.ok(routedAgents.includes("scout"));
+  assert.ok(routedAgents.includes("builder"), "a loaded assignee still hears about claimable work");
   assert.ok(busy.task.id);
-});
-
-test("agent under the cap still routes", () => {
-  seed({ assigned: "lens", assigneeHarness: "test", taskStatus: "in_progress" }); // 1 active < 2
-  seed({ assigned: "lens", assigneeHarness: "test" });
-  const m = tick(store);
-  assert.equal(m.routed.length, 1);
-  assert.equal(m.routed[0].assigned, "lens");
-  assert.equal(m.deferred.length, 0);
 });
 
 test("human work is listed but never routed to an agent", () => {
   const { task } = seed({ assigned: "human", taskStatus: "ready" });
   const m = tick(store);
   assert.deepEqual(m.routed, []);
-  assert.deepEqual(m.deferred, []);
   assert.equal(m.human.length, 1);
   assert.equal(m.human[0].taskId, task.id);
   assert.equal(m.human[0].assigned, "human");

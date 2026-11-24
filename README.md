@@ -400,8 +400,7 @@ through unchanged. History and live rows share one envelope shape.
 
 Delivery-dynamics notes the envelopes will not tell you: heartbeats renew the
 claim lease (only silence gets swept); an unmerged close dissolves its gate
-(late approvals answer `gate_dissolved`); starvation lives in the watcher
-manifest (`deferred` list), not the envelopes; a disputed
+(late approvals answer `gate_dissolved`); a disputed
 completion is a new ticket linked by dep edge with a `supersedes: ITM-x` note,
 never a rewrite of history.
 
@@ -473,7 +472,6 @@ refuse as likely typos, unknown meta keys are ignored for forward compat.
 | Dispatch management auth | `WINCH_DISPATCH_TOKEN` | unset (loopback) |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | DB path | `WINCH_DB` | `~/.winch/store.sqlite` |
-| Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits (tick / candidates / blocked list) | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
 | Note caps (progress / result / reason / artifact) | `WINCH_NOTE_{PROGRESS,RESULT,REASON,ARTIFACT}_LIMIT` | 2000 / 4000 / 1000 / 500 |

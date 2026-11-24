@@ -122,6 +122,5 @@ Claim leases, attempt caps, and gate checks:
 - **Dependencies**: forward-only, cycle-checked. Cancelled and dropped deps count as resolved; a dependency-wait parent returns to `ready` when every dep is terminal.
 - **Gates**: `backlog_block` opens a gate when `gateType` is given; `backlog_resume` returns it to `ready` and clears the assignment. A caller that names another actor is refused. A block with `blockedBy` and no `gateType` is a dependency wait, not a gate.
 - **Close**: closing the last task closes its story; closing the last story closes the epic and wakes the planner.
-- **Starvation**: lives in the watcher manifest (deferred list, per-task activeCount).
 - **Lease sweeper**: claims self-heal on next tick when the lease expires without heartbeats.
 - **Fencing**: wake-owned attempts carry `ownerInstance` and `leaseEpoch`; `backlog_update`, `backlog_done` and `backlog_block` refuse a missing or stale epoch, and the relay promotes a standby with a new epoch when the active lease expires.
