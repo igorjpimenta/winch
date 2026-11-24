@@ -29,7 +29,7 @@ function processCommand(pid) {
   }
 }
 
-export function createWakeRunner({ logger = console, stateDir = wakeStateDir() } = {}) {
+export function createWakeRunner({ logger = console, stateDir = wakeStateDir(), dispatchUrl = null, bearer = null, consumerId = null } = {}) {
   // Detached children lead their own process group; kill the group so a
   // reaped turn's tool and MCP subprocesses go with it.
   const reap = (pid) => {
@@ -39,7 +39,7 @@ export function createWakeRunner({ logger = console, stateDir = wakeStateDir() }
 
   const recordPath = (ownerPid, childPid) => path.join(stateDir, `wake-${ownerPid}-${childPid}.json`);
 
-  const wake = ({ agent, message }) =>
+  const spawnWake = ({ agent, message }) =>
     new Promise((resolve, reject) => {
       const bin = process.env.OPENCODE_BIN || "opencode";
       const child = spawn(bin, ["run", "--agent", agent, message], {
@@ -73,6 +73,35 @@ export function createWakeRunner({ logger = console, stateDir = wakeStateDir() }
       // event will not dispatch on an otherwise empty loop.
       child.unref();
     });
+
+  // Core owns the wake window: it counts delivered-but-unsettled children and
+  // refuses to exceed WINCH_DISPATCH_WAKE_MAX. This map is the fail-safe for
+  // the pump/recover race — one live child per key, never a queue.
+  const inflight = new Set();
+
+  const settleUrl = dispatchUrl ? `${String(dispatchUrl).replace(/\/+$/, "")}/dispatch/notify` : null;
+
+  // The window frees only when the child reports its exit.
+  const settle = (admissionId) => {
+    if (!admissionId || !settleUrl) return;
+    const headers = { "content-type": "application/json" };
+    if (bearer) headers.authorization = `Bearer ${bearer}`;
+    void fetch(settleUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ type: "settle", admissionId, consumerId }),
+      signal: AbortSignal.timeout(3000),
+    }).catch((err) => logger?.warn?.(`winch: settle ${admissionId} failed: ${err?.message ?? err}`));
+  };
+
+  const wake = ({ agent, message, key = null, admissionId = null }) => {
+    if (key && inflight.has(key)) return Promise.resolve({ deduped: true });
+    if (key) inflight.add(key);
+    return spawnWake({ agent, message }).finally(() => {
+      if (key) inflight.delete(key);
+      settle(admissionId);
+    });
+  };
 
   // Kill wake children whose spawning owner is no longer alive. Called at
   // dispatch startup and on a sweep timer; never on close, because a child
@@ -112,18 +141,19 @@ function consumerIdFor(harness, cfg = {}) {
 }
 
 function start({ cfg = {}, harness, logger }) {
-  const runner = createWakeRunner({ logger, stateDir: cfg.wakeStateDir });
-  runner.reapOrphans();
-
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
   const consumerId = consumerIdFor(harness, cfg);
   const bearer = process.env.WINCH_WEBHOOK_BEARER;
+  const dispatchUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
+  const runner = createWakeRunner({ logger, stateDir: cfg.wakeStateDir, dispatchUrl, bearer, consumerId });
+  runner.reapOrphans();
+
   if (!executorId || !bearer) {
     logger?.warn?.("winch: dispatch needs WINCH_EXECUTOR_ID and WINCH_WEBHOOK_BEARER; receiver disabled");
     return null;
   }
   const dispatch = startDispatch({
-    baseUrl: process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL,
+    baseUrl: dispatchUrl,
     harness,
     consumerId,
     executorId,

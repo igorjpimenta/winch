@@ -182,6 +182,40 @@ export function resumePrompt(row) {
   return `Resume ${taskId} attempt ${attemptId} leaseEpoch ${leaseEpoch}. You already own this task. Do not call backlog_claim. Call backlog_update with taskId "${taskId}", attemptId "${attemptId}", leaseEpoch ${leaseEpoch}, heartbeat true. If it returns stale_claim, stop. Then continue from the existing brief.`;
 }
 
+// Core owns the wake window (delivered-but-unsettled children, capped by
+// WINCH_DISPATCH_WAKE_MAX). This guard is the fail-safe for the pump/recover
+// race: one live child per admission or session key, and every exit settles
+// the admission so core can release the next wake.
+export function createWakeGuard(wake, { settle = null } = {}) {
+  const keyFor = (payload) =>
+    payload?.admissionId ? `start:${payload.admissionId}`
+    : payload?.sessionKey ? `resume:${payload.sessionKey}`
+    : null;
+  const inflight = new Set();
+  return (payload) => {
+    const key = keyFor(payload);
+    if (key && inflight.has(key)) return Promise.resolve({ deduped: true });
+    if (key) inflight.add(key);
+    return Promise.resolve()
+      .then(() => wake(payload))
+      .finally(() => {
+        if (key) inflight.delete(key);
+        if (payload?.admissionId) settle?.(payload.admissionId);
+      });
+  };
+}
+
+export function postSettle({ baseUrl, admissionId, consumerId = null, bearer = null, logger = null, timeoutMs = 3000 }) {
+  const headers = { "content-type": "application/json" };
+  if (bearer) headers.authorization = `Bearer ${bearer}`;
+  return fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/notify`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ type: "settle", admissionId, consumerId }),
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch((err) => logger?.warn?.(`winch: settle ${admissionId} failed: ${err?.message ?? err}`));
+}
+
 export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? process.env.WINCH_HARNESS ?? "openclaw", wake, logger = console }) {
   if (cfg.dispatchEnabled === false) return null;
   const executorId = cfg.winchExecutorId ?? process.env.WINCH_EXECUTOR_ID;
@@ -194,8 +228,11 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
   const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
   const publicBaseUrl = cfg.dispatchPublicBaseUrl ?? process.env.WINCH_DISPATCH_PUBLIC_BASE_URL ?? "http://127.0.0.1:18789";
   const started = new Map();
+  const gatedWake = createWakeGuard(wake, {
+    settle: (admissionId) => void postSettle({ baseUrl, admissionId, consumerId, bearer, logger }),
+  });
 
-  registerReceiver({ api, bearer, wake, started, logger });
+  registerReceiver({ api, bearer, wake: gatedWake, started, logger });
 
   let fresh = true;
   const run = async () => {
@@ -215,7 +252,7 @@ export function startDispatch({ api, cfg = {}, harness = cfg.winchHarness ?? pro
       return;
     }
     try {
-      await recoverOnce({ baseUrl, harness, consumerId, executorId, wake, started, logger });
+      await recoverOnce({ baseUrl, harness, consumerId, executorId, wake: gatedWake, started, logger });
     } catch (err) {
       logger?.warn?.(`winch: dispatch recover failed: ${err?.message ?? err}`);
     }
