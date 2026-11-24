@@ -22,7 +22,6 @@ overrides starts with dispatch enabled.
 | Dispatch management auth | `WINCH_DISPATCH_TOKEN` | unset (loopback) |
 | MCP HTTP port | `WINCH_MCP_HTTP_PORT` | 38292 |
 | DB path | `WINCH_DB` | `~/.winch/store.sqlite` |
-| Wake routing cap | `WINCH_MAX_ACTIVE_PER_AGENT` | 2 |
 | Scan limits | `WINCH_SCAN_LIMIT` / `WINCH_CANDIDATES` / `WINCH_BLOCKED_LIMIT` | 50 / 5 / 20 |
 | Dep cycle-check cap | `WINCH_DFS_NODES` | 500 nodes |
 | Note caps | `WINCH_NOTE_{PROGRESS,RESULT,REASON,ARTIFACT}_LIMIT` | 2000 / 4000 / 1000 / 500 |

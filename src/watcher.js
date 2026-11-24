@@ -15,19 +15,13 @@ import { HUMAN_AGENT } from "./reserved.js";
 import { createStore } from "./store/index.js";
 import { readyTasks } from "./ready-queue.js";
 
-// An agent this busy should finish before it hears about more work. Keeps the
-// wake queue from stacking claims on an already-loaded assignee; the deferred
-// list is the starvation signal.
-export const MAX_ACTIVE_PER_AGENT = 2;
-
 /**
- * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], deferred:object[], blocked:object[], gates:object[]}}
+ * @returns {{ts:number, swept:string[], resolved:string[], waits:object[], routed:object[], human:object[], blocked:object[], gates:object[]}}
  *   swept    — lease-expired tasks the sweep requeued or escalated this tick
  *   resolved — dependency-wait tasks returned to ready this tick
  *   waits    — gate-waiting rows written this tick (24h/72h age thresholds, one per gate per level)
- *   routed   — claimable AND assigned AND assignee under the active cap: the cron wakes `assigned`
+ *   routed   — claimable AND assigned: the cron wakes `assigned`
  *   human    — claimable human work: ready for a person, never woken through an agent harness
- *   deferred — claimable AND assigned BUT assignee at MAX_ACTIVE: never woken (starvation metric)
  */
 export function tick(store, { config: override = null } = {}) {
   const cfg = override ?? store.config;
@@ -58,18 +52,8 @@ export function tick(store, { config: override = null } = {}) {
     .filter((t) => t.gate_type)
     .sort((a, b) => (a.blocked_at ?? 0) - (b.blocked_at ?? 0))
     .map((t) => ({ id: t.id, title: t.title, gate_type: t.gate_type, blocked_at: t.blocked_at, assigned: t.assignee_agent }));
-  const active = new Map();
-  for (const t of store.item.list({ kind: "task", status: "in_progress" })) {
-    if (!t.assignee_agent) continue;
-    active.set(t.assignee_agent, (active.get(t.assignee_agent) ?? 0) + 1);
-  }
   const human = claimable.filter((c) => c.assigned === HUMAN_AGENT);
-  const routed = claimable.filter(
-    (c) => c.assigned && c.assigned !== HUMAN_AGENT && (active.get(c.assigned) ?? 0) < cfg.maxActivePerAgent
-  );
-  const deferred = claimable
-    .filter((c) => c.assigned && c.assigned !== HUMAN_AGENT && (active.get(c.assigned) ?? 0) >= cfg.maxActivePerAgent)
-    .map((c) => ({ ...c, activeCount: active.get(c.assigned) }));
+  const routed = claimable.filter((c) => c.assigned && c.assigned !== HUMAN_AGENT);
 
   return {
     ts: nowTs,
@@ -78,7 +62,6 @@ export function tick(store, { config: override = null } = {}) {
     waits,
     routed,
     human,
-    deferred,
     blocked,
     gates,
   };
