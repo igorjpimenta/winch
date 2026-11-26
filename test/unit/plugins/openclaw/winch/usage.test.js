@@ -1,7 +1,7 @@
 // usage.test.js — pure mapping and HTTP shape for the openclaw usage reporter.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { carriesItemId, usageFromReplyEvent, usageBody, postUsage } from "../../../../../plugins/openclaw/winch/usage.js";
+import { accumulateUsage, carriesItemId, llmOutputUsage, reportReplyUsage, runUsageBody, usageFromReplyEvent, usageBody, postUsage } from "../../../../../plugins/openclaw/winch/usage.js";
 
 test("maps a reply usage snapshot to winch usage", () => {
   const event = {
@@ -79,4 +79,87 @@ test("carriesItemId mirrors the server's item-binding keys", () => {
   assert.equal(carriesItemId({ admissionId: "ADM-1" }), false);
   assert.equal(carriesItemId({ id: "   " }), false);
   assert.equal(carriesItemId(null), false);
+});
+
+test("llmOutputUsage maps an attempt to a run-identified snapshot", () => {
+  const snap = llmOutputUsage(
+    { runId: "run_9", resolvedRef: "anthropic/claude-sonnet-4-6", usage: { input: 10, output: 5, cacheRead: 2 } },
+    { sessionKey: "agent:main:winch:ITM-1", agentId: "main" },
+  );
+  assert.deepEqual(snap, {
+    runId: "run_9",
+    agent: "main",
+    session: "agent:main:winch:ITM-1",
+    usage: { model: "anthropic/claude-sonnet-4-6", tokensIn: 10, tokensOut: 5, cacheRead: 2 },
+  });
+});
+
+test("llmOutputUsage falls back to provider/model and rejects unattributable attempts", () => {
+  const snap = llmOutputUsage(
+    { runId: "r", provider: "openai", model: "gpt-5.4", usage: { input: 1 } },
+    { sessionKey: "s", agentId: "a" },
+  );
+  assert.equal(snap.usage.model, "openai/gpt-5.4");
+  assert.equal(llmOutputUsage({ runId: "r", usage: {} }, { sessionKey: "s", agentId: "a" }), null);
+  assert.equal(llmOutputUsage({ runId: "r", usage: { input: 1 } }, { sessionKey: "s" }), null);
+  assert.equal(llmOutputUsage({ usage: { input: 1 } }, { sessionKey: "s", agentId: "a" }), null);
+  assert.equal(llmOutputUsage(null, null), null);
+});
+
+test("accumulateUsage sums attempts per run and keeps the last model", () => {
+  const runs = new Map();
+  accumulateUsage(runs, { runId: "r1", agent: "main", session: "s", usage: { model: "m1", tokensIn: 10, tokensOut: 2, cacheRead: null } });
+  accumulateUsage(runs, { runId: "r1", agent: "main", session: "s", usage: { model: "m2", tokensIn: 5, tokensOut: 3, cacheRead: 4 } });
+  accumulateUsage(runs, { runId: "r2", agent: "main", session: "s", usage: { model: "m3", tokensIn: 1, tokensOut: 1, cacheRead: null } });
+  assert.deepEqual(runs.get("r1"), { agent: "main", session: "s", usage: { model: "m2", tokensIn: 15, tokensOut: 5, cacheRead: 4 } });
+  assert.equal(runs.size, 2);
+});
+
+test("accumulateUsage evicts oldest runs past the bound", () => {
+  const runs = new Map();
+  for (let i = 0; i < 3; i++) {
+    accumulateUsage(runs, { runId: `r${i}`, agent: "a", session: "s", usage: { model: null, tokensIn: 1, tokensOut: null, cacheRead: null } }, 2);
+  }
+  assert.deepEqual([...runs.keys()], ["r1", "r2"]);
+});
+
+test("runUsageBody keys the flush body with turnRef=runId", () => {
+  const runs = new Map();
+  accumulateUsage(runs, { runId: "r1", agent: "main", session: "agent:main:winch:ITM-1", usage: { model: "m", tokensIn: 7, tokensOut: 1, cacheRead: null } });
+  assert.deepEqual(
+    runUsageBody({ event: { runId: "r1" }, runs, harness: "openclaw" }),
+    { sessionKey: "openclaw:main:agent:main:winch:ITM-1", turnRef: "r1", usage: { model: "m", tokensIn: 7, tokensOut: 1, cacheRead: null } },
+  );
+  assert.equal(runUsageBody({ event: { runId: "nope" }, runs, harness: "openclaw" }), null);
+  assert.equal(runUsageBody({ event: {}, runs, harness: "openclaw" }), null);
+});
+
+test("reportReplyUsage prefers the accumulator and still falls back to usageState", async () => {
+  const posted = [];
+  const fetchImpl = async (url, opts) => { posted.push(JSON.parse(opts.body)); return { ok: true }; };
+  const runs = new Map();
+  accumulateUsage(runs, { runId: "r1", agent: "main", session: "s", usage: { model: "m", tokensIn: 3, tokensOut: 2, cacheRead: null } });
+  const body = reportReplyUsage({
+    event: { runId: "r1", sessionKey: "s", usageState: { agentId: "other", usage: { input: 999, output: 999 } } },
+    runs,
+    harness: "openclaw",
+    baseUrl: "http://127.0.0.1:1",
+    fetchImpl,
+  });
+  assert.equal(body.turnRef, "r1");
+  assert.equal(posted[0].usage.tokensIn, 3);
+
+  const fallback = reportReplyUsage({
+    event: { runId: "r2", sessionKey: "s2", usageState: { agentId: "a", resolvedRef: "m", usage: { input: 1, output: 2 } } },
+    runs,
+    harness: "openclaw",
+    baseUrl: "http://127.0.0.1:1",
+    fetchImpl,
+  });
+  assert.equal(fallback.turnRef, "r2");
+  assert.equal(fallback.sessionKey, "openclaw:a:s2");
+  assert.equal(posted.length, 2);
+
+  assert.equal(reportReplyUsage({ event: {}, runs, harness: "h", baseUrl: "http://127.0.0.1:1", fetchImpl }), null);
+  assert.equal(posted.length, 2);
 });
