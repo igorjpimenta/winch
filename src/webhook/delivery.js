@@ -25,6 +25,12 @@ export function pickConsumer(store, row) {
   return hashPick(consumers, `${row.id}:${row.attempt_no ?? 0}`)?.id ?? null;
 }
 
+// A dead delivery is only terminal when no other consumer can take the attempt;
+// otherwise promoteStranded hands it over on the next pass.
+function hasSuccessor(store, row) {
+  return consumersFor(store, row.harness).some((consumer) => consumer.id !== row.active_consumer_id);
+}
+
 export function wakePayload(row, { at = Date.now(), offerMs = 120000, execution = "active", leaseEpoch = 0 } = {}) {
   return {
     type: "wake",
@@ -63,8 +69,14 @@ function permanent(status) {
   return status >= 400 && status < 500 && status !== 408 && status !== 425 && status !== 429;
 }
 
+// Only the attempt owner gets a delivery. A non-owner has no session to start
+// and cannot settle, so a notice to it would hold a wake-window slot for the
+// whole lease. Ownership moves through promoteStranded, which creates the
+// successor's delivery.
 export function ensureDeliveries(store, row, { at = Date.now() } = {}) {
   const consumers = consumersFor(store, row.harness);
+  const owner = consumers.find((consumer) => consumer.id === row.active_consumer_id);
+  if (!owner) return [];
   const event = row.attempt_no == null ? null : store.dispatchEvent.ensure({
     admissionId: row.id,
     attemptNo: row.attempt_no,
@@ -73,16 +85,14 @@ export function ensureDeliveries(store, row, { at = Date.now() } = {}) {
     payload: wakePayload(row, { at, leaseEpoch: row.lease_epoch ?? 0 }),
     at,
   });
-  for (const consumer of consumers) {
-    store.delivery.ensure({
-      admissionId: row.id,
-      attemptNo: row.attempt_no,
-      consumerId: consumer.id,
-      eventId: event?.id ?? null,
-      at,
-    });
-  }
-  return consumers;
+  store.delivery.ensure({
+    admissionId: row.id,
+    attemptNo: row.attempt_no,
+    consumerId: owner.id,
+    eventId: event?.id ?? null,
+    at,
+  });
+  return [owner];
 }
 
 async function deliverOne(store, delivery, row, { config, logger, at }) {
@@ -103,7 +113,14 @@ async function deliverOne(store, delivery, row, { config, logger, at }) {
     store.delivery.defer(delivery.id, { nextAt: at + 1000, at });
     return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "wake window full" };
   }
-  const execution = row.active_consumer_id === delivery.consumer_id ? "active" : "standby";
+  if (row.active_consumer_id !== delivery.consumer_id) {
+    // Ownership moved after this row was queued; the successor has its own
+    // delivery, so this one must not reach a non-owner.
+    store.delivery.markDead(delivery.id, { error: "not the attempt owner", at });
+    store.delivery.recordAttempt({ deliveryId: delivery.id, attemptNo: delivery.attempts + 1, status: "cancelled", error: "not the attempt owner", at });
+    return { ok: false, consumerId: delivery.consumer_id, status: 0, error: "not the attempt owner" };
+  }
+  const execution = "active";
   const payload = wakePayload(row, {
     offerMs: config.dispatchOfferMs,
     execution,
@@ -200,11 +217,11 @@ export async function deliverDue(store, { config = store.config, logger = null, 
     const row = store.admission.get(admissionId);
     if (row && ["offered", "accepted"].includes(row.status)) {
       const all = store.delivery.allForAttempt(row.id, row.attempt_no);
-      if (all.length && all.every((d) => d.status === "dead")) store.admission.fail(row.id, at);
+      if (all.length && all.every((d) => d.status === "dead") && !hasSuccessor(store, row)) store.admission.fail(row.id, at);
     }
   }
   const exhausted = store.db.prepare(`
-    SELECT q.id
+    SELECT q.id, q.harness, aa.active_consumer_id
       FROM admission_queue q
       JOIN admission_attempts aa ON aa.admission_id=q.id AND aa.ended_at IS NULL
      WHERE q.status IN ('offered','accepted') AND q.ended_at IS NULL
@@ -214,18 +231,22 @@ export async function deliverDue(store, { config = store.config, logger = null, 
                         WHERE d.admission_id=q.id AND d.attempt_no=aa.attempt_no
                           AND d.status != 'dead')
   `).all();
-  for (const row of exhausted) store.admission.fail(row.id, at);
+  for (const row of exhausted) if (!hasSuccessor(store, row)) store.admission.fail(row.id, at);
   return results;
 }
 
 export async function deliverWake(store, row, { config = store.config, logger = null, at = Date.now() } = {}) {
-  const consumers = ensureDeliveries(store, row, { at });
+  promoteStranded(store, { at, config });
+  const current = store.admission.get(row.id) ?? row;
+  const consumers = ensureDeliveries(store, current, { at });
   if (consumers.length === 0) {
-    store.admission.fail(row.id, at);
-    logger?.warn?.(`winch: no dispatch endpoint for ${row.harness}; requeueing ${row.id}`);
+    if (consumersFor(store, current.harness).length === 0) {
+      store.admission.fail(current.id, at);
+      logger?.warn?.(`winch: no dispatch endpoint for ${current.harness}; requeueing ${current.id}`);
+    }
     return { ok: false, delivered: [], failed: [] };
   }
-  const results = await deliverDue(store, { config, logger, at, admissionId: row.id });
+  const results = await deliverDue(store, { config, logger, at, admissionId: current.id });
   const delivered = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
   return { ok: delivered.length > 0, delivered, failed };

@@ -125,11 +125,10 @@ Two more rows matter to the dispatcher:
   not on every replay.
 
 Dispatch is delivered by HTTP, not polled. `202` means the receiver accepted
-the request. Each consumer gets its own delivery row and per-attempt audit row;
-one consumer's failure does not suppress another's retry. The payload marks one
-consumer `execution: "active"` and the rest `"standby"`; only the active
-consumer starts a session. Standby receivers acknowledge and stop. If the
-active route dies or its lease expires, the dispatcher promotes a standby and
+the request. Each attempt is delivered to its owner only, as
+`execution: "active"`, with its own delivery row and per-attempt audit row. The
+other consumers of the harness are not contacted. If the owner's route dies or
+its lease expires, the dispatcher hands the attempt to another consumer and
 bumps `leaseEpoch`.
 
 Planner wakes (`story`, `append`, `review`) require `backlog_accept_wake` with

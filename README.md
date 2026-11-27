@@ -112,10 +112,11 @@ is the single scheduler:
   `story.assigned`, `task.appended` (to the epic creator), and
   `epic.completed` (to the epic creator).
 - It writes each wake to `admission_queue`, creates a stable `dispatch_events`
-  row, one delivery row per consumer, and a per-attempt audit row. The payload
-  names one `execution: "active"` consumer and marks the rest `standby`; only
-  the active consumer starts a session. If it fails or its lease expires, the
-  dispatcher promotes a standby and bumps `leaseEpoch`.
+  row, one delivery row for the attempt's owner, and a per-attempt audit row.
+  Only the owner is delivered to, as `execution: "active"`; the other consumers
+  of the harness are not poked at all. If the owner fails or its lease expires,
+  the dispatcher hands the attempt to another consumer, bumps `leaseEpoch`, and
+  delivers that as active.
 - An offer reserves capacity until it is claimed, closes, or expires. Failed
   deliveries and expired offers requeue with backoff. Planner wakes
   (`story`/`append`/`review`) are one-shot only after `backlog_accept_wake`

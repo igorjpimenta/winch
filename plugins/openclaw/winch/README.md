@@ -6,7 +6,7 @@ OpenClaw companion for [winch](https://github.com/igorjpimenta/winch). Four jobs
    onto every winch MCP tool call, overwriting unconditionally so model-supplied
    meta cannot impersonate an agent.
 2. **Wake receiver** — serves `POST /api/winch/dispatch`, verifies the
-   executor bearer, acknowledges standby deliveries, deduplicates on
+   executor bearer, deduplicates on
    `admissionId + attemptNo`, and starts a one-shot session. Tasks use
    `backlog_claim`; planner wakes must call `backlog_accept_wake` with the
    payload lease before working.
