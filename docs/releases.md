@@ -55,4 +55,3 @@ A new package's packument 404s for a few minutes after the upload returns 202.
   registry tags `latest` whatever `--tag` asks for. An authenticated
   `npm dist-tag` is the only way to move or remove that tag.
 
-Stable releases publish since 2026.11.9.
