@@ -546,6 +546,28 @@ test("the work attempt carries the consumer, and resume follows it", () => {
   assert.equal(recover(store, { harness: "test", mutate: false }).resume.length, 1, "only the operator view sees it");
 });
 
+test("recover re-admits a ready task whose admission expired", async (t) => {
+  const receiver = await wakeReceiver({ status: 202 });
+  t.after(async () => { await receiver.close(); });
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: receiver.url, bearer: "tok" });
+  const { task } = seedAssigned();
+  store.task.update(task.id, { status: "ready", actor: "test" });
+  store.db.prepare("UPDATE admission_queue SET status='expired', ended_at=? WHERE item_id=? AND ended_at IS NULL")
+    .run(Date.now(), task.id);
+  assert.equal(store.admission.queued("test").length, 0, "an expired admission leaves nothing queued");
+
+  const first = recover(store, { harness: "test", consumerId: "a", at: Date.now(), mutate: true });
+  assert.equal(first.start.length, 1);
+  assert.equal(first.start[0].itemId, task.id);
+  assert.equal(first.start[0].status, "offered");
+
+  const again = recover(store, { harness: "test", consumerId: "a", at: Date.now() + 1000, mutate: true });
+  assert.equal(again.start.length, 0, "an already-running admission is not handed over twice");
+  const live = store.db.prepare("SELECT COUNT(*) AS n FROM admission_queue WHERE item_id=? AND ended_at IS NULL").get(task.id).n;
+  assert.equal(live, 1, "one live admission for the task");
+  assert.equal(store.delivery.allForAttempt(first.start[0].admissionId, first.start[0].attemptNo).length, 1);
+});
+
 test("read-only recover does not mutate the queue", () => {
   const { row } = seedAssigned();
   observeEvent(row);

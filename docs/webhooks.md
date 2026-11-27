@@ -311,8 +311,11 @@ status and exits non-zero if any fails.
 
 ## Restart recovery
 
-`POST /dispatch/recover` is a read-only assignment view. The dispatcher owns
-offer, retry and cap mutation, so a consumer cannot re-drive the global queue:
+`POST /dispatch/recover` is the restart path. It hands over offered work and,
+when `mutate` is set, fills free capacity — including re-admitting ready
+assigned work for the harness whose last admission expired, so a restart drains
+the backlog instead of leaving it dormant. Both steps stay inside the harness
+and global caps and the consumer's wake window:
 
     POST /dispatch/recover
     {"harness":"openclaw","consumerId":"openclaw:host","executorId":"openclaw-1"}
