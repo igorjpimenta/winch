@@ -322,7 +322,13 @@ and global caps and the consumer's wake window:
 
 It returns:
 
-- `resume`: assigned `in_progress` work with `task`, `attemptId`,
+- A resume is handed once per attempt per consumer: the server records the
+hand-off and withholds the same attempt until the receiver settles it
+(`{"type":"settle","itemId":"…","attemptId":"…","consumerId":"…"}`) or the
+delivery lease expires. Resumes share the consumer's wake window, so a restart
+cannot spawn a child for every in_progress item at once.
+
+`resume`: assigned `in_progress` work with `task`, `attemptId`,
   `sessionId`, `sessionKey`, `leaseEpoch`, `ownerInstance`, and
   `leaseExpiresAt`. The winning claim records the consumer on the work
   attempt; only that consumer gets its resume. A claim that never named a

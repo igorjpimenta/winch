@@ -173,7 +173,7 @@ export default definePluginEntry({
       if (bearer) {
         const baseUrl = process.env.WINCH_DISPATCH_URL ?? DEFAULT_DISPATCH_URL;
         gatedWake = createWakeGuard(wake, {
-          settle: (admissionId) => void postSettle({ baseUrl, admissionId, consumerId, bearer, logger: api.logger }),
+          settle: (frame) => void postSettle({ baseUrl, ...frame, consumerId, bearer, logger: api.logger }),
         });
         registerReceiver({ api, bearer, wake: gatedWake, started, logger: api.logger });
       } else {

@@ -82,24 +82,24 @@ export function createWakeRunner({ logger = console, stateDir = wakeStateDir(), 
   const settleUrl = dispatchUrl ? `${String(dispatchUrl).replace(/\/+$/, "")}/dispatch/notify` : null;
 
   // The window frees only when the child reports its exit.
-  const settle = (admissionId) => {
-    if (!admissionId || !settleUrl) return;
+  const settle = ({ admissionId = null, itemId = null, attemptId = null } = {}) => {
+    if (!settleUrl || (!admissionId && !itemId)) return;
     const headers = { "content-type": "application/json" };
     if (bearer) headers.authorization = `Bearer ${bearer}`;
     void fetch(settleUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ type: "settle", admissionId, consumerId }),
+      body: JSON.stringify({ type: "settle", admissionId, itemId, attemptId, consumerId }),
       signal: AbortSignal.timeout(3000),
-    }).catch((err) => logger?.warn?.(`winch: settle ${admissionId} failed: ${err?.message ?? err}`));
+    }).catch((err) => logger?.warn?.(`winch: settle ${admissionId ?? itemId} failed: ${err?.message ?? err}`));
   };
 
-  const wake = ({ agent, message, key = null, admissionId = null }) => {
+  const wake = ({ agent, message, key = null, admissionId = null, itemId = null, attemptId = null }) => {
     if (key && inflight.has(key)) return Promise.resolve({ deduped: true });
     if (key) inflight.add(key);
     return spawnWake({ agent, message }).finally(() => {
       if (key) inflight.delete(key);
-      settle(admissionId);
+      settle({ admissionId, itemId, attemptId });
     });
   };
 

@@ -527,6 +527,27 @@ test("four transient failures disable the subscription", () => {
   }
 });
 
+test("a resume is handed once per attempt until it settles", () => {
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
+  const { task, row } = seedAssigned();
+  observeEvent(row);
+  tick(store, { reachable: ["test"] });
+  store.task.claim({ id: task.id, agentId: "worker", harness: "test", session: "s", consumerId: "a" });
+  const attempt = store.db.prepare("SELECT * FROM attempts WHERE item_id=? AND ended_at IS NULL").get(task.id);
+  const config = { ...store.config, dispatchWakeMax: 1 };
+
+  const first = recover(store, { harness: "test", consumerId: "a", config, mutate: true });
+  assert.equal(first.resume.length, 1, "the first recover hands the attempt over");
+  assert.equal(first.start.length, 0);
+
+  const again = recover(store, { harness: "test", consumerId: "a", config, mutate: true });
+  assert.equal(again.resume.length, 0, "an in-flight resume is not handed twice");
+
+  store.resume.settle({ itemId: task.id, attemptKey: attempt.id, consumerId: "a" });
+  const afterSettle = recover(store, { harness: "test", consumerId: "a", config, mutate: true });
+  assert.equal(afterSettle.resume.length, 1, "the settle frees the attempt for the next hand-off");
+});
+
 test("the work attempt carries the consumer, and resume follows it", () => {
   store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: "http://127.0.0.1:1/wake", bearer: "tok" });
   store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: "http://127.0.0.1:2/wake", bearer: "tok" });
