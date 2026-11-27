@@ -150,6 +150,7 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
       message: resumePrompt(row),
       sessionKey: row.task.id,
       kind: "resume",
+      itemId: row.task.id,
       attemptId: row.attemptId,
     })).catch((err) => {
       started.delete(key);
@@ -206,20 +207,23 @@ export function createWakeGuard(wake, { settle = null } = {}) {
       .then(() => wake(payload))
       .finally(() => {
         if (key) inflight.delete(key);
-        if (payload?.admissionId) settle?.(payload.admissionId);
+        if (payload?.admissionId || payload?.itemId) {
+          settle?.({ admissionId: payload.admissionId ?? null, itemId: payload.itemId ?? null, attemptId: payload.attemptId ?? null });
+        }
       });
   };
 }
 
-export function postSettle({ baseUrl, admissionId, consumerId = null, bearer = null, logger = null, timeoutMs = 3000 }) {
+export function postSettle({ baseUrl, admissionId = null, itemId = null, attemptId = null, consumerId = null, bearer = null, logger = null, timeoutMs = 3000 }) {
+  if (!admissionId && !itemId) return Promise.resolve();
   const headers = { "content-type": "application/json" };
   if (bearer) headers.authorization = `Bearer ${bearer}`;
   return fetch(`${String(baseUrl).replace(/\/+$/, "")}/dispatch/notify`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ type: "settle", admissionId, consumerId }),
+    body: JSON.stringify({ type: "settle", admissionId, itemId, attemptId, consumerId }),
     signal: AbortSignal.timeout(timeoutMs),
-  }).catch((err) => logger?.warn?.(`winch: settle ${admissionId} failed: ${err?.message ?? err}`));
+  }).catch((err) => logger?.warn?.(`winch: settle ${admissionId ?? itemId} failed: ${err?.message ?? err}`));
 }
 
 // The receiver is registered from plugin register() — before the gateway HTTP

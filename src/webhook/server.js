@@ -174,13 +174,23 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
       if (unauthorized(req)) { json(res, 401, { error: "unauthorized" }); return; }
       const body = await readJson(req, res);
       if (body === undefined) return;
-      if (body?.type === "settle" && typeof body.admissionId === "string" && body.admissionId) {
-        store.delivery.settle({
-          admissionId: body.admissionId,
-          attemptNo: Number.isInteger(body.attemptNo) ? body.attemptNo : null,
-          consumerId: typeof body.consumerId === "string" && body.consumerId ? body.consumerId : null,
-          at: Date.now(),
-        });
+      if (body?.type === "settle") {
+        const consumerId = typeof body.consumerId === "string" && body.consumerId ? body.consumerId : null;
+        if (typeof body.admissionId === "string" && body.admissionId) {
+          store.delivery.settle({
+            admissionId: body.admissionId,
+            attemptNo: Number.isInteger(body.attemptNo) ? body.attemptNo : null,
+            consumerId,
+            at: Date.now(),
+          });
+        } else if (typeof body.itemId === "string" && body.itemId) {
+          store.resume.settle({
+            itemId: body.itemId,
+            attemptKey: typeof body.attemptId === "string" && body.attemptId ? body.attemptId : null,
+            consumerId,
+            at: Date.now(),
+          });
+        }
       }
       json(res, 202, { ok: true });
       void pump();

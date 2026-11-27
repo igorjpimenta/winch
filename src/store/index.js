@@ -35,6 +35,7 @@ import { createWebhookApi } from "./webhook.js";
 import { createEventApi } from "./events.js";
 import { createAdmissionApi } from "./admission.js";
 import { createDeliveryApi } from "./delivery.js";
+import { createResumeApi } from "./resume.js";
 import { createDispatchEventApi } from "./dispatch-events.js";
 import { observe } from "../webhook/core.js";
 import { toEventMessage } from "../webhook/envelope.js";
@@ -70,6 +71,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
   apis.event = createEventApi({ core });
   apis.admission = createAdmissionApi({ core });
   apis.delivery = createDeliveryApi({ core });
+  apis.resume = createResumeApi({ core });
   apis.dispatchEvent = createDispatchEventApi({ core });
   apis.usage = createUsageApi({ core });
 
@@ -116,6 +118,7 @@ export function createStore({ dbPath, logger, config: explicitConfig, notifyDisp
     event: apis.event,
     admission: apis.admission,
     delivery: apis.delivery,
+    resume: apis.resume,
     dispatchEvent: apis.dispatchEvent,
     usage: apis.usage,
     epic: apis.epic,

@@ -90,6 +90,7 @@ export async function recoverOnce({ baseUrl, harness, consumerId, executorId, wa
       message: resumePrompt(row),
       sessionKey: row.task.id,
       kind: "resume",
+      itemId: row.task.id,
       attemptId: row.attemptId,
     })).catch((err) => {
       started.delete(key);

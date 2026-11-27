@@ -130,7 +130,7 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
     maxAttempts: config.dispatchOfferMaxAttempts,
   });
 
-  const resume = store.db.prepare(`
+  const resumeAll = store.db.prepare(`
     SELECT s.item_id, s.assignee_agent, s.assignee_harness,
            a.id AS attempt_id, a.attempt_no, a.claimed_at, a.heartbeat_at, a.expires_at,
            a.lease_epoch, a.owner_instance,
@@ -145,6 +145,7 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
   `).all(harness, consumerId, consumerId).map((r) => ({
     task: store.task.get(r.item_id),
     attemptId: r.attempt_id ?? null,
+    attemptKey: r.attempt_id ?? "none",
     attemptNo: r.attempt_no ?? null,
     sessionId: r.session_id ?? null,
     sessionKey: r.session_key ?? null,
@@ -175,8 +176,34 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
   const settleAfter = at - (config.dispatchDeliveryLeaseMs ?? 300000);
   const wakeMax = config.dispatchWakeMax ?? 8;
   const running = store.delivery.runningAdmissionIds({ consumerId, after: settleAfter });
-  const runningForConsumer = consumerId ? store.delivery.runningCount(consumerId, { after: settleAfter }) : 0;
+  const runningForConsumer = consumerId
+    ? store.delivery.runningCount(consumerId, { after: settleAfter })
+      + store.resume.runningCount(consumerId, { after: settleAfter })
+    : 0;
   let windowFree = Math.max(0, wakeMax - runningForConsumer);
+
+  // A resume is handed like a wake: once per attempt per consumer until the
+  // receiver settles it or the lease expires. Otherwise every reconcile would
+  // spawn another child for the same in_progress attempt.
+  const resume = [];
+  for (const row of resumeAll) {
+    const rowConsumer = row.consumerId ?? consumerId;
+    if (store.resume.isRunning(row.task.id, { attemptKey: row.attemptKey, consumerId: rowConsumer, after: settleAfter })) continue;
+    if (consumerId) {
+      if (windowFree <= 0) break;
+      windowFree--;
+    }
+    resume.push(row);
+    if (mutate && consumerId) {
+      store.resume.hand({
+        itemId: row.task.id,
+        attemptKey: row.attemptKey,
+        attemptNo: row.attemptNo ?? null,
+        consumerId,
+        at,
+      });
+    }
+  }
 
   const start = [];
   for (const live of keptOffers) {

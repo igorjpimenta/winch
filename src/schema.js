@@ -320,6 +320,21 @@ export const webhookDeliveries = sqliteTable("webhook_deliveries", {
   index("idx_delivery_event").on(table.eventId, table.consumerId),
 ]);
 
+export const resumeDeliveries = sqliteTable("resume_deliveries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  attemptNo: integer("attempt_no"),
+  attemptKey: text("attempt_key").notNull(),
+  consumerId: text("consumer_id").notNull(),
+  handedAt: integer("handed_at").notNull(),
+  settledAt: integer("settled_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("uq_resume_grain").on(table.itemId, table.attemptKey, table.consumerId),
+  index("idx_resume_consumer").on(table.consumerId, table.handedAt),
+]);
+
 export const webhookDeliveryAttempts = sqliteTable("webhook_delivery_attempts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   deliveryId: integer("delivery_id").notNull().references(() => webhookDeliveries.id, { onDelete: "cascade" }),

@@ -99,7 +99,7 @@ test("the wake guard dedups a key in flight and settles when the child exits", a
   const gate = new Promise((resolve) => { release = resolve; });
   const guard = createWakeGuard(
     (frame) => gate.then(() => { spawned.push(frame.admissionId); }),
-    { settle: (id) => settled.push(id) },
+    { settle: (frame) => settled.push(frame) },
   );
   const first = guard({ admissionId: "ADM-1", itemId: "T", agent: "a" });
   const dup = await guard({ admissionId: "ADM-1", itemId: "T", agent: "a" });
@@ -108,7 +108,7 @@ test("the wake guard dedups a key in flight and settles when the child exits", a
   release();
   await first;
   assert.deepEqual(spawned, ["ADM-1"]);
-  assert.deepEqual(settled, ["ADM-1"], "the exit settles the admission");
+  assert.deepEqual(settled, [{ admissionId: "ADM-1", itemId: "T", attemptId: null }], "the exit settles the admission");
 });
 
 test("postSettle posts the settle frame to /dispatch/notify", async () => {
