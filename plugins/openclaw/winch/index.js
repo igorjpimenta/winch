@@ -7,6 +7,10 @@ import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
 
+// One process, several plugin instances: they reconcile the same core, so the
+// dedupe table is shared or every instance spawns its own child per attempt.
+const inFlight = new Map();
+
 // Mechanics: before_tool_call runs before MCP dispatch, and this hook returns
 // a full replacement of event.params with _meta.winch set unconditionally on
 // every winch tool call. A call without a resolvable session/agent returns
@@ -161,7 +165,7 @@ export default definePluginEntry({
     // dedupes receiver-vs-recover wakes and settles each admission on exit;
     // both paths share it (plus `started`) so the pump/recover race sees one
     // live child per admission.
-    const started = new Map();
+    const started = inFlight;
     const wake = buildWake({ cfg, logger: api.logger });
     let gatedWake = wake;
     if (cfg.dispatchEnabled !== false && typeof api.registerHttpRoute === "function") {
