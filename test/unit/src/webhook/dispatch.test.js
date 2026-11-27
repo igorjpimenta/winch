@@ -463,35 +463,31 @@ test("offering a child moves the parent cursor to its childKey", () => {
 });
 
 
-test("partial fan-out retries only the failed consumer", async (t) => {
-  const good = await wakeReceiver({ status: 202 });
-  const bad = await wakeReceiver({ status: 500 });
-  t.after(async () => { await good.close(); await bad.close(); });
-  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: good.url, bearer: "tok" });
-  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: bad.url, bearer: "tok" });
+test("only the attempt owner is delivered", async (t) => {
+  const owner = await wakeReceiver({ status: 202 });
+  const other = await wakeReceiver({ status: 202 });
+  t.after(async () => { await owner.close(); await other.close(); });
+  store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: owner.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: other.url, bearer: "tok" });
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  const result = await deliverWake(store, offer);
-  assert.equal(result.ok, true, "at least one receiver accepted");
-  assert.equal(result.delivered.length, 1);
-  assert.equal(result.failed.length, 1);
+  store.db.prepare("UPDATE admission_attempts SET active_consumer_id='a' WHERE admission_id=?").run(offer.id);
+  const result = await deliverWake(store, store.admission.get(offer.id));
+  assert.equal(result.ok, true);
+  assert.equal(owner.rows.length, 1);
+  assert.equal(other.rows.length, 0, "a non-owner receives no delivery");
   const rows = store.delivery.allForAttempt(offer.id, offer.attempt_no);
-  assert.equal(rows.length, 2);
-  assert.equal(rows.filter((r) => r.status === "delivered").length, 1);
-  assert.equal(rows.filter((r) => r.status === "pending").length, 1);
-  const goodHits = good.rows.length;
-  await deliverDue(store, { at: Date.now() + 20 });
-  assert.equal(good.rows.length, goodHits, "the delivered consumer is not retried");
-  assert.equal(bad.rows.length, 2, "the failed consumer gets its own retry");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].consumer_id, "a");
 });
 
-test("an active consumer that is gone is replaced by its standby", async (t) => {
+test("a dead owner is replaced by the other consumer, delivered as active", async (t) => {
   const gone = await wakeReceiver({ status: 410 });
-  const standby = await wakeReceiver({ status: 202 });
-  t.after(async () => { await gone.close(); await standby.close(); });
+  const successor = await wakeReceiver({ status: 202 });
+  t.after(async () => { await gone.close(); await successor.close(); });
   store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: gone.url, bearer: "tok" });
-  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: standby.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: successor.url, bearer: "tok" });
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
@@ -499,14 +495,14 @@ test("an active consumer that is gone is replaced by its standby", async (t) => 
   const live = store.admission.get(offer.id);
   await deliverWake(store, live);
   assert.equal(store.webhook.get({ topic: "dispatch", id: "a" }).state, "disabled");
-  assert.equal(standby.rows.at(-1).body.execution, "standby");
+  assert.equal(successor.rows.length, 0, "the successor is not told while the owner holds it");
 
   await deliverDue(store, { at: Date.now() + 20 });
   const promoted = store.admission.get(offer.id);
   assert.equal(promoted.active_consumer_id, "b");
   assert.ok(promoted.lease_epoch >= 1);
-  assert.equal(standby.rows.at(-1).body.execution, "active");
-  assert.equal(standby.rows.at(-1).body.leaseEpoch, promoted.lease_epoch);
+  assert.equal(successor.rows.at(-1).body.execution, "active");
+  assert.equal(successor.rows.at(-1).body.leaseEpoch, promoted.lease_epoch);
 });
 
 test("a subscription lease fences a second live instance", () => {
@@ -635,22 +631,22 @@ test("accepting a planner wake is single-flight and one-shot", () => {
   assert.equal(store.admission.get(offer.id).status, "done");
 });
 
-test("an expired active lease promotes a standby even after a 2xx delivery", async (t) => {
+test("an expired active lease moves the attempt to the other consumer", async (t) => {
   const active = await wakeReceiver({ status: 202 });
-  const standby = await wakeReceiver({ status: 202 });
-  t.after(async () => { await active.close(); await standby.close(); });
+  const successor = await wakeReceiver({ status: 202 });
+  t.after(async () => { await active.close(); await successor.close(); });
   store.webhook.upsert({ topic: "dispatch", id: "a", harness: "test", instanceId: "a", url: active.url, bearer: "tok" });
-  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: standby.url, bearer: "tok" });
+  store.webhook.upsert({ topic: "dispatch", id: "b", harness: "test", instanceId: "b", url: successor.url, bearer: "tok" });
   const { row } = seedAssigned();
   observeEvent(row);
   const [offer] = tick(store, { reachable: ["test"] });
-  store.db.prepare("UPDATE admission_attempts SET active_consumer_id='a', lease_until=? WHERE admission_id=?")
-    .run(Date.now() - 1, offer.id);
+  store.db.prepare("UPDATE admission_attempts SET active_consumer_id='a' WHERE admission_id=?").run(offer.id);
   await deliverWake(store, store.admission.get(offer.id));
   assert.equal(store.delivery.allForAttempt(offer.id, offer.attempt_no).find((d) => d.consumer_id === "a").status, "delivered");
+  store.db.prepare("UPDATE admission_attempts SET lease_until=? WHERE admission_id=?").run(Date.now() - 1, offer.id);
   await deliverDue(store, { at: Date.now() + 1 });
   assert.equal(store.admission.get(offer.id).active_consumer_id, "b");
-  assert.equal(standby.rows.at(-1).body.execution, "active");
+  assert.equal(successor.rows.at(-1).body.execution, "active");
 });
 
 test("delivery keeps a stable event and a per-attempt audit row", async (t) => {

@@ -81,8 +81,8 @@ flowchart TD
 ```
 
 A stale epoch is a refusal, not a takeover: the old session stops and re-reads
-`POST /dispatch/recover`. A standby consumer never gets the attempt or start
-row.
+`POST /dispatch/recover`. A consumer that does not own the attempt gets neither
+the attempt nor a start row.
 
 ## Usage triggers
 
@@ -101,8 +101,7 @@ flowchart LR
   P --> T2([T2 · usage_events row])
 ```
 
-A standby, duplicate, or expired delivery starts no session, so it produces no
-usage row. See [Webhooks → Usage ingestion](webhooks.md#usage-ingestion) for
+A duplicate or expired delivery starts no session, so it produces no usage row. See [Webhooks → Usage ingestion](webhooks.md#usage-ingestion) for
 the endpoint and the per-journey trigger table.
 
 ## Gate lifecycle

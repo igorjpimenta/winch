@@ -23,7 +23,7 @@ its port, and set the management token because the bind is not loopback:
       webhook serve --host 0.0.0.0 --port 38293
 
 Use one dispatch process per database; it owns retries, offer expiry, and
-standby promotion. Keep the MCP and dispatch containers on the same SQLite
+handing an attempt to another consumer. Keep the MCP and dispatch containers on the same SQLite
 volume, and do not run two dispatch replicas against it. Set the same
 `WINCH_DISPATCH_URL` and `WINCH_DISPATCH_TOKEN` on the MCP/CLI side so enqueue
 notifications reach this server.

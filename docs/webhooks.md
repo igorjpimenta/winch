@@ -3,8 +3,8 @@
 Winch stores webhook subscriptions by topic and stable id. Dispatch is the
 built-in topic: it delivers wake payloads over HTTP, and a receiver answers `202`
 (or any 2xx) to accept delivery. Delivery is at-least-once and per consumer;
-execution is single-flight. The payload marks one consumer `active` and the
-others `standby`; only the active consumer starts a session.
+execution is single-flight. One consumer owns the attempt and is the only one
+delivered to, as `execution: "active"`.
 
 `winch webhook serve [--port N] [--host H]` starts the HTTP dispatch endpoints
 and the wake pump. Webhook wakes are the main event driver: every work-making
@@ -88,7 +88,7 @@ flowchart TD
     S2[planner wake<br/>story · append · review]
     S3[restart / POST /dispatch/recover]
     S4[human-started session]
-    S5[standby · duplicate · expired]
+    S5[duplicate · expired]
   end
   S1 --> C1[backlog_claim]
   S2 --> C2[backlog_accept_wake] --> C3[backlog_get / append]
@@ -112,7 +112,7 @@ flowchart TD
 | planner wake | `backlog_get` / `backlog_append` | `backlog_accept_wake` guards the wake but carries no item id, so it does not bind |
 | restart / resume | `backlog_update` | heartbeat the same attempt with `attemptId` + `leaseEpoch`; never re-claim |
 | human session | first item-touching call | no dispatch involved |
-| standby / duplicate / expired | — | no session starts, so no row |
+| duplicate / expired | — | no session starts, so no row |
 
 T2 is shared: `POST /usage` for every row above. T1 is every finalized turn,
 not every model call — the tool-loop aggregate is the row.
@@ -220,15 +220,14 @@ The server routes work-making transitions into `admission_queue`:
 epic creator), and `epic.completed` (to the epic creator).
 
 - Each dispatch attempt has a stable `dispatch_events` row, one
-  `webhook_deliveries` row per consumer, and a `webhook_delivery_attempts`
-  audit row per HTTP try. A queued wake is POSTed to every dispatch
-  subscription for its harness. `202` means the receiver accepted the request;
-  it does **not** mean the work was claimed.
-- The payload names one `execution: "active"` consumer and marks the rest
-  `standby`. Standby receivers acknowledge and stop; only the active receiver
-  starts a session. If the active delivery dies or its lease expires, the
-  dispatcher promotes a standby, increments `leaseEpoch`, and re-delivers it as
-  active.
+  `webhook_deliveries` row for the attempt's owner, and a
+  `webhook_delivery_attempts` audit row per HTTP try. A queued wake is POSTed to
+  the owner only. `202` means the receiver accepted the request; it does **not**
+  mean the work was claimed.
+- The owner receives `execution: "active"` and is the only consumer that starts
+  a session. If its delivery dies or its lease expires, the dispatcher hands the
+  attempt to another consumer of the same harness, increments `leaseEpoch`, and
+  delivers that one as active.
 - Tasks still use the agent's MCP `backlog_claim` as the work CAS. A wake-owned
   claim records `consumerId`, `ownerInstance`, and a positive `leaseEpoch` on
   the work attempt; `backlog_update`/`backlog_done`/`backlog_block` reject a
@@ -253,15 +252,14 @@ epic creator), and `epic.completed` (to the epic creator).
 ```mermaid
 flowchart LR
   E[event or assignment] --> Q[admission queued]
-  Q -->|offer| O[attempt offered]
-  O -->|fan out| A[delivery: active]
-  O -->|fan out| S[delivery: standby]
+  Q -->|offer| O[attempt offered<br/>one owner]
+  O -->|deliver| A[delivery: active]
   A -->|2xx| AD[delivered]
   A -->|5xx / timeout| AR[pending / backoff] --> A
   A -->|4xx or attempts exhausted| AX[dead]
   AD -->|task: backlog_claim| T[in_progress<br/>owner + epoch]
   AD -->|planner: backlog_accept_wake| P[accepted<br/>epoch]
-  AD -->|no accept, lease expiry| PR[promote standby<br/>epoch + 1]
+  AD -->|no accept, lease expiry| PR[hand to another<br/>consumer · epoch + 1]
   PR --> A
   T -->|close| D[done]
   P -->|close| D
@@ -270,8 +268,8 @@ flowchart LR
 ```
 
 `dead` is a delivery outcome, not a task outcome: it is visible in
-`winch webhook deliveries --status dead`, and a standby can still be promoted
-from the same attempt.
+`winch webhook deliveries --status dead`, and the same attempt can still be
+handed to another consumer.
 
 ## Wake payload
 
@@ -293,8 +291,8 @@ Winch POSTs this JSON body:
     }
 
 The receiver should verify the bearer, keep the request bounded, and return 2xx
-once the wake is queued locally. If `execution` is `"standby"`, acknowledge
-without starting a session. The active receiver is the only one that starts.
+once the wake is queued locally. The receiver is the attempt's owner and is the
+only one that starts a session.
 For `task` wakes, the agent wins the work with `backlog_claim`; for
 `story`/`append`/`review`, it must first call `backlog_accept_wake` with the
 payload's `admissionId`, `attemptNo`, and `leaseEpoch`. A non-2xx response
@@ -326,8 +324,8 @@ It returns:
   `leaseExpiresAt`. The winning claim records the consumer on the work
   attempt; only that consumer gets its resume. A claim that never named a
   consumer is not fanned out to any of them (fail closed);
-- `start`: already-offered wakes whose `activeConsumerId` is this consumer. A
-  standby consumer receives none;
+- `start`: already-offered wakes whose `activeConsumerId` is this consumer. Any
+  other consumer receives none;
 - `free`: remaining capacity after active and offered work. The server pump
   performs any expiry, cap trim, or free-slot fill; this endpoint does not.
 
@@ -342,8 +340,7 @@ lease returns the item to `ready`, where normal wake and claim apply.
 - Require the executor bearer; reject a mismatched or missing one.
 - Deduplicate on `admissionId` + `attemptNo`; a duplicate wake must not start
   a second local session.
-- Start only when `execution` is `"active"` (or absent for older servers).
-  Acknowledge `"standby"` without spawning.
+- Start when `execution` is `"active"`; treat a missing field as active.
 - For `story`/`append`/`review`, call `backlog_accept_wake` before doing the
   work; a 202 without acceptance is retried, not treated as completed.
 - Register on boot with `fresh: true` and a stable `instanceId`, then
