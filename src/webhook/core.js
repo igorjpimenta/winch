@@ -3,6 +3,7 @@
 // winner starts a session. Item status remains the work acknowledgement.
 
 import { HUMAN_AGENT, HUMAN_HARNESS } from "../reserved.js";
+import { readyTasks } from "../ready-queue.js";
 import { pickConsumer } from "./delivery.js";
 
 const RELEASING_STATUSES = new Set(["done", "cancelled", "blocked", "backlog", "review"]);
@@ -208,13 +209,51 @@ export function recover(store, { harness, consumerId = null, at = Date.now(), co
   const usedHarness = activeHarness + keptOffers.length;
   const usedGlobal = activeGlobal + otherReserved + keptOffers.length;
   let free = Math.max(0, Math.min(
-    config.dispatchHarnessMax - usedHarness,
-    config.dispatchGlobalMax - usedGlobal,
+    (config.dispatchHarnessMax ?? 8) - usedHarness,
+    (config.dispatchGlobalMax ?? 16) - usedGlobal,
   ));
   if (mutate) for (const row of store.admission.queued(harness, at)) {
     if (free <= 0 || (consumerId && windowFree <= 0)) break;
     const next = store.admission.markOffered(row.id, at, {
       pickActive: (attemptNo) => pickConsumer(store, { ...row, attempt_no: attemptNo }),
+      leaseMs: config.dispatchConsumerTtlMs,
+    });
+    if (!next) continue;
+    start.push({
+      admissionId: next.id,
+      itemId: next.item_id,
+      attemptNo: next.attempt_no ?? null,
+      kind: next.kind,
+      agent: next.agent_id,
+      harness: next.harness,
+      eventId: next.event_id ?? null,
+      offerExpiresAt: at + config.dispatchOfferMs,
+      activeConsumerId: next.active_consumer_id ?? null,
+      leaseEpoch: next.lease_epoch ?? 0,
+      status: "offered",
+    });
+    if (consumerId) {
+      windowFree--;
+      store.delivery.markRunning({ admissionId: next.id, attemptNo: next.attempt_no ?? null, consumerId, at });
+    }
+    free--;
+  }
+
+  // A ready task whose last admission expired is otherwise dormant: only a new
+  // item event would enqueue it again. Recovery is the restart path, so it
+  // re-admits ready assigned work for this harness within the same caps.
+  if (mutate) for (const candidate of readyTasks(store, { harness, limit: free + 1 })) {
+    if (free <= 0 || (consumerId && windowFree <= 0)) break;
+    const agent = candidate.task.assignee_agent;
+    if (!agent || isHuman(agent, candidate.task.assignee_harness)) continue;
+    const busy = store.db.prepare(`
+      SELECT 1 FROM admission_queue WHERE item_id=? AND harness=? AND ended_at IS NULL
+    `).get(candidate.task.id, harness);
+    if (busy) continue;
+    const queued = store.admission.enqueue({ kind: "task", itemId: candidate.task.id, harness, agentId: agent, at });
+    if (!queued) continue;
+    const next = store.admission.markOffered(queued.id, at, {
+      pickActive: (attemptNo) => pickConsumer(store, { ...queued, attempt_no: attemptNo }),
       leaseMs: config.dispatchConsumerTtlMs,
     });
     if (!next) continue;
