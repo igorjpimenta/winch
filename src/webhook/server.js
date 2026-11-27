@@ -61,9 +61,9 @@ export function startDispatchServer({ store, port = null, host = "127.0.0.1", in
 
   store.admission.resetOffers();
   pruneConsumers();
-  // Repair a queue written before write-time routing existed. `enqueue` is
-  // idempotent per event, so replaying tells the same story without minting a
-  // second wake for rows the write hook already admitted.
+  // Repair any queue gaps from prior writes. `enqueue` is
+  // idempotent per event, so replaying mints no duplicate wake for a row
+  // the write hook already admitted.
   let since = 0;
   const cursor = lastEventId(store);
   for (;;) {

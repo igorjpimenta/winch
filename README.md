@@ -22,7 +22,7 @@ contract itself is the only integration surface.
 
 It is local-first and harness-neutral: OpenCode, OpenClaw and future harnesses
 are adapters, not the product. A work order is self-contained - no external
-planner task id is required. Stable releases publish since `2026.11.9`.
+planner task id is required.
 
 [Why the name?](#why-the-name)
 
