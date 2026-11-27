@@ -9,6 +9,9 @@ import http from "node:http";
 export const DEFAULT_DISPATCH_URL = "http://127.0.0.1:38293";
 const MAX_BODY_BYTES = 1024 * 1024;
 const INFLIGHT_TTL_MS = 35 * 60 * 1000;
+// Shared across dispatch instances in one process: the host calls setup()
+// once per session, and every instance reconciles against the same core.
+const inFlight = new Map();
 
 function readJson(req, res) {
   return (async () => {
@@ -127,7 +130,7 @@ export function resumePrompt(row) {
 export function startDispatch({ baseUrl = DEFAULT_DISPATCH_URL, harness, consumerId = null, executorId, bearer, wake, logger = console, host = "127.0.0.1", port = 0, reconcileMs = 30000 } = {}) {
   if (!executorId || !bearer) throw new Error("dispatch needs an executor id and bearer");
   const subscriptionId = consumerId || executorId;
-  const started = new Map();
+  const started = inFlight;
   let closed = false;
   let timer = null;
   let listener = null;

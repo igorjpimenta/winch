@@ -6,6 +6,49 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { startDispatch } from "../../../../../plugins/opencode/winch/dispatch.js";
 
+test("two dispatch instances in one process resume an attempt once", async () => {
+  const resumeRow = {
+    task: { id: "TASK-9", assignee_agent: "worker" },
+    attemptId: "ATT-9",
+    leaseEpoch: 1,
+  };
+  const core = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d) => { raw += d; });
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(req.url === "/dispatch/recover" ? { resume: [resumeRow], start: [] } : {}));
+    });
+  });
+  await new Promise((r) => core.listen(0, "127.0.0.1", r));
+  const baseUrl = `http://127.0.0.1:${core.address().port}`;
+  const calls = [];
+  const make = () => startDispatch({
+    baseUrl,
+    harness: "opencode",
+    consumerId: "opencode:test-host",
+    executorId: "e1",
+    bearer: "secret",
+    wake: (frame) => { calls.push(frame); },
+    logger: null,
+    port: 0,
+    reconcileMs: 0,
+  });
+  const first = make();
+  const second = make();
+  try {
+    await Promise.all([first.ready, second.ready]);
+    for (let i = 0; i < 50 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(calls.length, 1, "one resume child per attempt per process");
+    assert.equal(calls[0].attemptId, "ATT-9");
+  } finally {
+    await first.close();
+    await second.close();
+    await new Promise((r) => core.close(r));
+  }
+});
+
 test("listener registers with core and accepts a wake", async () => {
   const registrations = [];
   const core = http.createServer((req, res) => {
